@@ -1,0 +1,21 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "nodenext",
+		"allowJs": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"noImplicitAny": true,
+		"sourceMap": true,
+		"baseUrl": ".",
+		"outDir": "dist",
+		"moduleResolution": "nodenext",
+		"resolveJsonModule": true,
+		"jsx": "react-jsx",
+
+		// Path mappings
+		"paths": {
+			"@/*": ["./src/*"]
+		}
+	}
+}
