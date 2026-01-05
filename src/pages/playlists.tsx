@@ -165,7 +165,7 @@ export function PlaylistDetails() {
 									{item.artists?.map((artist) => artist.name).join(", ")}
 								</p>
 							</div>
-							<div className="text-sm text-muted-foreground">
+							<div className="text-sm text-muted-foreground mr-4">
 								{item.duration?.text}
 							</div>
 						</Card>

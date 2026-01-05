@@ -8,6 +8,7 @@ import {
 	useLocation,
 	useNavigate,
 } from "react-router-dom";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Player } from "./components/player";
 import { UserMenu } from "./components/user-menu";
 import { PlayerProvider } from "./contexts/player-context";
@@ -100,13 +101,17 @@ function Layout() {
 					</div>
 				</aside>
 
-				<main className="flex-1 overflow-auto relative pb-24">
-					<Routes>
-						<Route element={<HomePage />} path="/" />
-						<Route element={<HomePage />} path="/home" />
-						<Route element={<PlaylistsPage />} path="/playlists" />
-						<Route element={<PlaylistDetails />} path="/playlists/:id" />
-					</Routes>
+				<main className="flex-1 overflow-hidden relative">
+					<ScrollArea className="h-full">
+						<div className="pb-24">
+							<Routes>
+								<Route element={<HomePage />} path="/" />
+								<Route element={<HomePage />} path="/home" />
+								<Route element={<PlaylistsPage />} path="/playlists" />
+								<Route element={<PlaylistDetails />} path="/playlists/:id" />
+							</Routes>
+						</div>
+					</ScrollArea>
 				</main>
 				<Player />
 			</div>

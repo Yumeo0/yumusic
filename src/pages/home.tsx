@@ -21,7 +21,7 @@ export default function HomePage() {
 	};
 
 	return (
-		<div className="container mx-auto p-6 flex flex-col min-h-screen">
+		<div className="container mx-auto p-6 flex flex-col min-h-full">
 			<div className="w-full max-w-3xl mx-auto mb-8">
 				<form className="w-full" onSubmit={handleSearch}>
 					<div className="flex gap-3 items-center">
