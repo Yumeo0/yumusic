@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { Card } from "@/components/ui/card";
+import { usePlayer } from "@/contexts/player-context";
 import { getYoutubeClient } from "../lib/youtube-client";
 
 interface SearchResultsPageProps {
@@ -8,6 +9,7 @@ interface SearchResultsPageProps {
 }
 
 export default function SearchResults({ query }: SearchResultsPageProps) {
+	const { play } = usePlayer();
 	const [results, setResults] = useState<YTNodes.MusicResponsiveListItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,15 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 					<Card
 						className="overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
 						key={video.id}
+						onClick={() =>
+							play({
+								id: video.id,
+								title: video.title,
+								artist: video.artists?.[0]?.name || "Unknown Artist",
+								thumbnail: video.thumbnails?.[0]?.url || "",
+								duration: video.duration?.text,
+							})
+						}
 					>
 						<div className="relative aspect-video">
 							<img

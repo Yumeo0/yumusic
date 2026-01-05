@@ -8,7 +8,9 @@ import {
 	useLocation,
 	useNavigate,
 } from "react-router-dom";
+import { Player } from "./components/player";
 import { UserMenu } from "./components/user-menu";
+import { PlayerProvider } from "./contexts/player-context";
 import { getUserProfile, getYoutubeClient } from "./lib/youtube-client";
 import HomePage from "./pages/home";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
@@ -57,55 +59,58 @@ function Layout() {
 	};
 
 	return (
-		<div className="h-screen flex bg-background text-foreground overflow-hidden">
-			<aside className="w-64 border-r bg-muted/10 flex flex-col shrink-0">
-				<div className="p-6">
-					<h1 className="text-2xl font-bold flex items-center gap-2">
-						YuMusic
-					</h1>
-				</div>
-				<nav className="flex-1 px-4 space-y-2">
-					<SidebarItem
-						icon={<HomeIcon />}
-						isActive={
-							location.pathname === "/" || location.pathname === "/home"
-						}
-						label="Home"
-						onClick={() => navigate("/")}
-					/>
-					<SidebarItem
-						icon={<LibraryIcon />}
-						isActive={location.pathname.startsWith("/playlists")}
-						label="Playlists"
-						onClick={() => navigate("/playlists")}
-					/>
-				</nav>
+		<PlayerProvider>
+			<div className="h-screen flex bg-background text-foreground overflow-hidden">
+				<aside className="w-64 border-r bg-muted/10 flex flex-col shrink-0">
+					<div className="p-6">
+						<h1 className="text-2xl font-bold flex items-center gap-2">
+							YuMusic
+						</h1>
+					</div>
+					<nav className="flex-1 px-4 space-y-2">
+						<SidebarItem
+							icon={<HomeIcon />}
+							isActive={
+								location.pathname === "/" || location.pathname === "/home"
+							}
+							label="Home"
+							onClick={() => navigate("/")}
+						/>
+						<SidebarItem
+							icon={<LibraryIcon />}
+							isActive={location.pathname.startsWith("/playlists")}
+							label="Playlists"
+							onClick={() => navigate("/playlists")}
+						/>
+					</nav>
 
-				<div className="p-4 border-t mt-auto">
-					{isLoggedIn ? (
-						<UserMenu onLogout={handleLogout} user={userProfile || {}} />
-					) : (
-						<button
-							className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium hover:bg-muted text-muted-foreground hover:text-foreground"
-							onClick={handleLogin}
-							type="button"
-						>
-							<LogInIcon className="w-5 h-5" />
-							<span>Log In</span>
-						</button>
-					)}
-				</div>
-			</aside>
+					<div className="p-4 border-t mt-auto">
+						{isLoggedIn ? (
+							<UserMenu onLogout={handleLogout} user={userProfile || {}} />
+						) : (
+							<button
+								className="w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-sm font-medium hover:bg-muted text-muted-foreground hover:text-foreground"
+								onClick={handleLogin}
+								type="button"
+							>
+								<LogInIcon className="w-5 h-5" />
+								<span>Log In</span>
+							</button>
+						)}
+					</div>
+				</aside>
 
-			<main className="flex-1 overflow-auto relative">
-				<Routes>
-					<Route element={<HomePage />} path="/" />
-					<Route element={<HomePage />} path="/home" />
-					<Route element={<PlaylistsPage />} path="/playlists" />
-					<Route element={<PlaylistDetails />} path="/playlists/:id" />
-				</Routes>
-			</main>
-		</div>
+				<main className="flex-1 overflow-auto relative pb-24">
+					<Routes>
+						<Route element={<HomePage />} path="/" />
+						<Route element={<HomePage />} path="/home" />
+						<Route element={<PlaylistsPage />} path="/playlists" />
+						<Route element={<PlaylistDetails />} path="/playlists/:id" />
+					</Routes>
+				</main>
+				<Player />
+			</div>
+		</PlayerProvider>
 	);
 }
 

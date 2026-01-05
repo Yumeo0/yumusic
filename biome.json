@@ -57,6 +57,9 @@
 				"useArrayLiterals": "error",
 				"useAsConstAssertion": "error"
 			},
+			"a11y": {
+				"useMediaCaption": "off"
+			},
 			"suspicious": {
 				"noAssignInExpressions": "error",
 				"noAsyncPromiseExecutor": "error",

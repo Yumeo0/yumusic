@@ -1,9 +1,35 @@
-import { Innertube, UniversalCache, YTNodes } from "youtubei.js/web";
+import {
+	Innertube,
+	Platform,
+	type Types,
+	UniversalCache,
+	YTNodes,
+} from "youtubei.js/web";
 
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
 
 let youtube: Innertube | null = null;
+
+// Set up JavaScript evaluator for deciphering URLs
+Platform.shim.eval = async (
+	data: Types.BuildScriptResult,
+	env: Record<string, Types.VMPrimative>,
+) => {
+	const properties = [];
+
+	if (env.n) {
+		properties.push(`n: exportedVars.nFunction("${env.n}")`);
+	}
+
+	if (env.sig) {
+		properties.push(`sig: exportedVars.sigFunction("${env.sig}")`);
+	}
+
+	const code = `${data.output}\nreturn { ${properties.join(", ")} }`;
+
+	return new Function(code)();
+};
 
 export async function getYoutubeClient(cookie?: string) {
 	if (youtube && !cookie) return youtube;
@@ -133,4 +159,25 @@ export async function getPlaylist(id: string) {
 		console.error("Failed to get playlist:", error);
 		return null;
 	}
+}
+
+export async function getSongStream(videoId: string) {
+	const client = await getYoutubeClient();
+	const info = await client.music.getInfo(videoId);
+	console.log(info);
+	const format = info.chooseFormat({ type: "audio", quality: "best" });
+
+	console.log(format);
+
+	if (!format) {
+		throw new Error("No suitable audio format found");
+	}
+
+	// Check if the format has a direct URL or needs deciphering
+	if (format.url) {
+		return format.url;
+	}
+
+	// If no direct URL, try to decipher
+	return format.decipher(client.session.player);
 }

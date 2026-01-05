@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { usePlayer } from "@/contexts/player-context";
 import {
 	getPlaylist,
 	getUserPlaylists,
@@ -23,6 +24,7 @@ let playlistsListCache: CacheEntry<YTNodes.MusicTwoRowItem[]> | null = null;
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
+	const { play } = usePlayer();
 	const [playlist, setPlaylist] = useState<Playlist | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -138,8 +140,17 @@ export function PlaylistDetails() {
 
 					return (
 						<Card
-							className="p-0 flex flex-row items-center gap-4 hover:bg-muted/50 transition-colors"
+							className="p-0 flex flex-row items-center gap-4 hover:bg-muted/50 transition-colors cursor-pointer"
 							key={item.id}
+							onClick={() =>
+								play({
+									id: item.id,
+									title: item.title,
+									artist: item.artists?.[0]?.name || "Unknown Artist",
+									thumbnail: item.thumbnail?.contents?.[0]?.url || "",
+									duration: item.duration?.text,
+								})
+							}
 						>
 							{item.thumbnail.contents[0].url && (
 								<img
