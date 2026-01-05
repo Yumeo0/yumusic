@@ -49,7 +49,7 @@ export default function SearchResultsPage({ query }: SearchResultsPageProps) {
 
 	if (loading) {
 		return (
-			<div className="container mx-auto p-6">
+			<div>
 				<h2 className="text-2xl font-bold mb-4">Searching for "{query}"...</h2>
 				<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 					<Card className="h-64 animate-pulse bg-muted" />
@@ -65,14 +65,14 @@ export default function SearchResultsPage({ query }: SearchResultsPageProps) {
 
 	if (error) {
 		return (
-			<div className="container mx-auto p-6">
+			<div>
 				<h2 className="text-2xl font-bold mb-4 text-destructive">{error}</h2>
 			</div>
 		);
 	}
 
 	return (
-		<div className="container mx-auto p-6">
+		<div>
 			<h2 className="text-2xl font-bold mb-4">Search results for "{query}"</h2>
 			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
 				{results.map((video) => (

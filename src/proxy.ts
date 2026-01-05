@@ -138,10 +138,6 @@ export function startProxy() {
 				duplex: "half",
 			});
 
-			console.log(
-				`[Proxy] ${request.method} ${url.toString()} -> ${fetchRes.status}`,
-			);
-
 			// Construct return headers
 			const responseHeaders: Record<string, string> = {
 				"Access-Control-Allow-Origin": origin,

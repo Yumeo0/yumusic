@@ -1,16 +1,21 @@
-import { HomeIcon, LibraryIcon, LogInIcon, SearchIcon } from "lucide-react";
+import { HomeIcon, LibraryIcon, LogInIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+	HashRouter,
+	Route,
+	Routes,
+	useLocation,
+	useNavigate,
+} from "react-router-dom";
 import { UserMenu } from "./components/user-menu";
 import { getUserProfile, getYoutubeClient } from "./lib/youtube-client";
 import HomePage from "./pages/home";
-import SearchResultsPage from "./pages/search-results";
+import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
 
-function App() {
-	const [currentView, setCurrentView] = useState<
-		"home" | "search" | "playlists"
-	>("home");
-	const [searchQuery, setSearchQuery] = useState("");
+function Layout() {
+	const location = useLocation();
+	const navigate = useNavigate();
 	const [isLoggedIn, setIsLoggedIn] = useState(false);
 	const [userProfile, setUserProfile] = useState<{
 		name?: string;
@@ -22,7 +27,6 @@ function App() {
 			const cookie = await window.electron.getCookie();
 			if (cookie) {
 				setIsLoggedIn(true);
-				// Initialize client with cookie
 				await getYoutubeClient(cookie);
 				const profile = await getUserProfile();
 				if (profile) {
@@ -49,68 +53,31 @@ function App() {
 		await window.electron.logout();
 		setIsLoggedIn(false);
 		setUserProfile(null);
-		// Force reload to clear client state
 		window.location.reload();
-	};
-
-	const handleSearch = (query: string) => {
-		setSearchQuery(query);
-		setCurrentView("search");
-	};
-
-	const renderContent = () => {
-		switch (currentView) {
-			case "home":
-				return <HomePage onSearch={handleSearch} />;
-			case "search":
-				if (!searchQuery) {
-					return (
-						<div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-							<SearchIcon className="w-16 h-16 mb-4 opacity-20" />
-							<p>Search for songs, artists, or albums</p>
-						</div>
-					);
-				}
-				return <SearchResultsPage query={searchQuery} />;
-			case "playlists":
-				return (
-					<div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-						<LibraryIcon className="w-16 h-16 mb-4 opacity-20" />
-						<p>Playlists coming soon...</p>
-					</div>
-				);
-			default:
-				return <HomePage onSearch={handleSearch} />;
-		}
 	};
 
 	return (
 		<div className="h-screen flex bg-background text-foreground overflow-hidden">
-			{/* Sidebar */}
 			<aside className="w-64 border-r bg-muted/10 flex flex-col shrink-0">
 				<div className="p-6">
 					<h1 className="text-2xl font-bold flex items-center gap-2">
-						<span className="text-primary">Yu</span>Music
+						YuMusic
 					</h1>
 				</div>
 				<nav className="flex-1 px-4 space-y-2">
 					<SidebarItem
 						icon={<HomeIcon />}
-						isActive={currentView === "home"}
+						isActive={
+							location.pathname === "/" || location.pathname === "/home"
+						}
 						label="Home"
-						onClick={() => setCurrentView("home")}
-					/>
-					<SidebarItem
-						icon={<SearchIcon />}
-						isActive={currentView === "search"}
-						label="Search"
-						onClick={() => setCurrentView("search")}
+						onClick={() => navigate("/")}
 					/>
 					<SidebarItem
 						icon={<LibraryIcon />}
-						isActive={currentView === "playlists"}
+						isActive={location.pathname.startsWith("/playlists")}
 						label="Playlists"
-						onClick={() => setCurrentView("playlists")}
+						onClick={() => navigate("/playlists")}
 					/>
 				</nav>
 
@@ -130,9 +97,23 @@ function App() {
 				</div>
 			</aside>
 
-			{/* Main Content */}
-			<main className="flex-1 overflow-auto relative">{renderContent()}</main>
+			<main className="flex-1 overflow-auto relative">
+				<Routes>
+					<Route element={<HomePage />} path="/" />
+					<Route element={<HomePage />} path="/home" />
+					<Route element={<PlaylistsPage />} path="/playlists" />
+					<Route element={<PlaylistDetails />} path="/playlists/:id" />
+				</Routes>
+			</main>
 		</div>
+	);
+}
+
+function App() {
+	return (
+		<HashRouter>
+			<Layout />
+		</HashRouter>
 	);
 }
 

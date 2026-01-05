@@ -1,30 +1,28 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import SearchResults from "../components/search-results";
 
-interface HomePageProps {
-	onSearch: (query: string) => void;
-}
+export default function HomePage() {
+	const [searchParams, setSearchParams] = useSearchParams();
+	const query = searchParams.get("q") || "";
+	const [searchQuery, setSearchQuery] = useState(query);
 
-export default function HomePage({ onSearch }: HomePageProps) {
-	const [searchQuery, setSearchQuery] = useState("");
+	useEffect(() => {
+		setSearchQuery(query);
+	}, [query]);
 
 	const handleSearch = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (searchQuery.trim()) {
-			onSearch(searchQuery);
-			setSearchQuery("");
+			setSearchParams({ q: searchQuery });
 		}
 	};
 
 	return (
-		<div className="container mx-auto p-6 flex flex-col items-center justify-center min-h-screen">
-			<div className="w-full max-w-3xl">
-				<h1 className="text-5xl font-bold mb-4 text-center">YuMusic</h1>
-				<p className="text-lg text-center mb-12 text-muted-foreground">
-					Search and extract metadata from YouTube videos
-				</p>
-
+		<div className="container mx-auto p-6 flex flex-col min-h-screen">
+			<div className="w-full max-w-3xl mx-auto mb-8">
 				<form className="w-full" onSubmit={handleSearch}>
 					<div className="flex gap-3 items-center">
 						<Input
@@ -40,6 +38,12 @@ export default function HomePage({ onSearch }: HomePageProps) {
 					</div>
 				</form>
 			</div>
+
+			{query && (
+				<div className="w-full">
+					<SearchResults query={query} />
+				</div>
+			)}
 		</div>
 	);
 }

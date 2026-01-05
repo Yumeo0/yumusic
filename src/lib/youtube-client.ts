@@ -1,5 +1,8 @@
 import { Innertube, UniversalCache, YTNodes } from "youtubei.js/web";
 
+export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
+export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
+
 let youtube: Innertube | null = null;
 
 export async function getYoutubeClient(cookie?: string) {
@@ -104,6 +107,30 @@ export async function getUserProfile() {
 		return null;
 	} catch (error) {
 		console.error("Failed to get user profile:", error);
+		return null;
+	}
+}
+
+export async function getUserPlaylists() {
+	const client = await getYoutubeClient();
+	try {
+		const library = await client.music.getLibrary();
+		// The library usually contains sections like "Recent activity", "Playlists", etc.
+		// We want to find the playlists section or just return everything for now to inspect
+		return library;
+	} catch (error) {
+		console.error("Failed to get playlists:", error);
+		return null;
+	}
+}
+
+export async function getPlaylist(id: string) {
+	const client = await getYoutubeClient();
+	try {
+		const playlist = await client.music.getPlaylist(id);
+		return playlist;
+	} catch (error) {
+		console.error("Failed to get playlist:", error);
 		return null;
 	}
 }
