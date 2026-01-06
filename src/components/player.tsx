@@ -15,7 +15,10 @@ export function Player() {
 	const audioRef = useRef<HTMLAudioElement>(null);
 	const progressBarRef = useRef<HTMLDivElement>(null);
 	const maxVolume = 0.3;
-	const [volume, setVolume] = useState(maxVolume);
+	const [volume, setVolume] = useState(() => {
+		const savedVolume = localStorage.getItem("yumusic-volume");
+		return savedVolume ? Number.parseFloat(savedVolume) : maxVolume;
+	});
 	const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 	const [currentTime, setCurrentTime] = useState(0);
 	const [duration, setDuration] = useState(0);
@@ -49,6 +52,7 @@ export function Player() {
 		if (audioRef.current) {
 			audioRef.current.volume = volume;
 		}
+		localStorage.setItem("yumusic-volume", volume.toString());
 	}, [volume]);
 
 	const toggleMute = () => {
