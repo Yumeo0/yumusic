@@ -1,4 +1,18 @@
-import { createContext, type ReactNode, useContext, useState } from "react";
+import { SabrStreamingAdapter } from "googlevideo/sabr-streaming-adapter";
+import { buildSabrFormat } from "googlevideo/utils";
+import {
+	createContext,
+	type ReactNode,
+	type RefObject,
+	useContext,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import shaka from "shaka-player/dist/shaka-player.ui";
+import { Constants, Utils } from "youtubei.js";
+import { type Innertube, YT } from "youtubei.js/web";
+import { ShakaPlayerAdapter } from "@/lib/shaka-player-adapter";
 import { getSongStream } from "@/lib/youtube-client";
 
 export interface Song {
@@ -12,11 +26,26 @@ export interface Song {
 interface PlayerContextType {
 	currentSong: Song | null;
 	isPlaying: boolean;
-	play: (song: Song) => void;
+	play: (song: Song, queue?: Song[]) => void;
 	pause: () => void;
 	resume: () => void;
 	toggle: () => void;
-	streamUrl: string | null;
+	videoInfo: YT.VideoInfo | null;
+	innertube: Innertube | null;
+	queue: Song[];
+	currentIndex: number;
+	addToQueue: (songs: Song[]) => void;
+	setQueue: (songs: Song[]) => void;
+	next: () => void;
+	previous: () => void;
+	hasNext: boolean;
+	hasPrevious: boolean;
+	isNowPlayingOpen: boolean;
+	toggleNowPlaying: () => void;
+	videoContainerRef: RefObject<HTMLDivElement> | null;
+	videoElementRef: RefObject<HTMLVideoElement> | null;
+	duration: number;
+	currentTime: number;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -24,32 +53,346 @@ const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
 	const [isPlaying, setIsPlaying] = useState(false);
-	const [streamUrl, setStreamUrl] = useState<string | null>(null);
+	const [videoInfo, setVideoInfo] = useState<YT.VideoInfo | null>(null);
+	const [innertube, setInnertube] = useState<Innertube | null>(null);
+	const [queue, setQueueState] = useState<Song[]>([]);
+	const [currentIndex, setCurrentIndex] = useState(-1);
+	const [history, setHistory] = useState<Song[]>([]);
+	const [isNowPlayingOpen, setIsNowPlayingOpen] = useState(false);
+	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
+	const videoElementRef = useRef<HTMLVideoElement>(null);
+	const playerRef = useRef<shaka.Player | null>(null);
+	const [sabrAdapter, setSabrAdapter] = useState<SabrStreamingAdapter | null>(
+		null,
+	);
+	const [playerReady, setPlayerReady] = useState(false);
+	const [duration, _setDuration] = useState(0);
+	const [currentTime, _setCurrentTime] = useState(0);
 
-	const play = async (song: Song) => {
+	// Initialize Shaka Player
+	useEffect(() => {
+		shaka.polyfill.installAll();
+
+		if (!shaka.Player.isBrowserSupported()) {
+			console.error(
+				"[PlayerContext] Shaka Player is not supported on this browser.",
+			);
+			return;
+		}
+
+		const videoEl = videoElementRef.current;
+		if (!videoEl) {
+			console.log("[PlayerContext] Waiting for video element...");
+			return;
+		}
+
+		const player = new shaka.Player();
+		player.configure({
+			abr: { enabled: true },
+			streaming: {
+				bufferingGoal: 120,
+				rebufferingGoal: 2,
+			},
+		});
+
+		player
+			.attach(videoEl)
+			.then(() => {
+				playerRef.current = player;
+				setPlayerReady(true);
+				console.log("[PlayerContext] Shaka Player initialized and attached");
+			})
+			.catch((error) => {
+				console.error("[PlayerContext] Failed to attach player:", error);
+			});
+
+		return () => {
+			if (playerRef.current) {
+				const currentPlayer = playerRef.current;
+				playerRef.current = null;
+				setPlayerReady(false);
+
+				currentPlayer.destroy().catch((error) => {
+					console.warn("[PlayerContext] Error during cleanup:", error);
+				});
+			}
+		};
+	}, []);
+
+	// Load video when videoInfo changes and player is ready
+	useEffect(() => {
+		const loadVideo = async () => {
+			if (!playerReady || !playerRef.current) {
+				return;
+			}
+
+			if (!videoInfo || !innertube) {
+				return;
+			}
+
+			const cpn = Utils.generateRandomString(16);
+			const videoId = videoInfo.basic_info.id;
+
+			console.log("[PlayerContext] Unloading previous video...");
+			// Dispose old SABR adapter and create a new one for the new video
+			if (sabrAdapter) {
+				try {
+					sabrAdapter.dispose();
+				} catch (error) {
+					console.warn("[PlayerContext] Error disposing SABR adapter:", error);
+				}
+			}
+			await playerRef.current.unload();
+
+			// Create a new SABR adapter instance for this video
+			const newSabrAdapter = new SabrStreamingAdapter({
+				playerAdapter: new ShakaPlayerAdapter(),
+				clientInfo: {
+					osName: innertube.session.context.client.osName,
+					osVersion: innertube.session.context.client.osVersion,
+					clientName: parseInt(
+						Constants.CLIENT_NAME_IDS[
+							innertube.session.context.client
+								.clientName as keyof typeof Constants.CLIENT_NAME_IDS
+						],
+						10,
+					),
+					clientVersion: innertube.session.context.client.clientVersion,
+				},
+			});
+			setSabrAdapter(newSabrAdapter);
+
+			const isLive = videoInfo.basic_info.is_live;
+			const isPostLiveDVR =
+				!!videoInfo.basic_info.is_post_live_dvr ||
+				(videoInfo.basic_info.is_live_content &&
+					!!(
+						videoInfo.streaming_data?.dash_manifest_url ||
+						videoInfo.streaming_data?.hls_manifest_url
+					));
+
+			newSabrAdapter.onReloadPlayerResponse(async (reloadContext: unknown) => {
+				console.log("[SABR]", "Reloading player response...");
+
+				const reloadedInfo = await innertube.actions.execute("/player", {
+					videoId,
+					contentCheckOk: true,
+					racyCheckOk: true,
+					playbackContext: {
+						adPlaybackContext: {
+							pyv: true,
+						},
+						contentPlaybackContext: {
+							signatureTimestamp: innertube.session.player?.signature_timestamp,
+						},
+						reloadPlaybackContext: reloadContext,
+					},
+				});
+
+				const parsedInfo = new YT.VideoInfo(
+					[reloadedInfo],
+					innertube.actions,
+					cpn,
+				);
+				newSabrAdapter.setStreamingURL(
+					await innertube.session.player.decipher(
+						parsedInfo.streaming_data?.server_abr_streaming_url,
+					),
+				);
+				newSabrAdapter.setUstreamerConfig(
+					videoInfo.player_config?.media_common_config
+						.media_ustreamer_request_config?.video_playback_ustreamer_config,
+				);
+			});
+
+			newSabrAdapter.attach(playerRef.current);
+
+			if (videoInfo.streaming_data && !isPostLiveDVR && !isLive) {
+				newSabrAdapter.setStreamingURL(
+					await innertube.session.player.decipher(
+						videoInfo.streaming_data?.server_abr_streaming_url,
+					),
+				);
+				newSabrAdapter.setUstreamerConfig(
+					videoInfo.player_config?.media_common_config
+						.media_ustreamer_request_config?.video_playback_ustreamer_config,
+				);
+				newSabrAdapter.setServerAbrFormats(
+					videoInfo.streaming_data.adaptive_formats.map(buildSabrFormat),
+				);
+			}
+
+			let manifestUri: string | undefined;
+			if (videoInfo.streaming_data) {
+				if (isLive) {
+					manifestUri = videoInfo.streaming_data.dash_manifest_url
+						? `${videoInfo.streaming_data.dash_manifest_url}/mpd_version/7`
+						: videoInfo.streaming_data.hls_manifest_url;
+				} else if (isPostLiveDVR) {
+					manifestUri =
+						videoInfo.streaming_data.hls_manifest_url ||
+						`${videoInfo.streaming_data.dash_manifest_url}/mpd_version/7`;
+				} else {
+					manifestUri = `data:application/dash+xml;base64,${btoa(
+						await videoInfo.toDash({
+							manifest_options: {
+								is_sabr: true,
+								captions_format: "vtt",
+								include_thumbnails: false,
+							},
+						}),
+					)}`;
+				}
+			}
+
+			if (!manifestUri) throw new Error("Could not find a valid manifest URI.");
+
+			console.log("[PlayerContext] Loading manifest into Shaka Player...");
+			try {
+				await playerRef.current.load(manifestUri);
+				console.log(
+					"[PlayerContext]",
+					`Successfully loaded: ${videoInfo.basic_info.title}`,
+				);
+
+				// Start playback automatically after loading
+				if (videoElementRef.current) {
+					videoElementRef.current
+						.play()
+						.catch((e) => console.error("Auto-playback failed", e));
+				}
+			} catch (error) {
+				console.error("[PlayerContext] Failed to load manifest:", error);
+				throw error;
+			}
+		};
+
+		loadVideo().catch((error) => {
+			console.error("[PlayerContext] Load video error:", error);
+		});
+	}, [videoInfo, innertube, playerReady, sabrAdapter]);
+
+	// Play/pause control
+	useEffect(() => {
+		if (videoElementRef.current) {
+			if (isPlaying) {
+				videoElementRef.current
+					.play()
+					.catch((e) => console.error("Playback failed", e));
+			} else {
+				videoElementRef.current.pause();
+			}
+		}
+	}, [isPlaying]);
+
+	const playSong = async (song: Song) => {
+		console.log("[PlayerContext] Playing song:", song.id, song.title);
+		setIsPlaying(false);
+		setCurrentSong(song);
+		setVideoInfo(null);
+		setInnertube(null);
+
+		try {
+			const result = await getSongStream(song.id);
+			if (result) {
+				setVideoInfo(result.videoInfo);
+				setInnertube(result.innertube);
+				setIsPlaying(true);
+			}
+		} catch (error) {
+			console.error("[PlayerContext] Failed to play song:", error);
+		}
+	};
+
+	const play = async (song: Song, newQueue?: Song[]) => {
 		if (currentSong?.id === song.id) {
 			setIsPlaying(true);
 			return;
 		}
 
-		setIsPlaying(false);
-		setCurrentSong(song);
-		setStreamUrl(null);
-
-		try {
-			const url = await getSongStream(song.id);
-			if (url) {
-				setStreamUrl(url);
-				setIsPlaying(true);
-			}
-		} catch (error) {
-			console.error("Failed to play song:", error);
+		// Add current song to history if it exists
+		if (currentSong) {
+			setHistory((prev) => [...prev, currentSong]);
 		}
+
+		// If a new queue is provided, add the current song to the front and set it
+		if (newQueue) {
+			setQueueState([song, ...newQueue]);
+			setCurrentIndex(0);
+		} else {
+			// Find the song in the existing queue
+			const index = queue.findIndex((s) => s.id === song.id);
+			if (index !== -1) {
+				setCurrentIndex(index);
+			} else {
+				// Song not in queue, add it to the front
+				setQueueState([song, ...queue]);
+				setCurrentIndex(0);
+			}
+		}
+
+		await playSong(song);
+	};
+
+	const next = async () => {
+		if (currentIndex >= queue.length - 1) return;
+
+		const nextIndex = currentIndex + 1;
+		const nextSong = queue[nextIndex];
+
+		// Add current song to history
+		if (currentSong) {
+			setHistory((prev) => [...prev, currentSong]);
+		}
+
+		setCurrentIndex(nextIndex);
+		await playSong(nextSong);
+	};
+
+	const previous = async () => {
+		// Try to go back in queue first
+		if (currentIndex > 0) {
+			const prevIndex = currentIndex - 1;
+			const prevSong = queue[prevIndex];
+
+			// Add current song to history
+			if (currentSong) {
+				setHistory((prev) => [...prev, currentSong]);
+			}
+
+			setCurrentIndex(prevIndex);
+			await playSong(prevSong);
+			return;
+		}
+
+		// Otherwise, use history
+		if (history.length === 0) return;
+
+		const previousSong = history[history.length - 1];
+		const newHistory = history.slice(0, -1);
+
+		// Add current song to the front of the queue
+		if (currentSong) {
+			setQueueState((prev) => [currentSong, ...prev]);
+			setCurrentIndex(0);
+		}
+
+		setHistory(newHistory);
+		await playSong(previousSong);
+	};
+
+	const addToQueue = (songs: Song[]) => {
+		setQueueState((prev) => [...prev, ...songs]);
+	};
+
+	const setQueue = (songs: Song[]) => {
+		setQueueState(songs);
 	};
 
 	const pause = () => setIsPlaying(false);
 	const resume = () => setIsPlaying(true);
 	const toggle = () => setIsPlaying(!isPlaying);
+	const toggleNowPlaying = () => setIsNowPlayingOpen(!isNowPlayingOpen);
 
 	return (
 		<PlayerContext.Provider
@@ -60,7 +403,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				pause,
 				resume,
 				toggle,
-				streamUrl,
+				videoInfo,
+				innertube,
+				queue,
+				currentIndex,
+				addToQueue,
+				setQueue,
+				next,
+				previous,
+				hasNext: currentIndex < queue.length - 1,
+				hasPrevious: currentIndex > 0 || history.length > 0,
+				isNowPlayingOpen,
+				toggleNowPlaying,
+				videoContainerRef,
+				videoElementRef,
+				duration,
+				currentTime,
 			}}
 		>
 			{children}

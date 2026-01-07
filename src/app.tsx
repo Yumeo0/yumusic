@@ -11,10 +11,27 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Player } from "./components/player";
 import { UserMenu } from "./components/user-menu";
-import { PlayerProvider } from "./contexts/player-context";
+import { PlayerProvider, usePlayer } from "./contexts/player-context";
 import { getUserProfile, getYoutubeClient } from "./lib/youtube-client";
 import HomePage from "./pages/home";
+import { NowPlayingPage } from "./pages/now-playing";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
+
+function NowPlayingOverlay() {
+	const { isNowPlayingOpen, toggleNowPlaying } = usePlayer();
+
+	return (
+		<div
+			className="fixed inset-0 z-40 bg-background"
+			style={{
+				opacity: isNowPlayingOpen ? 1 : 0,
+				pointerEvents: isNowPlayingOpen ? "auto" : "none",
+			}}
+		>
+			<NowPlayingPage onClose={toggleNowPlaying} />
+		</div>
+	);
+}
 
 function Layout() {
 	const location = useLocation();
@@ -113,6 +130,7 @@ function Layout() {
 						</div>
 					</ScrollArea>
 				</main>
+				<NowPlayingOverlay />
 				<Player />
 			</div>
 		</PlayerProvider>

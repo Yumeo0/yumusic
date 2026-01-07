@@ -86,7 +86,8 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 								id: video.id,
 								title: video.title,
 								artist: video.artists?.[0]?.name || "Unknown Artist",
-								thumbnail: video.thumbnails?.[0]?.url || "",
+								thumbnail:
+									video.thumbnails?.[video.thumbnails.length - 1]?.url || "",
 								duration: video.duration?.text,
 							})
 						}

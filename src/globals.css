@@ -121,3 +121,14 @@
 		@apply bg-background text-foreground;
 	}
 }
+
+/* Hide video container by default - position off-screen */
+#video-container-wrapper {
+	position: absolute;
+	left: -9999px;
+	top: -9999px;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	visibility: hidden;
+}

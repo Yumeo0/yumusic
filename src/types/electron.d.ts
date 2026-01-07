@@ -10,9 +10,7 @@ declare global {
 		};
 		youtube: {
 			validateURL: (url: string) => Promise<boolean>;
-			getInfo: (
-				url: string,
-			) => Promise<{
+			getInfo: (url: string) => Promise<{
 				success: boolean;
 				data?: YTMusic.TrackInfo;
 				error?: string;

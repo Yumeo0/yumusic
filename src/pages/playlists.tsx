@@ -8,6 +8,7 @@ import { usePlayer } from "@/contexts/player-context";
 import {
 	getPlaylist,
 	getUserPlaylists,
+	loadPlaylistContinuation,
 	type Playlist,
 } from "../lib/youtube-client";
 
@@ -27,6 +28,7 @@ export function PlaylistDetails() {
 	const { play } = usePlayer();
 	const [playlist, setPlaylist] = useState<Playlist | null>(null);
 	const [loading, setLoading] = useState(true);
+	const [loadingMore, setLoadingMore] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	const fetchPlaylist = async (force = false) => {
@@ -46,14 +48,52 @@ export function PlaylistDetails() {
 			setLoading(true);
 			const data = await getPlaylist(id);
 			setPlaylist(data);
-			playlistDetailsCache[id] = {
-				data,
-				timestamp: Date.now(),
-			};
+			setLoading(false);
+
+			// Load remaining pages asynchronously
+			if (data?.has_continuation) {
+				setLoadingMore(true);
+				let currentPlaylist = data;
+				const allItems = [...(data.items || [])];
+
+				while (currentPlaylist.has_continuation) {
+					const continuation = await loadPlaylistContinuation(currentPlaylist);
+					if (!continuation) break;
+
+					currentPlaylist = continuation;
+					allItems.push(...(continuation.items || []));
+
+					// Create a new playlist object with accumulated items, preserving original data
+					const updatedPlaylist = {
+						...data,
+						items: allItems,
+						has_continuation: currentPlaylist.has_continuation,
+					} as Playlist;
+					setPlaylist(updatedPlaylist);
+				}
+
+				setLoadingMore(false);
+
+				// Cache the complete playlist, preserving original data
+				const finalPlaylist = {
+					...data,
+					items: allItems,
+					has_continuation: false,
+				} as Playlist;
+				playlistDetailsCache[id] = {
+					data: finalPlaylist,
+					timestamp: Date.now(),
+				};
+			} else {
+				// No continuation, cache as is
+				playlistDetailsCache[id] = {
+					data,
+					timestamp: Date.now(),
+				};
+			}
 		} catch (err) {
 			console.error("Error fetching playlist:", err);
 			setError("Failed to load playlist.");
-		} finally {
 			setLoading(false);
 		}
 	};
@@ -119,6 +159,7 @@ export function PlaylistDetails() {
 							<img
 								alt={playlist.header.title?.text}
 								className="w-48 h-48 object-cover rounded-lg shadow-lg"
+								loading="lazy"
 								src={playlist.header.thumbnail.contents[0].url}
 							/>
 						)}
@@ -135,27 +176,52 @@ export function PlaylistDetails() {
 			</div>
 
 			<div className="space-y-2">
-				{playlist?.items?.map((item) => {
+				{loadingMore && (
+					<div className="text-sm text-muted-foreground mb-2">
+						Loading more songs...
+					</div>
+				)}
+				{playlist?.items?.map((item, index) => {
 					if (!item.is(YTNodes.MusicResponsiveListItem)) return null;
 
 					return (
 						<Card
 							className="p-0 flex flex-row items-center gap-4 hover:bg-muted/50 transition-colors cursor-pointer"
-							key={item.id}
-							onClick={() =>
-								play({
+							key={item.id || `playlist-item-${index}`}
+							onClick={() => {
+								const song = {
 									id: item.id,
 									title: item.title,
 									artist: item.artists?.[0]?.name || "Unknown Artist",
-									thumbnail: item.thumbnail?.contents?.[0]?.url || "",
+									thumbnail:
+										item.thumbnail?.contents?.[
+											item.thumbnail.contents.length - 1
+										]?.url || "",
 									duration: item.duration?.text,
-								})
-							}
+								};
+
+								// Create queue from all songs after this one
+								const remainingSongs = playlist.items
+									.slice(index + 1)
+									.filter((i) => i.is(YTNodes.MusicResponsiveListItem))
+									.map((i) => ({
+										id: i.id,
+										title: i.title,
+										artist: i.artists?.[0]?.name || "Unknown Artist",
+										thumbnail:
+											i.thumbnail?.contents?.[i.thumbnail.contents.length - 1]
+												?.url || "",
+										duration: i.duration?.text,
+									}));
+
+								play(song, remainingSongs);
+							}}
 						>
 							{item.thumbnail.contents[0].url && (
 								<img
 									alt={item.title}
 									className="w-16 h-16 object-cover rounded"
+									loading="lazy"
 									src={item.thumbnail.contents[0].url}
 								/>
 							)}
