@@ -19,7 +19,6 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 		hasNext,
 		hasPrevious,
 		play,
-		videoElementRef,
 	} = usePlayer();
 
 	if (!currentSong) {
@@ -34,27 +33,16 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 	return (
 		<div className="h-screen bg-background flex">
 			{/* Left side - Video player and controls - Clickable to close */}
-			<button
+			<div
 				className="flex-1 flex flex-col items-center justify-center p-8 gap-8 cursor-pointer"
 				onClick={onClose}
-				type="button"
 			>
-				{/* Video Player - Thumbnail display (actual video element is hidden in Player component) */}
+				{/* Video Player - Thumbnail display (actual video element is hidden in PlayerProvider) */}
 				<div className="w-full max-w-md aspect-square bg-black rounded-lg shadow-2xl overflow-hidden relative">
-					{/* Video element */}
-					<video
-						className="absolute inset-0 w-full h-full object-cover"
-						onEnded={() => {
-							if (hasNext) {
-								next();
-							}
-						}}
-						ref={videoElementRef}
-					/>
 					{/* Thumbnail fallback */}
 					<img
 						alt={currentSong.title}
-						className="absolute inset-0 w-full h-full object-cover -z-10"
+						className="absolute inset-0 w-full h-full object-cover"
 						src={currentSong.thumbnail}
 					/>
 				</div>
@@ -106,11 +94,11 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 						<SkipForward className="w-6 h-6" />
 					</Button>
 				</div>
-			</button>
+			</div>
 
 			{/* Right side - Queue */}
 			<div className="w-96 border-l bg-muted/10 flex flex-col h-screen">
-				<div className="p-4 border-b flex-shrink-0">
+				<div className="p-4 border-b shrink-0">
 					<h2 className="text-lg font-semibold">Up Next</h2>
 					<p className="text-sm text-muted-foreground">
 						{queue.length} {queue.length === 1 ? "song" : "songs"}

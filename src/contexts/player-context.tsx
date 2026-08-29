@@ -12,6 +12,7 @@ import {
 import shaka from "shaka-player/dist/shaka-player.ui";
 import { Constants, Utils } from "youtubei.js";
 import { type Innertube, YT } from "youtubei.js/web";
+import { botguardService } from "@/lib/botguard-service";
 import { ShakaPlayerAdapter } from "@/lib/shaka-player-adapter";
 import { getSongStream } from "@/lib/youtube-client";
 
@@ -42,8 +43,8 @@ interface PlayerContextType {
 	hasPrevious: boolean;
 	isNowPlayingOpen: boolean;
 	toggleNowPlaying: () => void;
-	videoContainerRef: RefObject<HTMLDivElement> | null;
-	videoElementRef: RefObject<HTMLVideoElement> | null;
+	videoContainerRef: RefObject<HTMLDivElement | null> | null;
+	videoElementRef: RefObject<HTMLVideoElement | null> | null;
 	duration: number;
 	currentTime: number;
 }
@@ -62,6 +63,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
 	const playerRef = useRef<shaka.Player | null>(null);
+	const poTokenRef = useRef<string | null>(null);
 	const [sabrAdapter, setSabrAdapter] = useState<SabrStreamingAdapter | null>(
 		null,
 	);
@@ -82,7 +84,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		const videoEl = videoElementRef.current;
 		if (!videoEl) {
-			console.log("[PlayerContext] Waiting for video element...");
 			return;
 		}
 
@@ -100,7 +101,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			.then(() => {
 				playerRef.current = player;
 				setPlayerReady(true);
-				console.log("[PlayerContext] Shaka Player initialized and attached");
 			})
 			.catch((error) => {
 				console.error("[PlayerContext] Failed to attach player:", error);
@@ -133,7 +133,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			const cpn = Utils.generateRandomString(16);
 			const videoId = videoInfo.basic_info.id;
 
-			console.log("[PlayerContext] Unloading previous video...");
 			// Dispose old SABR adapter and create a new one for the new video
 			if (sabrAdapter) {
 				try {
@@ -171,8 +170,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						videoInfo.streaming_data?.hls_manifest_url
 					));
 
+			newSabrAdapter.onMintPoToken(async () => {
+				const visitorData = innertube.session.context.client.visitorData;
+				if (!visitorData) {
+					throw new Error("Missing visitor data");
+				}
+				return botguardService.mintToken(visitorData);
+			});
+
 			newSabrAdapter.onReloadPlayerResponse(async (reloadContext: unknown) => {
-				console.log("[SABR]", "Reloading player response...");
+				const visitorData = innertube.session.context.client.visitorData;
+				if (!visitorData) {
+					throw new Error("Missing visitor data");
+				}
+				const poToken = await botguardService.mintToken(visitorData);
+				poTokenRef.current = poToken;
 
 				const reloadedInfo = await innertube.actions.execute("/player", {
 					videoId,
@@ -187,6 +199,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						},
 						reloadPlaybackContext: reloadContext,
 					},
+					serviceIntegrityDimensions: {
+						poToken,
+					},
 				});
 
 				const parsedInfo = new YT.VideoInfo(
@@ -195,7 +210,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					cpn,
 				);
 				newSabrAdapter.setStreamingURL(
-					await innertube.session.player.decipher(
+					await innertube.session.player?.decipher(
 						parsedInfo.streaming_data?.server_abr_streaming_url,
 					),
 				);
@@ -209,7 +224,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			if (videoInfo.streaming_data && !isPostLiveDVR && !isLive) {
 				newSabrAdapter.setStreamingURL(
-					await innertube.session.player.decipher(
+					await innertube.session.player?.decipher(
 						videoInfo.streaming_data?.server_abr_streaming_url,
 					),
 				);
@@ -233,27 +248,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						videoInfo.streaming_data.hls_manifest_url ||
 						`${videoInfo.streaming_data.dash_manifest_url}/mpd_version/7`;
 				} else {
-					manifestUri = `data:application/dash+xml;base64,${btoa(
-						await videoInfo.toDash({
-							manifest_options: {
-								is_sabr: true,
-								captions_format: "vtt",
-								include_thumbnails: false,
-							},
-						}),
-					)}`;
+					const mpd = await videoInfo.toDash({
+						manifest_options: {
+							is_sabr: true,
+							captions_format: "vtt",
+							include_thumbnails: false,
+						},
+					});
+					manifestUri = `data:application/dash+xml;base64,${btoa(mpd)}`;
 				}
 			}
 
 			if (!manifestUri) throw new Error("Could not find a valid manifest URI.");
 
-			console.log("[PlayerContext] Loading manifest into Shaka Player...");
 			try {
 				await playerRef.current.load(manifestUri);
-				console.log(
-					"[PlayerContext]",
-					`Successfully loaded: ${videoInfo.basic_info.title}`,
-				);
 
 				// Start playback automatically after loading
 				if (videoElementRef.current) {
@@ -262,7 +271,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						.catch((e) => console.error("Auto-playback failed", e));
 				}
 			} catch (error) {
-				console.error("[PlayerContext] Failed to load manifest:", error);
+				// shaka.util.Error instances carry severity/category/code/data;
+				// log them as plain values, since DevTools shows the minified
+				// constructor name for the raw object.
+				console.error(
+					"[PlayerContext] Failed to load manifest:",
+					JSON.stringify(
+						{
+							message: (error as Error)?.message,
+							severity: (error as { severity?: unknown }).severity,
+							category: (error as { category?: unknown }).category,
+							code: (error as { code?: unknown }).code,
+							data: (error as { data?: unknown }).data,
+							stack: (error as Error)?.stack?.split("\n").slice(0, 6),
+						},
+						(_, v) => (typeof v === "bigint" ? v.toString() : v),
+						2,
+					),
+				);
 				throw error;
 			}
 		};
@@ -270,37 +296,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		loadVideo().catch((error) => {
 			console.error("[PlayerContext] Load video error:", error);
 		});
-	}, [videoInfo, innertube, playerReady, sabrAdapter]);
+	}, [videoInfo, innertube, playerReady]);
 
 	// Play/pause control
 	useEffect(() => {
-		if (videoElementRef.current) {
-			if (isPlaying) {
-				videoElementRef.current
-					.play()
-					.catch((e) => console.error("Playback failed", e));
-			} else {
-				videoElementRef.current.pause();
-			}
+		const videoEl = videoElementRef.current;
+		if (!videoEl) return;
+
+		// Only control playback if we have a loaded video
+		if (videoEl.readyState < 2) {
+			return;
+		}
+
+		if (isPlaying) {
+			videoEl.play().catch((e) => {
+				// Ignore AbortError as it's expected when pause is called
+				if (e.name !== "AbortError") {
+					console.error("Playback failed", e);
+				}
+			});
+		} else {
+			videoEl.pause();
 		}
 	}, [isPlaying]);
 
 	const playSong = async (song: Song) => {
-		console.log("[PlayerContext] Playing song:", song.id, song.title);
 		setIsPlaying(false);
 		setCurrentSong(song);
 		setVideoInfo(null);
 		setInnertube(null);
+		poTokenRef.current = null;
 
 		try {
 			const result = await getSongStream(song.id);
 			if (result) {
+				poTokenRef.current = result.poToken;
 				setVideoInfo(result.videoInfo);
 				setInnertube(result.innertube);
 				setIsPlaying(true);
 			}
 		} catch (error) {
-			console.error("[PlayerContext] Failed to play song:", error);
+			console.error(
+				"[PlayerContext] Failed to play song:",
+				error,
+				error instanceof Error ? error.stack : undefined,
+			);
 		}
 	};
 
@@ -393,6 +433,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const resume = () => setIsPlaying(true);
 	const toggle = () => setIsPlaying(!isPlaying);
 	const toggleNowPlaying = () => setIsNowPlayingOpen(!isNowPlayingOpen);
+	const hasNext = currentIndex < queue.length - 1;
+	const hasPrevious = currentIndex > 0 || history.length > 0;
 
 	return (
 		<PlayerContext.Provider
@@ -411,8 +453,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setQueue,
 				next,
 				previous,
-				hasNext: currentIndex < queue.length - 1,
-				hasPrevious: currentIndex > 0 || history.length > 0,
+				hasNext,
+				hasPrevious,
 				isNowPlayingOpen,
 				toggleNowPlaying,
 				videoContainerRef,
@@ -422,6 +464,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			}}
 		>
 			{children}
+			{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
+			<video
+				className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+				onEnded={() => {
+					if (hasNext) next();
+				}}
+				playsInline
+				ref={videoElementRef}
+			/>
 		</PlayerContext.Provider>
 	);
 }

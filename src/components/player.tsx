@@ -71,7 +71,7 @@ export function Player() {
 			videoEl.volume = volume;
 		}
 		localStorage.setItem("yumusic-volume", volume.toString());
-	}, [volume, videoElementRef.current]);
+	}, [volume, videoElementRef]);
 
 	// Convert linear slider value to exponential volume
 	const linearToExponential = (linear: number) => {
@@ -183,12 +183,11 @@ export function Player() {
 		<>
 			{/* Player UI - Only show when there's a current song */}
 			{currentSong && (
-				<button
+				<div
 					className="fixed bottom-0 left-0 right-0 bg-background border-t z-50 cursor-pointer"
 					onClick={toggleNowPlaying}
 					onMouseEnter={() => setShowVolumeSlider(true)}
 					onMouseLeave={() => setShowVolumeSlider(false)}
-					type="button"
 				>
 					{/* Progress bar */}
 					<div
@@ -314,7 +313,7 @@ export function Player() {
 							</div>
 						</div>
 					</div>
-				</button>
+				</div>
 			)}
 		</>
 	);

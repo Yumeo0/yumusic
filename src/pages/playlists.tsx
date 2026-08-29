@@ -47,6 +47,13 @@ export function PlaylistDetails() {
 		try {
 			setLoading(true);
 			const data = await getPlaylist(id);
+
+			if (!data) {
+				setError("Failed to load playlist.");
+				setLoading(false);
+				return;
+			}
+
 			setPlaylist(data);
 			setLoading(false);
 
@@ -184,14 +191,16 @@ export function PlaylistDetails() {
 				{playlist?.items?.map((item, index) => {
 					if (!item.is(YTNodes.MusicResponsiveListItem)) return null;
 
+					const thumbnailUrl = item.thumbnail?.contents[0]?.url;
+
 					return (
 						<Card
 							className="p-0 flex flex-row items-center gap-4 hover:bg-muted/50 transition-colors cursor-pointer"
 							key={item.id || `playlist-item-${index}`}
 							onClick={() => {
 								const song = {
-									id: item.id,
-									title: item.title,
+									id: item.id ?? "",
+									title: item.title ?? "Unknown Title",
 									artist: item.artists?.[0]?.name || "Unknown Artist",
 									thumbnail:
 										item.thumbnail?.contents?.[
@@ -205,8 +214,8 @@ export function PlaylistDetails() {
 									.slice(index + 1)
 									.filter((i) => i.is(YTNodes.MusicResponsiveListItem))
 									.map((i) => ({
-										id: i.id,
-										title: i.title,
+										id: i.id ?? "",
+										title: i.title ?? "Unknown Title",
 										artist: i.artists?.[0]?.name || "Unknown Artist",
 										thumbnail:
 											i.thumbnail?.contents?.[i.thumbnail.contents.length - 1]
@@ -217,12 +226,12 @@ export function PlaylistDetails() {
 								play(song, remainingSongs);
 							}}
 						>
-							{item.thumbnail.contents[0].url && (
+							{thumbnailUrl && (
 								<img
 									alt={item.title}
 									className="w-16 h-16 object-cover rounded"
 									loading="lazy"
-									src={item.thumbnail.contents[0].url}
+									src={thumbnailUrl}
 								/>
 							)}
 							<div className="flex-1 min-w-0">
@@ -263,9 +272,14 @@ export default function PlaylistsPage() {
 			setLoading(true);
 			const library = await getUserPlaylists();
 
+			if (!library) {
+				setError("Failed to load playlists.");
+				return;
+			}
+
 			const foundItems: YTNodes.MusicTwoRowItem[] = [];
 
-			for (const section of library.contents) {
+			for (const section of library.contents ?? []) {
 				if (section.contents) {
 					foundItems.push(
 						...section.contents.filterType(YTNodes.MusicTwoRowItem),

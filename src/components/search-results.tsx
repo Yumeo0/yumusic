@@ -83,8 +83,8 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 						key={video.id}
 						onClick={() =>
 							play({
-								id: video.id,
-								title: video.title,
+								id: video.id ?? "",
+								title: video.title ?? "Unknown Title",
 								artist: video.artists?.[0]?.name || "Unknown Artist",
 								thumbnail:
 									video.thumbnails?.[video.thumbnails.length - 1]?.url || "",

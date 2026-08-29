@@ -58,7 +58,12 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 		this.cacheManager = cacheManager;
 
 		const networkingEngine = shaka.net.NetworkingEngine;
-		const schemes = ["http", "https"];
+		// "sabr" must be registered so shaka's initial scheme lookup succeeds
+		// for sabr:// URIs (shaka v5 checks the scheme before running request
+		// filters). The request filter rewrites the URI to the real
+		// googlevideo URL before this plugin is invoked, so parseRequest
+		// always receives an https:// URL here.
+		const schemes = ["http", "https", "sabr"];
 
 		if (!shaka.net.HttpFetchPlugin.isSupported())
 			throw new Error("The Fetch API is not supported in this browser.");
@@ -635,6 +640,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 
 			shaka.net.NetworkingEngine.unregisterScheme("http");
 			shaka.net.NetworkingEngine.unregisterScheme("https");
+			shaka.net.NetworkingEngine.unregisterScheme("sabr");
 
 			this.player = null;
 		}

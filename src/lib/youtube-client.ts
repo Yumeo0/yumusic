@@ -5,8 +5,9 @@ import {
 	UniversalCache,
 	Utils,
 	YT,
-	YTNodes,
 } from "youtubei.js/web";
+import { botguardService } from "./botguard-service";
+import { PROXY_ORIGIN } from "./tauri";
 
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
@@ -38,6 +39,7 @@ export async function fetchFunction(
 	init?: RequestInit,
 ): Promise<Response> {
 	const userCookie = await window.electron.getCookie();
+
 	const urlStr =
 		typeof input === "string"
 			? input
@@ -46,7 +48,7 @@ export async function fetchFunction(
 				: input.url;
 	const url = new URL(urlStr);
 
-	const proxyUrl = new URL(`http://localhost:8080${url.pathname}${url.search}`);
+	const proxyUrl = new URL(`${PROXY_ORIGIN}${url.pathname}${url.search}`);
 	proxyUrl.searchParams.set("__host", url.host);
 
 	const headersObj: Record<string, string> = {};
@@ -81,22 +83,55 @@ export async function fetchFunction(
 		headersObj.Cookie = userCookie;
 	}
 
-	const body = init?.body
-		? init.body
-		: input instanceof Request
-			? await input.blob()
-			: null;
-
+	let body: BodyInit | null = null;
 	const method =
 		init?.method || (input instanceof Request ? input.method : "GET");
 
-	return fetch(proxyUrl.toString(), {
-		method: method,
-		headers: {
-			"X-Proxy-Headers": JSON.stringify(headersObj),
-		},
-		body: body as BodyInit,
-	});
+	// Only read body for non-GET/HEAD requests
+	if (method !== "GET" && method !== "HEAD") {
+		if (init?.body) {
+			body = init.body;
+	} else if (input instanceof Request && input.body) {
+			try {
+				body = await input.blob();
+			} catch (error) {
+				console.error("[fetchFunction] Failed to read body:", error);
+			}
+		}
+	}
+
+	try {
+		// Add a timeout to prevent indefinite hangs
+		const controller = new AbortController();
+		const timeoutId = setTimeout(() => {
+			console.error("[fetchFunction] Request timed out after 30 seconds");
+			controller.abort();
+		}, 30000);
+
+		const response = await fetch(proxyUrl.toString(), {
+			method: method,
+			headers: {
+				"X-Proxy-Headers": JSON.stringify(headersObj),
+			},
+			body: body,
+			signal: controller.signal,
+		});
+
+		clearTimeout(timeoutId);
+		if (!response.ok) {
+			response
+				.clone()
+				.text()
+				.then((body) =>
+					console.error("[fetchFunction] Error body:", body.slice(0, 600)),
+				)
+				.catch(() => undefined);
+		}
+		return response;
+	} catch (error) {
+		console.error("[fetchFunction] Fetch failed:", error);
+		throw error;
+	}
 }
 
 export async function getYoutubeClient(cookie?: string) {
@@ -121,22 +156,19 @@ export async function getYoutubeClient(cookie?: string) {
 export async function getUserProfile() {
 	const client = await getYoutubeClient();
 	try {
-		const info = await client.account.getInfo();
+		// getInfo(true) uses the WEB client channel-switcher endpoint, which is
+		// the variant that works with cookie-based sessions. The default
+		// getInfo() uses the TV client, whose response has no contents here.
+		const accounts = await client.account.getInfo(true);
 
-		if (!info.contents || !info.contents.contents) return null;
+		const selected = accounts.find((item) => item.is_selected) ?? accounts[0];
 
-		const accountItem = info.contents.contents.find(
-			(item) => item.is(YTNodes.AccountItem) && item.is_selected,
-		);
+		if (!selected) return null;
 
-		if (accountItem?.is(YTNodes.AccountItem)) {
-			return {
-				name: accountItem.account_name.text,
-				photo: accountItem.account_photo?.[0]?.url,
-			};
-		}
-
-		return null;
+		return {
+			name: selected.account_name?.text,
+			photo: selected.account_photo?.[0]?.url,
+		};
 	} catch (error) {
 		console.error("Failed to get user profile:", error);
 		return null;
@@ -183,6 +215,15 @@ export async function loadPlaylistContinuation(playlist: Playlist) {
 export async function getSongStream(videoId: string) {
 	const client = await getYoutubeClient();
 
+	const visitorData = client.session.context.client.visitorData;
+	if (!visitorData) {
+		throw new Error("Missing visitor data");
+	}
+
+	await botguardService.init();
+	const poToken = await botguardService.mintToken(visitorData);
+	client.session.po_token = poToken;
+
 	// Use the same approach as the working sabr-shaka-example
 	// This ensures proper player session initialization
 	const playerResponse = await client.actions.execute("/player", {
@@ -194,11 +235,14 @@ export async function getSongStream(videoId: string) {
 				signatureTimestamp: client.session.player?.signature_timestamp,
 			},
 		},
+		serviceIntegrityDimensions: {
+			poToken,
+		},
 	});
 
 	const cpn = Utils.generateRandomString(16);
 	const info = new YT.VideoInfo([playerResponse], client.actions, cpn);
 
 	// Return the full VideoInfo object for SABR streaming support
-	return { videoInfo: info, innertube: client };
+	return { videoInfo: info, innertube: client, poToken };
 }

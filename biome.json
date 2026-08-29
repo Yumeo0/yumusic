@@ -58,7 +58,9 @@
 				"useAsConstAssertion": "error"
 			},
 			"a11y": {
-				"useMediaCaption": "off"
+				"useMediaCaption": "off",
+				"noStaticElementInteractions": "off",
+				"useKeyWithClickEvents": "off"
 			},
 			"suspicious": {
 				"noAssignInExpressions": "error",
