@@ -91,7 +91,7 @@ export async function fetchFunction(
 	if (method !== "GET" && method !== "HEAD") {
 		if (init?.body) {
 			body = init.body;
-	} else if (input instanceof Request && input.body) {
+		} else if (input instanceof Request && input.body) {
 			try {
 				body = await input.blob();
 			} catch (error) {
@@ -195,6 +195,18 @@ export async function getPlaylist(id: string) {
 		return playlist;
 	} catch (error) {
 		console.error("Failed to get playlist:", error);
+		return null;
+	}
+}
+
+export async function getSongLyrics(videoId: string): Promise<string | null> {
+	const client = await getYoutubeClient();
+	try {
+		const shelf = await client.music.getLyrics(videoId);
+		const text = shelf?.description?.toString();
+		return text && text.trim().length > 0 ? text : null;
+	} catch (error) {
+		console.warn("Failed to get lyrics:", error);
 		return null;
 	}
 }

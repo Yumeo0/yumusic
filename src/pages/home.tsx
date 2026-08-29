@@ -1,8 +1,17 @@
+import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { HomeFeed } from "@/components/home-feed";
+import { cn } from "@/lib/utils";
 import SearchResults from "../components/search-results";
+
+const SUGGESTIONS = [
+	"lofi beats",
+	"city pop",
+	"jazz fusion",
+	"synthwave",
+	"afrobeats",
+];
 
 export default function HomePage() {
 	const [searchParams, setSearchParams] = useSearchParams();
@@ -21,27 +30,51 @@ export default function HomePage() {
 	};
 
 	return (
-		<div className="container mx-auto p-6 flex flex-col min-h-full">
-			<div className="w-full max-w-3xl mx-auto mb-8">
-				<form className="w-full" onSubmit={handleSearch}>
-					<div className="flex gap-3 items-center">
-						<Input
-							className="h-14 text-lg px-6"
-							onChange={(e) => setSearchQuery(e.target.value)}
-							placeholder="Search for music videos..."
-							type="text"
-							value={searchQuery}
-						/>
-						<Button className="h-14 px-8" size="lg" type="submit">
-							Search
-						</Button>
-					</div>
-				</form>
-			</div>
+		<div
+			className={cn(
+				"mx-auto flex w-full flex-col px-6 pt-28 sm:px-8",
+				query ? "max-w-3xl" : "max-w-5xl",
+			)}
+		>
+			{/* Search */}
+			<form onSubmit={handleSearch}>
+				<div className="group relative flex items-center">
+					<Search className="pointer-events-none absolute left-4.5 size-5 text-muted-foreground transition-colors group-focus-within:text-foreground" />
+					<input
+						className="h-13 w-full rounded-xl border border-foreground/12 bg-foreground/[0.04] pr-4 pl-12 text-base outline-none transition-colors duration-200 placeholder:text-muted-foreground/70 focus:border-primary/50 focus:bg-foreground/[0.06]"
+						onChange={(e) => setSearchQuery(e.target.value)}
+						placeholder="Search songs, artists, videos…"
+						type="text"
+						value={searchQuery}
+					/>
+				</div>
+			</form>
+
+			{/* Quick picks */}
+			{!query && (
+				<div className="mt-4 flex flex-wrap gap-2">
+					{SUGGESTIONS.map((s) => (
+						<button
+							className="rounded-full border border-foreground/10 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors duration-200 hover:border-primary/40 hover:text-primary"
+							key={s}
+							onClick={() => setSearchParams({ q: s })}
+							type="button"
+						>
+							{s}
+						</button>
+					))}
+				</div>
+			)}
 
 			{query && (
-				<div className="w-full">
+				<div className="mt-10">
 					<SearchResults query={query} />
+				</div>
+			)}
+
+			{!query && (
+				<div className="mt-14 pb-4">
+					<HomeFeed />
 				</div>
 			)}
 		</div>

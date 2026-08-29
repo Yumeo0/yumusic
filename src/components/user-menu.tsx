@@ -1,5 +1,6 @@
 import { LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 interface UserMenuProps {
 	user: {
@@ -29,38 +30,41 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
 	return (
 		<div className="relative" ref={menuRef}>
 			<button
-				className="flex items-center gap-3 px-4 py-3 w-full rounded-lg hover:bg-muted transition-colors text-left"
+				className={cn(
+					"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-200",
+					isOpen ? "bg-foreground/[0.06]" : "hover:bg-foreground/[0.05]",
+				)}
 				onClick={() => setIsOpen(!isOpen)}
 				type="button"
 			>
 				{user.photo ? (
 					<img
 						alt={user.name}
-						className="w-8 h-8 rounded-full object-cover"
+						className="size-9 rounded-full object-cover"
 						src={user.photo}
 					/>
 				) : (
-					<div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+					<div className="grid size-9 place-items-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
 						{user.name?.[0]?.toUpperCase() || "U"}
 					</div>
 				)}
-				<div className="flex-1 min-w-0">
-					<p className="text-sm font-medium truncate">{user.name || "User"}</p>
+				<div className="min-w-0 flex-1">
+					<p className="truncate text-sm font-medium">{user.name || "User"}</p>
 				</div>
 			</button>
 
 			{isOpen && (
-				<div className="absolute bottom-full left-0 w-full mb-2 bg-popover border rounded-lg shadow-lg overflow-hidden z-50">
-					<div className="p-1">
+				<div className="animate-pop-in absolute bottom-full left-0 z-50 mb-2 w-full origin-bottom-left overflow-hidden rounded-xl border border-foreground/10 bg-popover/95 shadow-[0_20px_50px_-12px_oklch(0_0_0/0.6)] backdrop-blur-xl">
+					<div className="p-1.5">
 						<button
-							className="flex items-center gap-2 w-full px-3 py-2 text-sm text-destructive hover:bg-destructive/10 rounded-md transition-colors"
+							className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-destructive transition-colors duration-150 hover:bg-destructive/10"
 							onClick={() => {
 								setIsOpen(false);
 								onLogout();
 							}}
 							type="button"
 						>
-							<LogOut className="w-4 h-4" />
+							<LogOut className="size-4" />
 							<span>Log Out</span>
 						</button>
 					</div>

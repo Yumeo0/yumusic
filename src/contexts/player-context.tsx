@@ -13,6 +13,7 @@ import shaka from "shaka-player/dist/shaka-player.ui";
 import { Constants, Utils } from "youtubei.js";
 import { type Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
+import { MAX_VOLUME } from "@/lib/hooks";
 import { ShakaPlayerAdapter } from "@/lib/shaka-player-adapter";
 import { getSongStream } from "@/lib/youtube-client";
 
@@ -20,6 +21,10 @@ export interface Song {
 	id: string;
 	title: string;
 	artist: string;
+	/** Channel id (UC…) of the primary artist, when known */
+	artistId?: string;
+	/** All artists with their channel ids, when known */
+	artists?: Array<{ name: string; id?: string }>;
 	thumbnail: string;
 	duration?: string;
 }
@@ -43,10 +48,13 @@ interface PlayerContextType {
 	hasPrevious: boolean;
 	isNowPlayingOpen: boolean;
 	toggleNowPlaying: () => void;
+	isQueueOpen: boolean;
+	toggleQueue: () => void;
+	setQueueOpen: (open: boolean) => void;
 	videoContainerRef: RefObject<HTMLDivElement | null> | null;
 	videoElementRef: RefObject<HTMLVideoElement | null> | null;
-	duration: number;
-	currentTime: number;
+	volume: number;
+	setVolume: (volume: number) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
@@ -60,6 +68,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [currentIndex, setCurrentIndex] = useState(-1);
 	const [history, setHistory] = useState<Song[]>([]);
 	const [isNowPlayingOpen, setIsNowPlayingOpen] = useState(false);
+	const [isQueueOpen, setIsQueueOpen] = useState(false);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
 	const playerRef = useRef<shaka.Player | null>(null);
@@ -68,8 +77,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		null,
 	);
 	const [playerReady, setPlayerReady] = useState(false);
-	const [duration, _setDuration] = useState(0);
-	const [currentTime, _setCurrentTime] = useState(0);
+	const [volume, _setVolume] = useState(() => {
+		const savedVolume = localStorage.getItem("yumusic-volume");
+		const parsed = savedVolume ? Number.parseFloat(savedVolume) : NaN;
+		return Number.isFinite(parsed)
+			? Math.min(MAX_VOLUME, Math.max(0, parsed))
+			: MAX_VOLUME;
+	});
 
 	// Initialize Shaka Player
 	useEffect(() => {
@@ -120,6 +134,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	// Load video when videoInfo changes and player is ready
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the SABR adapter is intentionally recreated per video inside the effect.
 	useEffect(() => {
 		const loadVideo = async () => {
 			if (!playerReady || !playerRef.current) {
@@ -320,6 +335,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}
 	}, [isPlaying]);
 
+	// Volume control - applied to the media element and persisted
+	useEffect(() => {
+		const videoEl = videoElementRef.current;
+		if (videoEl) {
+			videoEl.volume = volume;
+		}
+		localStorage.setItem("yumusic-volume", volume.toString());
+	}, [volume]);
+
+	const setVolume = (next: number) => {
+		_setVolume(Math.min(MAX_VOLUME, Math.max(0, next)));
+	};
+
 	const playSong = async (song: Song) => {
 		setIsPlaying(false);
 		setCurrentSong(song);
@@ -433,6 +461,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const resume = () => setIsPlaying(true);
 	const toggle = () => setIsPlaying(!isPlaying);
 	const toggleNowPlaying = () => setIsNowPlayingOpen(!isNowPlayingOpen);
+	const toggleQueue = () => setIsQueueOpen(!isQueueOpen);
+	const setQueueOpen = (open: boolean) => setIsQueueOpen(open);
 	const hasNext = currentIndex < queue.length - 1;
 	const hasPrevious = currentIndex > 0 || history.length > 0;
 
@@ -457,10 +487,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				hasPrevious,
 				isNowPlayingOpen,
 				toggleNowPlaying,
+				isQueueOpen,
+				toggleQueue,
+				setQueueOpen,
 				videoContainerRef,
 				videoElementRef,
-				duration,
-				currentTime,
+				volume,
+				setVolume,
 			}}
 		>
 			{children}
