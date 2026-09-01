@@ -2,9 +2,9 @@ import { Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
-import { Thumb } from "@/components/thumb";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import { getYoutubeClient } from "../lib/youtube-client";
 
@@ -59,7 +59,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 		artist: artistNames(video),
 		artistId: artistIdOf(video.artists),
 		artists: artistListOf(video),
-		thumbnail: video.thumbnails?.[video.thumbnails.length - 1]?.url || "",
+		thumbnail: hiResThumb(video.thumbnails?.[video.thumbnails.length - 1]?.url),
 		duration: video.duration?.text,
 	});
 
@@ -112,9 +112,10 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 						>
 							<div className="relative aspect-square overflow-hidden">
 								{song.thumbnail && (
-									<Thumb
+									<img
 										alt={video.title}
 										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+										crossOrigin="anonymous"
 										loading="lazy"
 										src={song.thumbnail}
 									/>

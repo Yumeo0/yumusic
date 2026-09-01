@@ -10,7 +10,6 @@ import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
 import { cn, formatTime } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
-import { Thumb } from "./thumb";
 import { VolumeControl } from "./volume-control";
 import { ProgressBar } from "./waveform";
 
@@ -67,9 +66,10 @@ export function Player() {
 				>
 					<div className="relative shrink-0">
 						{currentSong.thumbnail ? (
-							<Thumb
+							<img
 								alt={currentSong.title}
 								className="size-11 rounded-md border border-foreground/10 object-cover"
+								crossOrigin="anonymous"
 								key={currentSong.id}
 								src={currentSong.thumbnail}
 							/>

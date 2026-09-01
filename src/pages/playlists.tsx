@@ -11,12 +11,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
-import { Thumb } from "@/components/thumb";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { usePinnedPlaylists } from "@/lib/pinned";
-import { cn } from "@/lib/utils";
+import { cn, hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import {
 	getPlaylist,
@@ -81,8 +80,9 @@ function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 		artist: artistNames(item),
 		artistId: artistIdOf(item.artists),
 		artists: artistListOf(item),
-		thumbnail:
-			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url || "",
+		thumbnail: hiResThumb(
+			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url,
+		),
 		duration: item.duration?.text,
 	};
 }
@@ -151,9 +151,10 @@ export function PlaylistDetails() {
 			const view: PlaylistView = {
 				title: header?.title?.text || "Playlist",
 				subtitle: cleanSubtitle(header?.subtitle?.text || ""),
-				thumbnail:
+				thumbnail: hiResThumb(
 					header?.thumbnail?.contents?.[header.thumbnail.contents.length - 1]
 						?.url || null,
+				),
 				songs: collectSongs(data.items ?? []),
 				complete: !data.has_continuation,
 			};
@@ -245,9 +246,10 @@ export function PlaylistDetails() {
 			{/* Header */}
 			<header className="animate-track-in mt-6 flex items-end gap-6">
 				{playlist.thumbnail ? (
-					<Thumb
+					<img
 						alt={playlist.title}
 						className="size-40 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-48"
+						crossOrigin="anonymous"
 						loading="lazy"
 						src={playlist.thumbnail}
 					/>
@@ -343,9 +345,10 @@ export function PlaylistDetails() {
 
 							{/* Thumbnail */}
 							{song.thumbnail ? (
-								<Thumb
+								<img
 									alt={song.title}
 									className="size-10 rounded-md border border-foreground/10 object-cover"
+									crossOrigin="anonymous"
 									loading="lazy"
 									src={song.thumbnail}
 								/>
@@ -425,7 +428,9 @@ export default function PlaylistsPage() {
 					id: item.id || "",
 					title: item.title?.text || "Unknown Title",
 					subtitle: cleanSubtitle(item.subtitle?.text || ""),
-					thumbnail: item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+					thumbnail: hiResThumb(
+						item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+					),
 				}));
 			setPlaylists(list);
 			writeCache(LIBRARY_CACHE_KEY, list);
@@ -500,9 +505,10 @@ export default function PlaylistsPage() {
 						>
 							<div className="relative aspect-square overflow-hidden bg-muted">
 								{item.thumbnail ? (
-									<Thumb
+									<img
 										alt={item.title}
 										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+										crossOrigin="anonymous"
 										loading="lazy"
 										src={item.thumbnail}
 									/>

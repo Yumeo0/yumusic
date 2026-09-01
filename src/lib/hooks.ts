@@ -67,7 +67,45 @@ export function useMediaTime(
 
 /* ─── Ambient album color extraction ─────────────────────────── */
 
+const AMBIENT_STORAGE_KEY = "yumusic-ambient-colors";
+const AMBIENT_MAX_ENTRIES = 256;
+
 const ambientCache = new Map<string, string>();
+/** URLs whose extraction failed — not re-probed this session (429 hammering guard). */
+const ambientFailures = new Set<string>();
+const ambientInflight = new Map<string, Promise<string | null>>();
+
+/** Loads persisted colors once at startup; the map is tiny (url -> rgb string). */
+function hydrateAmbientCache() {
+	try {
+		const raw = localStorage.getItem(AMBIENT_STORAGE_KEY);
+		if (!raw) return;
+		const stored = JSON.parse(raw) as Record<string, string>;
+		for (const [url, color] of Object.entries(stored)) {
+			ambientCache.set(url, color);
+		}
+	} catch {
+		// corrupted store — start fresh in memory
+	}
+}
+hydrateAmbientCache();
+
+/** Persists the color map, bounding its size to keep localStorage small. */
+function persistAmbientCache() {
+	try {
+		while (ambientCache.size > AMBIENT_MAX_ENTRIES) {
+			const oldest = ambientCache.keys().next().value;
+			if (oldest === undefined) break;
+			ambientCache.delete(oldest);
+		}
+		localStorage.setItem(
+			AMBIENT_STORAGE_KEY,
+			JSON.stringify(Object.fromEntries(ambientCache)),
+		);
+	} catch {
+		// quota exceeded or storage unavailable — keep in-memory only
+	}
+}
 
 function boostColor(r: number, g: number, b: number): string {
 	// Pick the most vivid pixel: score by saturation + brightness
@@ -98,7 +136,9 @@ function boostColor(r: number, g: number, b: number): string {
 	return `rgb(${nr}, ${ng}, ${nb})`;
 }
 
-function extractDominantColor(bitmap: ImageBitmap): string | null {
+function extractDominantColor(
+	bitmap: ImageBitmap | HTMLImageElement,
+): string | null {
 	const size = 32;
 	const canvas = document.createElement("canvas");
 	canvas.width = size;
@@ -122,13 +162,38 @@ function extractDominantColor(bitmap: ImageBitmap): string | null {
 }
 
 /**
- * Fetches the image and extracts the dominant ambient color. Tries a direct
- * CORS fetch first, then the app's Tauri proxy (which bypasses CORS entirely
- * — needed because thumbnails previewed via plain <img> tags end up in the
- * HTTP cache without CORS metadata, breaking mode:"cors" revalidation).
- * Returns null on any failure.
+ * Loads an image through an <img> element in CORS mode. This reuses the HTTP
+ * cache entry that the crossOrigin artwork tags populated, so extraction is
+ * request-free for covers already on screen (and cached for future sessions).
+ */
+function loadImageElement(url: string): Promise<HTMLImageElement | null> {
+	return new Promise((resolve) => {
+		const img = new Image();
+		img.crossOrigin = "anonymous";
+		img.decoding = "async";
+		img.onload = () => resolve(img);
+		img.onerror = () => resolve(null);
+		img.src = url;
+	});
+}
+
+/**
+ * Extracts the dominant ambient color with as little network traffic as
+ * possible: an CORS-mode <img> load reuses the browser's HTTP cache entry
+ * first. Falls back to a direct fetch, then to the app's Tauri proxy (which
+ * bypasses CORS entirely) for CORS-hostile hosts. Returns null on any failure.
  */
 async function extractFromUrl(url: string): Promise<string | null> {
+	const element = await loadImageElement(url);
+	if (element) {
+		try {
+			const color = extractDominantColor(element);
+			if (color) return color;
+		} catch {
+			// canvas unexpectedly tainted — fall through to the fetch attempts
+		}
+	}
+
 	const attempts: string[] = [url];
 	try {
 		const parsed = new URL(url);
@@ -160,6 +225,8 @@ async function extractFromUrl(url: string): Promise<string | null> {
 /**
  * Extracts a dominant ambient color from an album thumbnail.
  * Falls back to the theme red when the image is missing or CORS-blocked.
+ * Results are cached in memory + localStorage; failures are negative-cached
+ * for the session so rate-limited (429) URLs are never hammered.
  */
 export function useAmbientColor(imageUrl: string | undefined): string {
 	const [color, setColor] = useState(
@@ -173,15 +240,28 @@ export function useAmbientColor(imageUrl: string | undefined): string {
 			setColor(cached);
 			return;
 		}
+		if (ambientFailures.has(imageUrl)) return;
 		let cancelled = false;
-		extractFromUrl(imageUrl).then((extracted) => {
-			if (cancelled) return;
-			if (extracted) {
-				ambientCache.set(imageUrl, extracted);
-				setColor(extracted);
-			} else {
-				console.warn("[ambient] failed to extract color from", imageUrl);
-			}
+		let request = ambientInflight.get(imageUrl);
+		if (!request) {
+			request = extractFromUrl(imageUrl)
+				.then((extracted) => {
+					if (extracted) {
+						ambientCache.set(imageUrl, extracted);
+						persistAmbientCache();
+					} else {
+						ambientFailures.add(imageUrl);
+						console.warn("[ambient] failed to extract color from", imageUrl);
+					}
+					return extracted;
+				})
+				.finally(() => {
+					ambientInflight.delete(imageUrl);
+				});
+			ambientInflight.set(imageUrl, request);
+		}
+		request.then((extracted) => {
+			if (!cancelled && extracted) setColor(extracted);
 		});
 		return () => {
 			cancelled = true;

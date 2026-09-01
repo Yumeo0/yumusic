@@ -10,11 +10,10 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
-import { Thumb } from "@/components/thumb";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
-import { cn } from "@/lib/utils";
+import { cn, hiResThumb } from "@/lib/utils";
 import { artistListOf, artistNames } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
 
@@ -50,8 +49,9 @@ function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 		title: item.title ?? "Unknown Title",
 		artist: artistNames(item),
 		artists: artistListOf(item),
-		thumbnail:
-			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url || "",
+		thumbnail: hiResThumb(
+			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url,
+		),
 		duration: item.duration?.text,
 	};
 }
@@ -72,12 +72,15 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	if (header instanceof YTNodes.MusicImmersiveHeader) {
 		name = header.title?.text || name;
 		description = header.description?.toString() || null;
-		thumbnail =
+		thumbnail = hiResThumb(
 			header.thumbnail?.contents?.[header.thumbnail.contents.length - 1]?.url ||
-			null;
+				null,
+		);
 	} else if (header instanceof YTNodes.MusicVisualHeader) {
 		name = header.title?.text || name;
-		thumbnail = header.thumbnail?.[header.thumbnail.length - 1]?.url || null;
+		thumbnail = hiResThumb(
+			header.thumbnail?.[header.thumbnail.length - 1]?.url || null,
+		);
 	} else if (header instanceof YTNodes.MusicHeader) {
 		name = header.title?.text || name;
 	}
@@ -125,7 +128,9 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 					items.push({
 						title: item.title?.text || "Unknown Title",
 						subtitle: item.subtitle?.text || "",
-						thumbnail: item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+						thumbnail: hiResThumb(
+							item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+						),
 					});
 				}
 			}
@@ -225,9 +230,10 @@ export default function ArtistPage() {
 			{/* Header */}
 			<header className="animate-track-in mt-6 flex items-end gap-6">
 				{artist.thumbnail ? (
-					<Thumb
+					<img
 						alt={artist.name}
 						className="size-40 shrink-0 rounded-full border border-foreground/10 object-cover sm:size-48"
+						crossOrigin="anonymous"
 						src={artist.thumbnail}
 					/>
 				) : (
@@ -313,9 +319,10 @@ export default function ArtistPage() {
 										)}
 									</span>
 									{song.thumbnail ? (
-										<Thumb
+										<img
 											alt={song.title}
 											className="size-10 rounded-md border border-foreground/10 object-cover"
+											crossOrigin="anonymous"
 											loading="lazy"
 											src={song.thumbnail}
 										/>
@@ -375,9 +382,10 @@ export default function ArtistPage() {
 							>
 								<div className="relative aspect-square overflow-hidden rounded-xl border border-foreground/8 bg-card">
 									{item.thumbnail ? (
-										<Thumb
+										<img
 											alt={item.title}
 											className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+											crossOrigin="anonymous"
 											loading="lazy"
 											src={item.thumbnail}
 										/>

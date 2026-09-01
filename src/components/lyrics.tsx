@@ -1,6 +1,9 @@
 import { AudioLines, MicVocal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchSyncedLyrics, type LrcLine } from "@/lib/lrclib";
+import { fetchMusixmatchSynced } from "@/lib/musixmatch";
+import { useRomanizedLines } from "@/lib/romanize";
+import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { getSongLyrics } from "@/lib/youtube-client";
 
@@ -16,22 +19,29 @@ interface LyricsPanelProps {
 	className?: string;
 }
 
+interface LyricsSources {
+	lrclib: LrcLine[] | null;
+	musixmatch: LrcLine[] | null;
+	youtube: string | null;
+}
+
 type LyricsState =
 	| { status: "loading" }
-	| { status: "done"; synced: LrcLine[] | null; plain: string | null };
+	| { status: "done"; sources: LyricsSources };
 
-type LyricsView = "lrclib" | "youtube";
+type LyricsView = "lrclib" | "musixmatch" | "youtube";
 
-/** Toggle options labeled by lyrics provider */
 const LYRICS_PROVIDERS: Array<{ id: LyricsView; label: string }> = [
 	{ id: "lrclib", label: "LRCLIB" },
+	{ id: "musixmatch", label: "Musixmatch" },
 	{ id: "youtube", label: "YouTube" },
 ];
 
 /**
- * Full-height lyrics panel. Fetches time-synced lyrics (LRCLIB) and static
- * YouTube Music lyrics in parallel, lets the user switch between them,
- * and shows a quiet placeholder when neither exists.
+ * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch) and
+ * static YouTube Music lyrics in parallel, lets the user switch between the
+ * providers, optionally shows romanization under each line, and falls back
+ * to a quiet placeholder when nothing is available.
  */
 export function LyricsPanel({
 	songId,
@@ -44,6 +54,7 @@ export function LyricsPanel({
 }: LyricsPanelProps) {
 	const [state, setState] = useState<LyricsState>({ status: "loading" });
 	const [view, setView] = useState<LyricsView>("lrclib");
+	const [settings] = useSettings();
 
 	useEffect(() => {
 		let cancelled = false;
@@ -51,16 +62,24 @@ export function LyricsPanel({
 		setView("lrclib");
 
 		const load = async () => {
-			const [synced, plain] = await Promise.all([
+			const [lrclib, musixmatch, youtube] = await Promise.all([
 				fetchSyncedLyrics(title, artist, duration),
+				fetchMusixmatchSynced(title, artist),
 				getSongLyrics(songId),
 			]);
 			if (cancelled) return;
-			setState({
-				status: "done",
-				synced: synced && synced.length > 0 ? synced : null,
-				plain,
-			});
+			const sources: LyricsSources = {
+				lrclib: lrclib && lrclib.length > 0 ? lrclib : null,
+				musixmatch: musixmatch && musixmatch.length > 0 ? musixmatch : null,
+				youtube,
+			};
+			setState({ status: "done", sources });
+			const firstAvailable = LYRICS_PROVIDERS.find(
+				(p) => sources[p.id as keyof LyricsSources] !== null,
+			);
+			if (firstAvailable) {
+				setView(firstAvailable.id);
+			}
 		};
 		load();
 
@@ -69,17 +88,29 @@ export function LyricsPanel({
 		};
 	}, [songId, title, artist, duration]);
 
+	const romanize = settings.romanizeLyrics;
+	const sources = state.status === "done" ? state.sources : null;
+	const available = sources
+		? LYRICS_PROVIDERS.filter(
+				(p) => sources[p.id as keyof LyricsSources] !== null,
+			)
+		: [];
+	const activeSynced =
+		sources && view !== "youtube"
+			? sources[view as Exclude<LyricsView, "youtube">]
+			: null;
+
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col", className)}>
-			{/* Header + source toggle */}
+			{/* Header + provider toggle */}
 			<div className="mb-4 flex items-center gap-2">
-				<MicVocal className="size-3.5 text-muted-foreground" />
+				<MicVocal className="size-3.5 shrink-0 text-muted-foreground" />
 				<span className="text-xs font-medium text-muted-foreground">
 					Lyrics
 				</span>
-				{state.status === "done" && state.synced && state.plain && (
+				{available.length >= 2 && (
 					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/[0.06] p-0.5">
-						{LYRICS_PROVIDERS.map((provider) => (
+						{available.map((provider) => (
 							<button
 								className={cn(
 									"rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
@@ -97,55 +128,36 @@ export function LyricsPanel({
 					</div>
 				)}
 			</div>
-
 			{state.status === "loading" && <LyricsSkeleton />}
-			{state.status === "done" && view === "lrclib" && state.synced && (
+			{sources && activeSynced && (
 				<SyncedLines
 					currentTime={currentTime}
-					lines={state.synced}
+					lines={activeSynced}
 					onSeekTime={onSeekTime}
+					romanize={romanize}
 				/>
 			)}
-			{state.status === "done" &&
-				!(view === "lrclib" && state.synced) &&
-				state.plain && <LyricsLines text={state.plain} />}
-			{state.status === "done" && !state.synced && !state.plain && (
-				<LyricsFallback />
-			)}
+			{sources && !activeSynced && sources.youtube && (
+				<LyricsLines romanize={romanize} text={sources.youtube} />
+			)}{" "}
+			{sources &&
+				!sources.lrclib &&
+				!sources.musixmatch &&
+				!sources.youtube && <LyricsFallback artist={artist} title={title} />}
 		</div>
 	);
 }
-
-/** Detects silence-only LRC lines ("♪", empty, etc.). */
-function isSilentLine(text: string): boolean {
-	const s = text.trim();
-	return s === "" || /^[♪*●○]+$/u.test(s);
-}
-
-type LyricSegment =
-	| { kind: "line"; index: number }
-	| {
-			kind: "dots";
-			/** First line index replaced by the dots */
-			from: number;
-			/** Last line index replaced by the dots */
-			to: number;
-			/** Time (s) the dots appear — instantly when the silence starts */
-			start: number;
-			/** Time (s) the silence ends; null = unknown (looping fill) */
-			end: number | null;
-			/** Unique key */
-			key: string;
-	  };
 
 function SyncedLines({
 	lines,
 	currentTime,
 	onSeekTime,
+	romanize,
 }: {
 	lines: LrcLine[];
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
+	romanize: boolean;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	// Visual anchor per line index: the line itself, or the dots row that
@@ -153,6 +165,8 @@ function SyncedLines({
 	const anchorRefs = useRef<Array<HTMLElement | null>>([]);
 	// Pauses auto-scroll briefly while the user scrolls manually
 	const holdUntilRef = useRef(0);
+	const lineTexts = useMemo(() => lines.map((l) => l.text), [lines]);
+	const romanized = useRomanizedLines(lineTexts, romanize);
 
 	const activeIndex = useMemo(() => {
 		let idx = -1;
@@ -169,7 +183,17 @@ function SyncedLines({
 	// Build render segments: runs of silence-only lines ("♪"/empty) are
 	// replaced by a single dots row; everything else renders as-is.
 	const segments = useMemo(() => {
-		const out: LyricSegment[] = [];
+		const out: Array<
+			| { kind: "line"; index: number }
+			| {
+					kind: "dots";
+					from: number;
+					to: number;
+					start: number;
+					end: number | null;
+					key: string;
+			  }
+		> = [];
 		let i = 0;
 		while (i < lines.length) {
 			if (isSilentLine(lines[i].text)) {
@@ -258,7 +282,8 @@ function SyncedLines({
 					return (
 						<p
 							className={cn(
-								"cursor-pointer py-1.5 text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
+								"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
+								romanize ? "py-3" : "py-1.5",
 								seg.index === activeIndex
 									? "text-foreground [text-shadow:0_0_24px_color-mix(in_oklab,var(--primary)_35%,transparent)]"
 									: "text-foreground/25 hover:text-foreground/60",
@@ -281,10 +306,82 @@ function SyncedLines({
 										</span>
 									))
 								: line.text}
+							{romanize && romanized?.get(seg.index) && (
+								<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
+									{romanized.get(seg.index)}
+								</span>
+							)}
 						</p>
 					);
 				})}
 			</div>
+		</div>
+	);
+}
+
+function LyricsLines({ text, romanize }: { text: string; romanize: boolean }) {
+	const lines = useMemo(() => text.split("\n"), [text]);
+	const romanized = useRomanizedLines(lines, romanize);
+
+	return (
+		<div className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2">
+			<div className="pb-24 pt-10">
+				{lines.map((line, i) =>
+					line.trim() === "" ? (
+						// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
+						<div className="h-5" key={`gap-${i}`} />
+					) : (
+						<p
+							className={cn(
+								"cursor-default text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
+								romanize ? "py-3" : "py-1.5",
+								i === 0 && "text-foreground/70",
+							)}
+							// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
+							key={`line-${i}`}
+						>
+							{line}
+							{romanize && romanized?.get(i) && (
+								<span className="mt-1 block text-base leading-normal font-normal text-foreground/45">
+									{romanized.get(i)}
+								</span>
+							)}
+						</p>
+					),
+				)}
+				<p className="mt-8 text-[11px] text-muted-foreground/50">
+					Lyrics via YouTube Music
+				</p>
+			</div>
+		</div>
+	);
+}
+
+function LyricsSkeleton() {
+	return (
+		<div className="flex min-h-0 flex-1 flex-col gap-4 pr-2">
+			{[85, 65, 92, 58, 78, 88, 45, 70, 60].map((w, i) => (
+				<div
+					className="shimmer-surface h-6 rounded-md"
+					// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
+					key={i}
+					style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
+				/>
+			))}
+		</div>
+	);
+}
+
+function LyricsFallback({ title, artist }: { title: string; artist: string }) {
+	return (
+		<div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-foreground/8 bg-foreground/[0.03] px-8 text-center">
+			<AudioLines className="mb-4 size-8 text-muted-foreground/50" />
+			<p className="text-sm font-medium text-foreground/80">
+				No lyrics available
+			</p>
+			<p className="mt-1 max-w-[32ch] text-sm text-muted-foreground">
+				Enjoy “{truncate(title)}” by {truncate(artist)}.
+			</p>
 		</div>
 	);
 }
@@ -321,59 +418,12 @@ function PauseDots({
 	);
 }
 
-function LyricsLines({ text }: { text: string }) {
-	const lines = text.split("\n");
-
-	return (
-		<div className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2">
-			<div className="pb-24 pt-10">
-				{lines.map((line, i) =>
-					line.trim() === "" ? (
-						// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
-						<div className="h-5" key={`gap-${i}`} />
-					) : (
-						<p
-							className={cn(
-								"cursor-default py-1.5 text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
-								i === 0 && "text-foreground/70",
-							)}
-							// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
-							key={`line-${i}`}
-						>
-							{line}
-						</p>
-					),
-				)}
-				<p className="mt-8 text-[11px] text-muted-foreground/50">
-					Lyrics via YouTube Music
-				</p>
-			</div>
-		</div>
-	);
+/** Detects silence-only LRC lines ("♪", empty, etc.). */
+function isSilentLine(text: string): boolean {
+	const s = text.trim();
+	return s === "" || /^[♪*●○]+$/u.test(s);
 }
 
-function LyricsSkeleton() {
-	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-4 pr-2">
-			{[85, 65, 92, 58, 78, 88, 45, 70, 60].map((w, i) => (
-				<div
-					className="shimmer-surface h-6 rounded-md"
-					// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-					key={i}
-					style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
-				/>
-			))}
-		</div>
-	);
-}
-
-function LyricsFallback() {
-	return (
-		<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 text-center">
-			<AudioLines className="mb-4 size-8 text-muted-foreground/50" />
-			<p className="text-sm font-medium text-muted-foreground/50">
-				No lyrics available
-			</p>
-		</div>
-	);
+function truncate(text: string, max = 34): string {
+	return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }

@@ -15,6 +15,7 @@ import { type Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
 import { ShakaPlayerAdapter } from "@/lib/shaka-player-adapter";
+import { biggestThumb, hiResThumb } from "@/lib/utils";
 import { getSongStream } from "@/lib/youtube-client";
 
 export interface Song {
@@ -358,10 +359,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		try {
 			const result = await getSongStream(song.id);
 			if (result) {
+				// Debug: dump everything YouTube returned for this song
+				console.log(
+					"[YuMusic] song info:",
+					JSON.parse(JSON.stringify(result.videoInfo.basic_info ?? {})),
+				);
+				console.log(
+					"[YuMusic] streaming data:",
+					JSON.parse(JSON.stringify(result.videoInfo.streaming_data ?? {})),
+				);
 				poTokenRef.current = result.poToken;
 				setVideoInfo(result.videoInfo);
 				setInnertube(result.innertube);
 				setIsPlaying(true);
+
+				// Swap the list-item thumbnail for the best one the player
+				// response carries: the biggest variant, center-cut to a square
+				// for music (googleusercontent URLs get a server-side crop,
+				// ytimg ones are cropped by the square containers' object-fit).
+				// Uses the canonical size so the URL matches the list thumbnail
+				// and reuses its HTTP cache entry instead of fetching a variant.
+				const basic = result.videoInfo.basic_info;
+				const best = biggestThumb(basic.thumbnail);
+				if (best) {
+					const thumbnail =
+						basic.category === "Music" ? hiResThumb(best.url) : best.url;
+					setCurrentSong((prev) =>
+						prev && prev.id === basic.id ? { ...prev, thumbnail } : prev,
+					);
+				}
 			}
 		} catch (error) {
 			console.error(

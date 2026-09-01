@@ -1,4 +1,11 @@
-import { HouseIcon, LibraryIcon, LogInIcon, Music2, X } from "lucide-react";
+import {
+	HouseIcon,
+	LibraryIcon,
+	LogInIcon,
+	Music2,
+	SettingsIcon,
+	X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -21,6 +28,7 @@ import ArtistPage from "./pages/artist";
 import HomePage from "./pages/home";
 import { NowPlayingPage } from "./pages/now-playing";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
+import SettingsPage from "./pages/settings";
 
 /** Recolors the app accent from the current song's thumbnail. */
 function AmbientSync() {
@@ -163,6 +171,14 @@ function AppShell({
 								label="Playlists"
 								onClick={() => navigate("/playlists")}
 							/>
+							<SidebarItem
+								icon={
+									<SettingsIcon className="size-[18px]" strokeWidth={2.2} />
+								}
+								isActive={location.pathname.startsWith("/settings")}
+								label="Settings"
+								onClick={() => navigate("/settings")}
+							/>
 						</nav>
 
 						{/* Pinned playlists */}
@@ -187,6 +203,7 @@ function AppShell({
 													<img
 														alt=""
 														className="size-5 shrink-0 rounded object-cover"
+														crossOrigin="anonymous"
 														src={playlist.thumbnail}
 													/>
 												) : (
@@ -241,6 +258,7 @@ function AppShell({
 									<Route element={<PlaylistsPage />} path="/playlists" />
 									<Route element={<PlaylistDetails />} path="/playlists/:id" />
 									<Route element={<ArtistPage />} path="/artist/:id" />
+									<Route element={<SettingsPage />} path="/settings" />
 								</Routes>
 							</div>
 						</div>

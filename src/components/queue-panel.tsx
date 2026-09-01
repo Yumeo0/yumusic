@@ -85,6 +85,7 @@ export function QueuePanel({
 										<img
 											alt=""
 											className="size-10 rounded-md border border-foreground/10 object-cover"
+											crossOrigin="anonymous"
 											loading="lazy"
 											src={song.thumbnail}
 										/>

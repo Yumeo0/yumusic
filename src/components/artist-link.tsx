@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
+import { usePlayer } from "@/contexts/player-context";
 import { cn } from "@/lib/utils";
 
 interface ArtistLinkProps {
@@ -9,12 +10,14 @@ interface ArtistLinkProps {
 }
 
 /**
- * Clickable artist name that opens the artist page. Renders as plain text
- * when no channel id is known. Anchor-based so it can live inside other
- * buttons without invalid nesting (navigation goes through the hash router).
+ * Clickable artist name that opens the artist page (closing the fullscreen
+ * lyrics view). Renders as plain text when no channel id is known.
+ * Anchor-based so it can live inside other buttons without invalid nesting
+ * (navigation goes through the hash router).
  */
 export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 	const navigate = useNavigate();
+	const { isNowPlayingOpen, toggleNowPlaying } = usePlayer();
 
 	if (!id) {
 		return <span className={className}>{name}</span>;
@@ -30,6 +33,9 @@ export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 			onClick={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
+				if (isNowPlayingOpen) {
+					toggleNowPlaying();
+				}
 				navigate(`/artist/${id}`);
 			}}
 		>

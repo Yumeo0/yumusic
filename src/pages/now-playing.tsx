@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
-import { Thumb } from "@/components/thumb";
 import { VolumeControl } from "@/components/volume-control";
 import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
@@ -70,6 +69,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					<img
 						alt=""
 						className="size-full scale-125 object-cover opacity-30 blur-3xl"
+						crossOrigin="anonymous"
 						src={currentSong.thumbnail}
 					/>
 					<div className="absolute inset-0 bg-background/60" />
@@ -131,9 +131,10 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 							className="absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl"
 						/>
 						{currentSong.thumbnail ? (
-							<Thumb
+							<img
 								alt={currentSong.title}
 								className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
+								crossOrigin="anonymous"
 								key={`art-${currentSong.id}`}
 								src={currentSong.thumbnail}
 							/>
@@ -273,9 +274,11 @@ function QueueRow({ song, onPlay }: { song: Song; onPlay: () => void }) {
 			type="button"
 		>
 			{song.thumbnail ? (
-				<Thumb
+				<img
 					alt={song.title}
 					className="size-9 shrink-0 rounded-md object-cover"
+					crossOrigin="anonymous"
+					loading="lazy"
 					src={song.thumbnail}
 				/>
 			) : (
