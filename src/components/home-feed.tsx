@@ -153,7 +153,7 @@ export function HomeFeed() {
 						</h2>
 						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
 					</div>
-					<div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
 						{section.songs.map((song, i) => (
 							<button
 								className="group w-44 shrink-0 text-left"

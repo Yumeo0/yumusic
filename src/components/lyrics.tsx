@@ -374,13 +374,10 @@ function LyricsSkeleton() {
 
 function LyricsFallback({ title, artist }: { title: string; artist: string }) {
 	return (
-		<div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-foreground/8 bg-foreground/[0.03] px-8 text-center">
-			<AudioLines className="mb-4 size-8 text-muted-foreground/50" />
-			<p className="text-sm font-medium text-foreground/80">
+		<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 text-center">
+			<AudioLines className="mb-4 size-8 text-muted-foreground/60" />
+			<p className="text-sm font-medium text-muted-foreground/60">
 				No lyrics available
-			</p>
-			<p className="mt-1 max-w-[32ch] text-sm text-muted-foreground">
-				Enjoy “{truncate(title)}” by {truncate(artist)}.
 			</p>
 		</div>
 	);
