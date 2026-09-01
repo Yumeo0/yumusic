@@ -28,3 +28,4 @@ reqwest = { version = "0.12", default-features = false, features = [
   "http2",
 ] }
 tokio = { version = "1", features = ["time"] }
+discord-rich-presence = "1.1.0"

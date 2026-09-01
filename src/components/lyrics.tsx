@@ -143,7 +143,7 @@ export function LyricsPanel({
 			{sources &&
 				!sources.lrclib &&
 				!sources.musixmatch &&
-				!sources.youtube && <LyricsFallback artist={artist} title={title} />}
+				!sources.youtube && <LyricsFallback />}
 		</div>
 	);
 }
@@ -372,7 +372,7 @@ function LyricsSkeleton() {
 	);
 }
 
-function LyricsFallback({ title, artist }: { title: string; artist: string }) {
+function LyricsFallback() {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 text-center">
 			<AudioLines className="mb-4 size-8 text-muted-foreground/60" />
@@ -419,8 +419,4 @@ function PauseDots({
 function isSilentLine(text: string): boolean {
 	const s = text.trim();
 	return s === "" || /^[♪*●○]+$/u.test(s);
-}
-
-function truncate(text: string, max = 34): string {
-	return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }

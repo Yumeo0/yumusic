@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 
 export interface Settings {
 	romanizeLyrics: boolean;
+	discordRpc: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
 const SETTINGS_EVENT = "yumusic:settings-changed";
 const DEFAULTS: Settings = {
 	romanizeLyrics: false,
+	discordRpc: false,
 };
 
 export function getSettings(): Settings {

@@ -58,6 +58,40 @@ export default function SettingsPage() {
 				</div>
 			</section>
 
+			{/* Discord */}
+			<section className="mt-10">
+				<h2 className="mb-3 text-sm font-semibold text-foreground">Discord</h2>
+				<div className="divide-y divide-foreground/6 overflow-hidden rounded-xl border border-foreground/8 bg-card">
+					<div className="flex items-center justify-between gap-6 p-4">
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Rich presence</p>
+							<p className="mt-0.5 text-xs text-muted-foreground">
+								Show the song you're listening to on your Discord profile, with
+								cover art and links to the song, album and artist. Discord must
+								be running for the presence to appear.
+							</p>
+						</div>
+						<button
+							aria-label="Toggle Discord rich presence"
+							aria-pressed={settings.discordRpc}
+							className={cn(
+								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
+								settings.discordRpc ? "bg-primary" : "bg-foreground/15",
+							)}
+							onClick={() => update({ discordRpc: !settings.discordRpc })}
+							type="button"
+						>
+							<span
+								className={cn(
+									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
+									settings.discordRpc && "translate-x-5",
+								)}
+							/>
+						</button>
+					</div>
+				</div>
+			</section>
+
 			{/* Storage */}
 			<section className="mt-10">
 				<h2 className="mb-3 text-sm font-semibold text-foreground">Storage</h2>

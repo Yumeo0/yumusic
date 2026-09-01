@@ -5,6 +5,7 @@ import {
 	UniversalCache,
 	Utils,
 	YT,
+	YTNodes,
 } from "youtubei.js/web";
 import { botguardService } from "./botguard-service";
 import { PROXY_ORIGIN } from "./tauri";
@@ -257,4 +258,50 @@ export async function getSongStream(videoId: string) {
 
 	// Return the full VideoInfo object for SABR streaming support
 	return { videoInfo: info, innertube: client, poToken };
+}
+
+export interface TrackMeta {
+	album?: { name: string; id?: string };
+	artists: { name: string; id?: string }[];
+}
+
+/**
+ * Album and artist metadata for a track, taken from the selected entry of
+ * the "Up next" queue. Used for Discord rich presence; failures resolve to
+ * null so the presence still works without album data.
+ */
+export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
+	try {
+		const client = await getYoutubeClient();
+		const info = await client.music.getInfo(videoId);
+		const panel = await info.getUpNext(false);
+		const videos: YTNodes.PlaylistPanelVideo[] = [];
+		for (const item of panel.contents) {
+			if (item.is(YTNodes.PlaylistPanelVideo)) {
+				videos.push(item);
+			} else if (item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary) {
+				videos.push(item.primary);
+			}
+		}
+		const current =
+			videos.find((video) => video.selected) ??
+			videos.find((video) => video.video_id === videoId);
+		if (!current) return null;
+		return {
+			album: current.album
+				? { name: current.album.name, id: current.album.id }
+				: undefined,
+			artists: (current.artists ?? [])
+				.filter((artist) => artist.name)
+				.map((artist) => ({
+					name: artist.name,
+					id: artist.channel_id?.startsWith("UC")
+						? artist.channel_id
+						: undefined,
+				})),
+		};
+	} catch (error) {
+		console.warn("[YuMusic] failed to load track metadata:", error);
+		return null;
+	}
 }

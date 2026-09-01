@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import {
 	HouseIcon,
 	LibraryIcon,
@@ -22,13 +23,120 @@ import { UserMenu } from "./components/user-menu";
 import { PlayerProvider, usePlayer } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
 import { usePinnedPlaylists } from "./lib/pinned";
+import { useSettings } from "./lib/settings";
 import { cn } from "./lib/utils";
-import { getUserProfile, getYoutubeClient } from "./lib/youtube-client";
+import {
+	getTrackMeta,
+	getUserProfile,
+	getYoutubeClient,
+	type TrackMeta,
+} from "./lib/youtube-client";
 import ArtistPage from "./pages/artist";
 import HomePage from "./pages/home";
 import { NowPlayingPage } from "./pages/now-playing";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
 import SettingsPage from "./pages/settings";
+
+/**
+ * Mirrors the current song into Discord rich presence while enabled:
+ * cover art + album tooltip (linked), clickable song title and artist,
+ * plus playback timestamps that freeze while paused.
+ */
+function DiscordPresenceSync() {
+	const { currentSong, isPlaying, videoElementRef } = usePlayer();
+	const [settings] = useSettings();
+	const [meta, setMeta] = useState<TrackMeta | null>(null);
+	const [mediaDuration, setMediaDuration] = useState(0);
+
+	const songId = currentSong?.id;
+	const title = currentSong?.title ?? "";
+	const artist = currentSong?.artist ?? "";
+	const cover = currentSong?.thumbnail ?? "";
+	const artistId =
+		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
+	const discordEnabled = settings.discordRpc;
+
+	// Track the element's duration reactively: when a song starts, the
+	// presence update fires before MSE metadata is parsed (duration NaN),
+	// so re-send once durationchange/loadedmetadata deliver the real value.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: songId is an intentional reset trigger for the tracked duration
+	useEffect(() => {
+		setMediaDuration(0);
+		const videoEl = videoElementRef?.current;
+		if (!videoEl) return;
+		const sync = () =>
+			setMediaDuration(
+				Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
+			);
+		videoEl.addEventListener("durationchange", sync);
+		videoEl.addEventListener("loadedmetadata", sync);
+		return () => {
+			videoEl.removeEventListener("durationchange", sync);
+			videoEl.removeEventListener("loadedmetadata", sync);
+		};
+	}, [videoElementRef, songId]);
+
+	// Album data arrives from a follow-up fetch; it upgrades the presence
+	// (album tooltip/link) once loaded.
+	useEffect(() => {
+		let cancelled = false;
+		setMeta(null);
+		if (discordEnabled && songId) {
+			getTrackMeta(songId).then((next) => {
+				if (!cancelled) setMeta(next);
+			});
+		}
+		return () => {
+			cancelled = true;
+		};
+	}, [discordEnabled, songId]);
+
+	useEffect(() => {
+		if (!discordEnabled || !songId) return;
+		const videoEl = videoElementRef?.current ?? null;
+		const elapsed = videoEl?.currentTime ?? 0;
+		invoke("set_discord_activity", {
+			track: {
+				title,
+				artist,
+				album: meta?.album?.name ?? null,
+				coverUrl: cover || null,
+				songUrl: `https://music.youtube.com/watch?v=${songId}`,
+				artistUrl: artistId
+					? `https://music.youtube.com/channel/${artistId}`
+					: null,
+				albumUrl: meta?.album?.id
+					? `https://music.youtube.com/playlist?list=${meta.album.id}`
+					: null,
+				playing: isPlaying,
+				elapsedSecs: elapsed,
+				durationSecs: mediaDuration,
+			},
+		}).catch((error) => {
+			console.warn("[discord] presence update failed:", error);
+		});
+	}, [
+		discordEnabled,
+		songId,
+		title,
+		artist,
+		cover,
+		artistId,
+		isPlaying,
+		mediaDuration,
+		meta,
+		videoElementRef,
+	]);
+
+	// Turning the feature off drops the presence immediately.
+	useEffect(() => {
+		if (!discordEnabled) {
+			invoke("clear_discord_activity").catch(() => undefined);
+		}
+	}, [discordEnabled]);
+
+	return null;
+}
 
 /** Recolors the app accent from the current song's thumbnail. */
 function AmbientSync() {
@@ -152,6 +260,7 @@ function AppShell({
 	return (
 		<>
 			<AmbientSync />
+			<DiscordPresenceSync />
 			<div className="h-screen flex bg-background text-foreground overflow-hidden">
 				{/* ── Sidebar ─────────────────────────────────── */}
 				<aside className="flex w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar">

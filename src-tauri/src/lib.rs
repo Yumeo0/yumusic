@@ -1,3 +1,4 @@
+mod discord;
 mod proxy;
 
 use std::fs;
@@ -95,7 +96,18 @@ pub fn run() {
 			}
 			Ok(())
 		})
-		.invoke_handler(tauri::generate_handler![get_cookie, login, logout])
-		.run(tauri::generate_context!())
-		.expect("error while running tauri application");
+		.invoke_handler(tauri::generate_handler![
+			get_cookie,
+			login,
+			logout,
+			discord::set_discord_activity,
+			discord::clear_discord_activity
+		])
+		.build(tauri::generate_context!())
+		.expect("error while building tauri application")
+		.run(|_app_handle, event| {
+			if let tauri::RunEvent::Exit = event {
+				discord::shutdown();
+			}
+		});
 }
