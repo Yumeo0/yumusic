@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
+import { SongTitle } from "@/components/song-title";
 import { VolumeControl } from "@/components/volume-control";
 import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
@@ -149,7 +150,10 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 							className="animate-track-in truncate text-2xl font-bold tracking-tight sm:text-3xl"
 							key={`title-${currentSong.id}`}
 						>
-							{currentSong.title}
+							<SongTitle
+								artist={currentSong.artist}
+								title={currentSong.title}
+							/>
 						</h1>
 						<p
 							className="animate-track-in mt-1 text-base text-muted-foreground"
@@ -282,7 +286,9 @@ function QueueRow({ song, onPlay }: { song: Song; onPlay: () => void }) {
 				<div className="size-9 shrink-0 rounded-md bg-muted" />
 			)}
 			<div className="min-w-0 flex-1">
-				<p className="truncate text-sm font-medium">{song.title}</p>
+				<p className="truncate text-sm font-medium">
+					<SongTitle artist={song.artist} title={song.title} />
+				</p>
 				<p className="truncate text-xs text-muted-foreground">
 					<ArtistLinks song={song} />
 				</p>

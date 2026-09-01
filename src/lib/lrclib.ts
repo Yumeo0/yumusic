@@ -45,6 +45,7 @@ function cleanTitle(title: string): string {
 	return title
 		.replace(/[([{][^)\]}]*[)\]}]/g, "")
 		.replace(/\s*feat\..*$/i, "")
+		.replace(/\s+covered\s+by\s+.*$/i, "")
 		.trim();
 }
 
@@ -56,10 +57,16 @@ function cleanArtist(artist: string): string {
 		.trim();
 }
 
+/** Only accept records whose duration matches the song within this window. */
+const DURATION_TOLERANCE_SEC = 2;
+
 /**
  * Fetches time-synced lyrics from LRCLIB (free, no key, CORS enabled).
- * Tries an exact duration match first, then fuzzy search. Returns null
- * when nothing usable is found.
+ * Tries an exact artist+track+duration match first, then search. Records
+ * whose duration is not within ±DURATION_TOLERANCE_SEC of the song are
+ * rejected — prevents wrong-version lyrics (live/extended) desyncing the
+ * panel. Returns null when nothing usable is found; callers re-fetch once
+ * the duration becomes known.
  */
 export async function fetchSyncedLyrics(
 	title: string,
@@ -68,16 +75,21 @@ export async function fetchSyncedLyrics(
 ): Promise<LrcLine[] | null> {
 	const track = cleanTitle(title);
 	const name = cleanArtist(artist);
-	if (!track) return null;
+	if (!track || durationSec <= 0) return null;
 
 	try {
-		if (durationSec > 0 && name) {
+		if (name) {
 			const res = await fetch(
 				`https://lrclib.net/api/get?artist_name=${encodeURIComponent(name)}&track_name=${encodeURIComponent(track)}&duration=${Math.round(durationSec)}`,
 			);
 			if (res.ok) {
 				const data = await res.json();
-				if (data?.syncedLyrics) return parseLrc(data.syncedLyrics);
+				if (
+					data?.syncedLyrics &&
+					Math.abs(data.duration - durationSec) <= DURATION_TOLERANCE_SEC
+				) {
+					return parseLrc(data.syncedLyrics);
+				}
 			}
 		}
 
@@ -97,17 +109,17 @@ export async function fetchSyncedLyrics(
 				duration: number;
 				syncedLyrics?: string | null;
 			}>;
-			const withSync = results.filter((r) => r.syncedLyrics);
-			if (withSync.length === 0) continue;
-			const best =
-				durationSec > 0
-					? withSync.reduce((a, b) =>
-							Math.abs(a.duration - durationSec) <
-							Math.abs(b.duration - durationSec)
-								? a
-								: b,
-						)
-					: withSync[0];
+			const candidates = results.filter(
+				(r) =>
+					r.syncedLyrics &&
+					Math.abs(r.duration - durationSec) <= DURATION_TOLERANCE_SEC,
+			);
+			if (candidates.length === 0) continue;
+			const best = candidates.reduce((a, b) =>
+				Math.abs(a.duration - durationSec) < Math.abs(b.duration - durationSec)
+					? a
+					: b,
+			);
 			return parseLrc(best.syncedLyrics ?? "");
 		}
 		return null;

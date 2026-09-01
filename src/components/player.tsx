@@ -6,6 +6,7 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
+import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
 import { cn, formatTime } from "@/lib/utils";
@@ -84,7 +85,10 @@ export function Player() {
 							className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary"
 							key={`t-${currentSong.id}`}
 						>
-							{currentSong.title}
+							<SongTitle
+								artist={currentSong.artist}
+								title={currentSong.title}
+							/>
 						</h3>
 						<p
 							className="animate-track-in truncate text-xs text-muted-foreground"

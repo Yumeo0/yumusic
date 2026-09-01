@@ -2,6 +2,7 @@ import { Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongTitle } from "@/components/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { hiResThumb } from "@/lib/utils";
@@ -129,11 +130,11 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 									{isCurrent && isPlaying ? (
 										<span
 											aria-hidden
-											className="inline-flex h-3.5 items-end gap-[2px]"
+											className="inline-flex h-3.5 items-end gap-0.5"
 										>
 											{[0, 1, 2].map((j) => (
 												<span
-													className="animate-eq w-[3px] origin-bottom rounded-full bg-current"
+													className="animate-eq w-0.75 origin-bottom rounded-full bg-current"
 													key={j}
 													style={{
 														height: "100%",
@@ -143,15 +144,13 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 											))}
 										</span>
 									) : (
-										<Play className="size-4 translate-x-[1px] fill-current" />
+										<Play className="size-4 translate-x-px fill-current" />
 									)}
 								</span>
 							</div>
-							<div className="p-3">
-								<h3
-									className={`line-clamp-1 text-sm font-medium transition-colors duration-200 group-hover:text-primary ${isCurrent ? "text-primary" : ""}`}
-								>
-									{video.title}
+							<div className="p-2">
+								<h3 className="mt-2 line-clamp-2 text-sm font-semibold">
+									<SongTitle artist={song.artist} title={video.title ?? ""} />
 								</h3>
 								<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
 									<ArtistLinks song={song} />

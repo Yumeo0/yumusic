@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 
+export type TitleMode = "both" | "original" | "translation";
+
 export interface Settings {
 	romanizeLyrics: boolean;
 	discordRpc: boolean;
+	titleMode: TitleMode;
+	cleanTitles: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -10,6 +14,8 @@ const SETTINGS_EVENT = "yumusic:settings-changed";
 const DEFAULTS: Settings = {
 	romanizeLyrics: false,
 	discordRpc: false,
+	titleMode: "both",
+	cleanTitles: true,
 };
 
 export function getSettings(): Settings {

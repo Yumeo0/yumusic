@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongTitle } from "@/components/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { hiResThumb } from "@/lib/utils";
@@ -182,7 +183,7 @@ export function HomeFeed() {
 									</span>
 								</div>
 								<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
-									{song.title}
+									<SongTitle artist={song.artist} title={song.title} />
 								</h3>
 								<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
 									<ArtistLinks song={song} />

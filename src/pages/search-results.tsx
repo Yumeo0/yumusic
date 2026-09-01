@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
+import { SongTitle } from "@/components/song-title";
 import { Card } from "@/components/ui/card";
 import { getYoutubeClient } from "../lib/youtube-client";
 
@@ -94,7 +95,9 @@ export default function SearchResultsPage({ query }: SearchResultsPageProps) {
 							)}
 						</div>
 						<div className="p-4">
-							<h3 className="font-semibold line-clamp-2 mb-2">{video.title}</h3>
+							<h3 className="font-semibold line-clamp-2 mb-2">
+								<SongTitle title={video.title ?? ""} />
+							</h3>
 							{video.artists && video.artists.length > 0 && (
 								<div className="flex items-center gap-2 mb-1">
 									<p className="text-sm text-muted-foreground">

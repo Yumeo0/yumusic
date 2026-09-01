@@ -24,6 +24,7 @@ import { PlayerProvider, usePlayer } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
 import { usePinnedPlaylists } from "./lib/pinned";
 import { useSettings } from "./lib/settings";
+import { displayTitle } from "./lib/title";
 import { cn } from "./lib/utils";
 import {
 	getTrackMeta,
@@ -49,8 +50,13 @@ function DiscordPresenceSync() {
 	const [mediaDuration, setMediaDuration] = useState(0);
 
 	const songId = currentSong?.id;
-	const title = currentSong?.title ?? "";
 	const artist = currentSong?.artist ?? "";
+	const title = displayTitle(
+		currentSong?.title ?? "",
+		settings.titleMode,
+		settings.cleanTitles,
+		artist,
+	);
 	const cover = currentSong?.thumbnail ?? "";
 	const artistId =
 		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;

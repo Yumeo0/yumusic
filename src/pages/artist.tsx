@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongTitle } from "@/components/song-title";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -334,7 +335,7 @@ export default function ArtistPage() {
 												isCurrent && "text-primary",
 											)}
 										>
-											{song.title}
+											<SongTitle artist={song.artist} title={song.title} />
 										</h3>
 										<p className="truncate text-xs text-muted-foreground">
 											<ArtistLinks song={song} />
@@ -403,7 +404,7 @@ export default function ArtistPage() {
 									)}
 								</div>
 								<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
-									{item.title}
+									<SongTitle artist={item.song?.artist} title={item.title} />
 								</h3>
 								<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
 									{item.subtitle}

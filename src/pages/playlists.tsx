@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongTitle } from "@/components/song-title";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -280,7 +281,7 @@ export function PlaylistDetails() {
 							}}
 							type="button"
 						>
-							<Play className="size-4 translate-x-[1px] fill-current" />
+							<Play className="size-4 translate-x-px fill-current" />
 							Play all
 						</button>
 						<button
@@ -318,8 +319,8 @@ export function PlaylistDetails() {
 					return (
 						<button
 							className={cn(
-								"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05]",
-								isCurrent && "bg-primary/[0.08]",
+								"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
+								isCurrent && "bg-primary/8",
 							)}
 							key={song.id || `playlist-item-${index}`}
 							onClick={() => play(song, songs.slice(index + 1))}
@@ -362,7 +363,7 @@ export function PlaylistDetails() {
 										isCurrent && "text-primary",
 									)}
 								>
-									{song.title}
+									<SongTitle artist={song.artist} title={song.title} />
 								</h3>
 								<p className="truncate text-xs text-muted-foreground">
 									<ArtistLinks song={song} />

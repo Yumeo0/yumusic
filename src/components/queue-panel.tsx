@@ -1,4 +1,5 @@
 import { ListMusic, X } from "lucide-react";
+import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
 import { cn } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
@@ -98,7 +99,7 @@ export function QueuePanel({
 												isCurrent && "text-primary",
 											)}
 										>
-											{song.title}
+											<SongTitle artist={song.artist} title={song.title} />
 										</p>
 										<p className="truncate text-xs text-muted-foreground">
 											<ArtistLinks song={song} />
