@@ -233,7 +233,6 @@ export default function ArtistPage() {
 					<img
 						alt={artist.name}
 						className="size-40 shrink-0 rounded-full border border-foreground/10 object-cover sm:size-48"
-						crossOrigin="anonymous"
 						src={artist.thumbnail}
 					/>
 				) : (
@@ -322,7 +321,6 @@ export default function ArtistPage() {
 										<img
 											alt={song.title}
 											className="size-10 rounded-md border border-foreground/10 object-cover"
-											crossOrigin="anonymous"
 											loading="lazy"
 											src={song.thumbnail}
 										/>
@@ -385,7 +383,6 @@ export default function ArtistPage() {
 										<img
 											alt={item.title}
 											className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-											crossOrigin="anonymous"
 											loading="lazy"
 											src={item.thumbnail}
 										/>

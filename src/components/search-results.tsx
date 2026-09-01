@@ -115,7 +115,6 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 									<img
 										alt={video.title}
 										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-										crossOrigin="anonymous"
 										loading="lazy"
 										src={song.thumbnail}
 									/>

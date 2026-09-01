@@ -336,6 +336,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}
 	}, [isPlaying]);
 
+	// Mirror the element's real playback state back into React: OS/headset
+	// media keys pause the element directly, bypassing setIsPlaying — without
+	// this the UI shows "playing" while audio is paused and the play button
+	// needs two clicks to resume.
+	useEffect(() => {
+		const videoEl = videoElementRef.current;
+		if (!videoEl) return;
+		const sync = () => setIsPlaying(!videoEl.paused);
+		videoEl.addEventListener("play", sync);
+		videoEl.addEventListener("pause", sync);
+		return () => {
+			videoEl.removeEventListener("play", sync);
+			videoEl.removeEventListener("pause", sync);
+		};
+	}, []);
+
 	// Volume control - applied to the media element and persisted
 	useEffect(() => {
 		const videoEl = videoElementRef.current;

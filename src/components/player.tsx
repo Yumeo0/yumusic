@@ -69,7 +69,6 @@ export function Player() {
 							<img
 								alt={currentSong.title}
 								className="size-11 rounded-md border border-foreground/10 object-cover"
-								crossOrigin="anonymous"
 								key={currentSong.id}
 								src={currentSong.thumbnail}
 							/>

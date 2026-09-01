@@ -179,9 +179,10 @@ function loadImageElement(url: string): Promise<HTMLImageElement | null> {
 
 /**
  * Extracts the dominant ambient color with as little network traffic as
- * possible: an CORS-mode <img> load reuses the browser's HTTP cache entry
- * first. Falls back to a direct fetch, then to the app's Tauri proxy (which
- * bypasses CORS entirely) for CORS-hostile hosts. Returns null on any failure.
+ * possible: a CORS-mode <img> load reuses the browser's HTTP cache entry
+ * first. CORS-hostile hosts (e.g. i.ytimg.com/vi_webp sends no
+ * Access-Control-Allow-Origin) fall back to the app's Tauri proxy, which
+ * adds CORS headers itself. Returns null on any failure.
  */
 async function extractFromUrl(url: string): Promise<string | null> {
 	const element = await loadImageElement(url);
@@ -190,34 +191,26 @@ async function extractFromUrl(url: string): Promise<string | null> {
 			const color = extractDominantColor(element);
 			if (color) return color;
 		} catch {
-			// canvas unexpectedly tainted — fall through to the fetch attempts
+			// canvas unexpectedly tainted — fall through to the proxy fetch
 		}
 	}
 
-	const attempts: string[] = [url];
 	try {
 		const parsed = new URL(url);
 		const proxyUrl = new URL(
 			`${PROXY_ORIGIN}${parsed.pathname}${parsed.search}`,
 		);
 		proxyUrl.searchParams.set("__host", parsed.host);
-		attempts.push(proxyUrl.toString());
-	} catch {
-		// not a parseable URL — direct attempt only
-	}
-
-	for (const attempt of attempts) {
-		try {
-			const res = await fetch(attempt, { mode: "cors" });
-			if (!res.ok) continue;
+		const res = await fetch(proxyUrl.toString(), { mode: "cors" });
+		if (res.ok) {
 			const blob = await res.blob();
 			const bitmap = await createImageBitmap(blob);
 			const color = extractDominantColor(bitmap);
 			bitmap.close();
 			if (color) return color;
-		} catch {
-			// try the next strategy
 		}
+	} catch {
+		// proxy unreachable or unusable response
 	}
 	return null;
 }

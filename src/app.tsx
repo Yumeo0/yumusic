@@ -203,7 +203,6 @@ function AppShell({
 													<img
 														alt=""
 														className="size-5 shrink-0 rounded object-cover"
-														crossOrigin="anonymous"
 														src={playlist.thumbnail}
 													/>
 												) : (

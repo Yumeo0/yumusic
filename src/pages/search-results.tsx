@@ -84,7 +84,6 @@ export default function SearchResultsPage({ query }: SearchResultsPageProps) {
 							<img
 								alt={video.title}
 								className="w-full h-full object-cover"
-								crossOrigin="anonymous"
 								loading="lazy"
 								src={video.thumbnails[0]?.url}
 							/>
