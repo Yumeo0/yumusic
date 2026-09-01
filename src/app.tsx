@@ -25,7 +25,12 @@ import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
 import { usePinnedPlaylists } from "./lib/pinned";
 import { useSettings } from "./lib/settings";
-import { displayTitle, formatTitleParts, joinArtists } from "./lib/title";
+import {
+	cleanSearchTitle,
+	displayTitle,
+	formatTitleParts,
+	joinArtists,
+} from "./lib/title";
 import { cn } from "./lib/utils";
 import {
 	getTrackMeta,
@@ -164,6 +169,8 @@ function ListenBrainzSync() {
 	const scrobbledRef = useRef<string | null>(null);
 	const startedAtRef = useRef<number | null>(null);
 	const playingNowSentRef = useRef(false);
+	const playingNowTimerRef = useRef<number | null>(null);
+	const isPlayingRef = useRef(isPlaying);
 
 	/**
 	 * Scrobble metadata in the track's original language: the title without
@@ -195,6 +202,8 @@ function ListenBrainzSync() {
 			feats: parts.feats,
 		};
 	}, [currentSong, meta, settings.cleanTitles]);
+	const scrobbleMetadataRef = useRef(scrobbleMetadata);
+	scrobbleMetadataRef.current = scrobbleMetadata;
 
 	// Album name for the release metadata.
 	useEffect(() => {
@@ -210,14 +219,23 @@ function ListenBrainzSync() {
 		};
 	}, [enabled, songId]);
 
-	// New track — reset the scrobble state.
+	// New track — reset the scrobble state and cancel any pending
+	// playing-now submission, so skipping songs doesn't spam MusicBrainz.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: songId/enabled are intentional reset triggers
 	useEffect(() => {
 		elapsedRef.current = 0;
 		scrobbledRef.current = null;
 		startedAtRef.current = null;
 		playingNowSentRef.current = false;
+		if (playingNowTimerRef.current !== null) {
+			window.clearTimeout(playingNowTimerRef.current);
+			playingNowTimerRef.current = null;
+		}
 	}, [songId, enabled]);
+
+	useEffect(() => {
+		isPlayingRef.current = isPlaying;
+	}, [isPlaying]);
 
 	useEffect(() => {
 		if (!enabled || !songId || !isPlaying || !currentSong) return;
@@ -225,17 +243,42 @@ function ListenBrainzSync() {
 			startedAtRef.current = Math.floor(Date.now() / 1000);
 		}
 		if (playingNowSentRef.current) return;
-		playingNowSentRef.current = true;
-		const names = scrobbleMetadata();
-		submitListen({
-			token,
-			trackName: names.trackName,
-			artistName: names.artistName,
-			album: meta?.album?.name,
-		}).catch((error) => {
-			console.warn("[listenbrainz] playing_now failed:", error);
-		});
-	}, [enabled, songId, isPlaying, currentSong, token, meta, scrobbleMetadata]);
+		if (playingNowTimerRef.current !== null) return;
+		// Grace period: skipping songs within it cancels the submission.
+		playingNowTimerRef.current = window.setTimeout(() => {
+			playingNowTimerRef.current = null;
+			if (!isPlayingRef.current) return;
+			playingNowSentRef.current = true;
+			const names = scrobbleMetadataRef.current();
+			const videoEl = videoElementRef?.current ?? null;
+			const duration =
+				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+			// Resolve the recording MBID for the playing_now listen as well — it
+			// links the card and gives it cover art, and pre-warms the cache for
+			// the scrobble. Submits without MBIDs if the lookup fails.
+			const submit = async () => {
+				const mbids = await findRecording(
+					cleanSearchTitle(
+						meta?.originalTitle ?? names.mainTitle,
+						names.artistName,
+					),
+					names.artistName,
+					duration,
+					names.feats,
+				).catch(() => null);
+				await submitListen({
+					token,
+					trackName: names.trackName,
+					artistName: names.artistName,
+					album: meta?.album?.name,
+					mbids,
+				});
+			};
+			submit().catch((error) => {
+				console.warn("[listenbrainz] playing_now failed:", error);
+			});
+		}, 5000);
+	}, [enabled, songId, isPlaying, currentSong, token, meta, videoElementRef]);
 
 	// Listening-time accumulation + scrobble submission.
 	useEffect(() => {
@@ -258,7 +301,10 @@ function ListenBrainzSync() {
 			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
 			const submit = async () => {
 				const mbids = await findRecording(
-					meta?.originalTitle ?? names.mainTitle,
+					cleanSearchTitle(
+						meta?.originalTitle ?? names.mainTitle,
+						names.artistName,
+					),
 					names.artistName,
 					duration,
 					names.feats,

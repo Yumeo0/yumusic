@@ -104,6 +104,15 @@ export function displayTitle(
 	return feats.length > 0 ? `${main} (feat. ${joinArtists(feats)})` : main;
 }
 
+/**
+ * Prepares a title for external search (MusicBrainz): runs the full original-
+ * mode pipeline — noise/decoration cleanup, artist prefix, feat tail, dual-
+ * title resolution — so the query carries only the original song name.
+ */
+export function cleanSearchTitle(title: string, artist?: string): string {
+	return formatTitleParts(title, "original", true, artist).main;
+}
+
 function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

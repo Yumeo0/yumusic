@@ -123,8 +123,8 @@ export default function SettingsPage() {
 							<p className="text-sm font-medium">Original artist names</p>
 							<p className="mt-0.5 text-xs text-muted-foreground">
 								Show artists under their original-language name, e.g.
-								"猫又おかゆ" instead of "Nekomata Okayu". Each artist
-								name is looked up once and cached.
+								"猫又おかゆ" instead of "Nekomata Okayu". Each artist name is
+								looked up once and cached.
 							</p>
 						</div>
 						<button
