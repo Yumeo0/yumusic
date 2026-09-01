@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { useArtistName } from "@/lib/artist-names";
 import { cn } from "@/lib/utils";
 
 interface ArtistLinkProps {
@@ -44,6 +45,20 @@ export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 	);
 }
 
+/** Artist name that upgrades to the original-language form in that mode. */
+function ResolvedArtistLink({
+	id,
+	name,
+	className,
+}: {
+	id?: string;
+	name: string;
+	className?: string;
+}) {
+	const displayName = useArtistName(name, id);
+	return <ArtistLink className={className} id={id} name={displayName} />;
+}
+
 /** Renders every artist of a song as its own clickable link. */
 export function ArtistLinks({
 	song,
@@ -56,7 +71,11 @@ export function ArtistLinks({
 
 	if (list.length === 0) {
 		return (
-			<ArtistLink className={className} id={song.artistId} name={song.artist} />
+			<ResolvedArtistLink
+				className={className}
+				id={song.artistId}
+				name={song.artist}
+			/>
 		);
 	}
 
@@ -67,7 +86,7 @@ export function ArtistLinks({
 					// biome-ignore lint/suspicious/noArrayIndexKey: artists may repeat names
 					key={`${a.id ?? "na"}-${a.name}-${i}`}
 				>
-					<ArtistLink className={className} id={a.id} name={a.name} />
+					<ResolvedArtistLink className={className} id={a.id} name={a.name} />
 					{i < list.length - 1 ? ", " : ""}
 				</span>
 			))}

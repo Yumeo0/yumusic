@@ -7,6 +7,10 @@ export interface Settings {
 	discordRpc: boolean;
 	titleMode: TitleMode;
 	cleanTitles: boolean;
+	listenbrainz: boolean;
+	listenbrainzToken: string;
+	/** Original-language artist names (fetched per artist, cached). */
+	originalArtists: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -16,6 +20,9 @@ const DEFAULTS: Settings = {
 	discordRpc: false,
 	titleMode: "both",
 	cleanTitles: true,
+	listenbrainz: false,
+	listenbrainzToken: "",
+	originalArtists: false,
 };
 
 export function getSettings(): Settings {

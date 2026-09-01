@@ -14,6 +14,7 @@ import { SongTitle } from "@/components/song-title";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { useArtistName } from "@/lib/artist-names";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistListOf, artistNames } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
@@ -160,6 +161,7 @@ export default function ArtistPage() {
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const artistName = useArtistName(artist?.name, id ?? undefined);
 
 	const fetchArtist = async (force = false) => {
 		if (!id) return;
@@ -243,7 +245,7 @@ export default function ArtistPage() {
 				)}
 				<div className="min-w-0 pb-1">
 					<h1 className="truncate text-3xl font-bold tracking-tight sm:text-4xl">
-						{artist.name}
+						{artistName || artist.name}
 					</h1>
 					{artist.description && (
 						<p className="mt-2 line-clamp-2 max-w-xl text-sm text-muted-foreground">

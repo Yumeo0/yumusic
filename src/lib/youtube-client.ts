@@ -263,20 +263,36 @@ export async function getSongStream(videoId: string) {
 export interface TrackMeta {
 	album?: { name: string; id?: string };
 	artists: { name: string; id?: string }[];
+	/** Track title in the original language (queue fetched with hl=ja). */
+	originalTitle?: string;
+	/** Primary artist credit in the original language. */
+	originalArtist?: string;
 }
 
 /**
  * Album and artist metadata for a track, taken from the selected entry of
- * the "Up next" queue. Used for Discord rich presence; failures resolve to
- * null so the presence still works without album data.
+ * the "Up next" queue. The queue is additionally fetched localized to
+ * Japanese so scrobbles can carry the untranslated title and artist credit;
+ * failures resolve to null so callers keep working without it.
  */
 export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	try {
 		const client = await getYoutubeClient();
-		const info = await client.music.getInfo(videoId);
-		const panel = await info.getUpNext(false);
+		// Temporarily switch the session locale: the ja queue carries the
+		// original-language title and artist credits.
+		const clientContext = client.session.context.client as { hl?: string };
+		const previousHl = clientContext.hl;
+		const queue = await (async () => {
+			try {
+				clientContext.hl = "ja";
+				const info = await client.music.getInfo(videoId);
+				return await info.getUpNext(false);
+			} finally {
+				clientContext.hl = previousHl;
+			}
+		})();
 		const videos: YTNodes.PlaylistPanelVideo[] = [];
-		for (const item of panel.contents) {
+		for (const item of queue.contents) {
 			if (item.is(YTNodes.PlaylistPanelVideo)) {
 				videos.push(item);
 			} else if (item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary) {
@@ -299,6 +315,8 @@ export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 						? artist.channel_id
 						: undefined,
 				})),
+			originalTitle: current.title?.toString() || undefined,
+			originalArtist: current.artists?.[0]?.name || undefined,
 		};
 	} catch (error) {
 		console.warn("[YuMusic] failed to load track metadata:", error);

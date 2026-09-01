@@ -7,7 +7,7 @@ import {
 	SettingsIcon,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
 	HashRouter,
@@ -22,9 +22,10 @@ import { QueuePanel } from "./components/queue-panel";
 import { UserMenu } from "./components/user-menu";
 import { PlayerProvider, usePlayer } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
+import { findRecording, submitListen } from "./lib/listenbrainz";
 import { usePinnedPlaylists } from "./lib/pinned";
 import { useSettings } from "./lib/settings";
-import { displayTitle } from "./lib/title";
+import { displayTitle, formatTitleParts, joinArtists } from "./lib/title";
 import { cn } from "./lib/utils";
 import {
 	getTrackMeta,
@@ -140,6 +141,152 @@ function DiscordPresenceSync() {
 			invoke("clear_discord_activity").catch(() => undefined);
 		}
 	}, [discordEnabled]);
+
+	return null;
+}
+
+/**
+ * Scrobbles finished plays to ListenBrainz: a "playing now" listen when
+ * playback starts and a single listen (with the MusicBrainz recording MBID,
+ * looked up once per track and cached) once half the song — max 4 minutes —
+ * has actually been listened to.
+ */
+function ListenBrainzSync() {
+	const { currentSong, isPlaying, videoElementRef } = usePlayer();
+	const [settings] = useSettings();
+	const [meta, setMeta] = useState<TrackMeta | null>(null);
+
+	const songId = currentSong?.id;
+	const token = settings.listenbrainzToken.trim();
+	const enabled = settings.listenbrainz && token.length > 0;
+
+	const elapsedRef = useRef(0);
+	const scrobbledRef = useRef<string | null>(null);
+	const startedAtRef = useRef<number | null>(null);
+	const playingNowSentRef = useRef(false);
+
+	/**
+	 * Scrobble metadata in the track's original language: the title without
+	 * its translated part and the primary artist credit (both from the
+	 * original-language queue fetch when available).
+	 */
+	const scrobbleMetadata = useCallback((): {
+		trackName: string;
+		artistName: string;
+		mainTitle: string;
+		feats: string[];
+	} => {
+		const parts = formatTitleParts(
+			currentSong?.title ?? "",
+			"original",
+			settings.cleanTitles,
+			currentSong?.artist,
+		);
+		const trackName =
+			meta?.originalTitle ??
+			(parts.feats.length > 0
+				? `${parts.main} (feat. ${joinArtists(parts.feats)})`
+				: parts.main);
+		const artistName = meta?.originalArtist ?? currentSong?.artist ?? "";
+		return {
+			trackName,
+			artistName,
+			mainTitle: parts.main,
+			feats: parts.feats,
+		};
+	}, [currentSong, meta, settings.cleanTitles]);
+
+	// Album name for the release metadata.
+	useEffect(() => {
+		let cancelled = false;
+		setMeta(null);
+		if (enabled && songId) {
+			getTrackMeta(songId).then((next) => {
+				if (!cancelled) setMeta(next);
+			});
+		}
+		return () => {
+			cancelled = true;
+		};
+	}, [enabled, songId]);
+
+	// New track — reset the scrobble state.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: songId/enabled are intentional reset triggers
+	useEffect(() => {
+		elapsedRef.current = 0;
+		scrobbledRef.current = null;
+		startedAtRef.current = null;
+		playingNowSentRef.current = false;
+	}, [songId, enabled]);
+
+	useEffect(() => {
+		if (!enabled || !songId || !isPlaying || !currentSong) return;
+		if (startedAtRef.current === null) {
+			startedAtRef.current = Math.floor(Date.now() / 1000);
+		}
+		if (playingNowSentRef.current) return;
+		playingNowSentRef.current = true;
+		const names = scrobbleMetadata();
+		submitListen({
+			token,
+			trackName: names.trackName,
+			artistName: names.artistName,
+			album: meta?.album?.name,
+		}).catch((error) => {
+			console.warn("[listenbrainz] playing_now failed:", error);
+		});
+	}, [enabled, songId, isPlaying, currentSong, token, meta, scrobbleMetadata]);
+
+	// Listening-time accumulation + scrobble submission.
+	useEffect(() => {
+		if (!enabled) return;
+		const timer = window.setInterval(() => {
+			if (!isPlaying || !currentSong || !songId) return;
+			if (scrobbledRef.current === songId) return;
+			elapsedRef.current += 1;
+			const videoEl = videoElementRef?.current ?? null;
+			const duration =
+				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+			// Classic rule: half the track or 4 minutes, whichever first.
+			const threshold = Math.max(
+				30,
+				Math.min(duration > 0 ? duration * 0.5 : 240, 240),
+			);
+			if (elapsedRef.current < threshold) return;
+			scrobbledRef.current = songId;
+			const names = scrobbleMetadata();
+			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
+			const submit = async () => {
+				const mbids = await findRecording(
+					meta?.originalTitle ?? names.mainTitle,
+					names.artistName,
+					duration,
+					names.feats,
+				).catch(() => null);
+				await submitListen({
+					token,
+					trackName: names.trackName,
+					artistName: names.artistName,
+					album: meta?.album?.name,
+					mbids,
+					listenedAt,
+				});
+			};
+			submit().catch((error) => {
+				console.warn("[listenbrainz] scrobble failed:", error);
+			});
+		}, 1000);
+		return () => window.clearInterval(timer);
+	}, [
+		enabled,
+		isPlaying,
+		currentSong,
+		songId,
+		token,
+		meta,
+		scrobbleMetadata,
+		videoElementRef,
+	]);
 
 	return null;
 }
@@ -267,6 +414,7 @@ function AppShell({
 		<>
 			<AmbientSync />
 			<DiscordPresenceSync />
+			<ListenBrainzSync />
 			<div className="h-screen flex bg-background text-foreground overflow-hidden">
 				{/* ── Sidebar ─────────────────────────────────── */}
 				<aside className="flex w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar">
