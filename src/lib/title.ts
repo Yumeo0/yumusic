@@ -88,6 +88,7 @@ export function formatTitleParts(
 		title = extracted.title;
 		title = cleanUpTitle(title);
 		title = stripArtistPrefix(title, artist, credits);
+		title = stripArtistSuffix(title, artist);
 	}
 	const { main, feats } = splitFeaturedTitle(title);
 	return { main: applyMode(main, mode), feats, credits };
@@ -165,6 +166,50 @@ export function stripArtistPrefix(
 	return out === "" ? title : out;
 }
 
+/** Folds a name for fuzzy comparison: lowercase, no spaces or punctuation. */
+function foldName(text: string): string {
+	return text.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+/**
+ * Strips a trailing artist credit that mirrors the track's artist —
+ * "もぐもぐYUMMY！ - 猫又おかゆ" or "… (Nerissa Ravencroft)" when the
+ * artist is 猫又おかゆ / Nerissa Ravencroft. Only strips when a non-empty
+ * title remains, so "Artist - Song" pairs handled by stripArtistPrefix are
+ * untouched.
+ */
+export function stripArtistSuffix(title: string, artist?: string): string {
+	const primary = artist?.trim();
+	if (!primary || primary.length > 60) return title;
+	const target = foldName(primary);
+	if (target.length < 2) return title;
+	const matches = (segment: string) => {
+		const folded = foldName(segment);
+		if (folded.length < 2) return false;
+		return (
+			folded === target || folded.includes(target) || target.includes(folded)
+		);
+	};
+
+	// "(<artist>)" / "【<artist>】" tail.
+	const bracket = title.match(
+		/\s*([（(【[])([^（）()【】[\]]{1,80})([）)】\]])\s*$/u,
+	);
+	if (bracket && matches(bracket[2])) {
+		const head = title.slice(0, bracket.index ?? 0).trim();
+		if (head) return head;
+	}
+	// " - <artist>" / "/ <artist>" / "／<artist>" tail.
+	const separated = title.match(
+		/\s*(?:[-–—]\s*|\s*\/\s*|／)([^-–—／/]{1,80})$/u,
+	);
+	if (separated && matches(separated[1])) {
+		const head = title.slice(0, separated.index ?? 0).trim();
+		if (head) return head;
+	}
+	return title;
+}
+
 /**
  * Noise YouTube/labels append to titles, stripped when title cleanup is
  * enabled. Regex entries are removed; object entries are rewritten to their
@@ -227,6 +272,9 @@ const TITLE_NOISE: NoiseRule[] = [
 			String.raw`\s*$`,
 		"i",
 	),
+	// "デーモンロード/ Kanaria 【オリジナルMV】cover" → bare trailing word,
+	// only right after a CJK bracket/script so "Take Cover" survives
+	/(?<=[)）\]】』」》〉≫]|\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana})\s*\bcover(?:ed|s)?\s*$/iu,
 	// 'Lumiose City (From "Pokémon X & Y")' → "Lumiose City"
 	new RegExp(
 		String.raw`\s*` +
@@ -238,17 +286,25 @@ const TITLE_NOISE: NoiseRule[] = [
 	),
 ];
 
-/** Strips known noise from the end of a title; never empties it. */
+/**
+ * Strips known noise from the end of a title; never empties it. The rules
+ * are applied to a fixpoint so patterns revealed by an earlier peel (e.g.
+ * "(Cover)" after a trailing 【channel】 bracket) are also removed.
+ */
 export function cleanUpTitle(title: string): string {
 	let out = title;
-	for (const rule of TITLE_NOISE) {
-		out =
-			typeof rule === "object" && "replacement" in rule
-				? out.replace(rule.pattern, rule.replacement)
-				: out.replace(rule, "");
+	for (;;) {
+		const before = out;
+		for (const rule of TITLE_NOISE) {
+			out =
+				typeof rule === "object" && "replacement" in rule
+					? out.replace(rule.pattern, rule.replacement)
+					: out.replace(rule, "");
+		}
+		out = stripDecorations(out);
+		out = stripCreditTail(out);
+		if (out === before) break;
 	}
-	out = stripDecorations(out);
-	out = stripCreditTail(out);
 	return out.trim() === "" ? title : out.trim();
 }
 
@@ -257,17 +313,39 @@ export function cleanUpTitle(title: string): string {
  * " / "/"／" separator followed by a same-script segment is an
  * uploader/artist credit. Translation-style pairs ("夜駆け / Night Run") and
  * version tags are left for the dual-title mode; multiple separators suggest
- * a medley and are kept.
+ * a medley and are kept. Glued-slash credits ("ラッシャイナ/柊マグネタイト",
+ * "デーモンロード/ Kanaria") are handled separately: the right side must be
+ * a single short token, which translation halves rarely are.
  */
 function stripCreditTail(title: string): string {
 	const idx = Math.max(title.lastIndexOf(" / "), title.lastIndexOf("／"));
-	if (idx <= 0) return title;
-	const separator = title.startsWith("／", idx) ? "／" : " / ";
-	if (title.indexOf(separator) !== idx) return title;
-	const left = title.slice(0, idx).trim();
-	const right = title.slice(idx + separator.length).trim();
-	if (!left || !right || right.length > 60) return title;
-	if (LATIN_ONLY.test(right)) return title;
+	if (idx > 0) {
+		const separator = title.startsWith("／", idx) ? "／" : " / ";
+		if (title.indexOf(separator) !== idx) return title;
+		const left = title.slice(0, idx).trim();
+		const right = title.slice(idx + separator.length).trim();
+		if (!left || !right || right.length > 60) return title;
+		if (LATIN_ONLY.test(right)) return title;
+		if (
+			/\b(?:ver|version|remix|full|short|inst|instrumental|off\s+vocal)\b/i.test(
+				right,
+			)
+		) {
+			return title;
+		}
+		return left;
+	}
+	return stripGluedSlashCredit(title);
+}
+
+/** "ラッシャイナ/柊マグネタイト" → "ラッシャイナ" (glued-slash credit). */
+function stripGluedSlashCredit(title: string): string {
+	const idx = title.lastIndexOf("/");
+	if (idx <= 0 || title.indexOf("/") !== idx) return title;
+	const left = title.slice(0, idx).trimEnd();
+	const right = title.slice(idx + 1).trim();
+	if (!left || left.length < 3 || !right) return title;
+	if (right.length > 60 || /\s/.test(right)) return title;
 	if (
 		/\b(?:ver|version|remix|full|short|inst|instrumental|off\s+vocal)\b/i.test(
 			right,
@@ -300,11 +378,33 @@ const VIDEO_MARKER_TAIL =
 	/(?<=[\s)）\]】』〉」\-–—/|｜·・]|^)\s*(?:M\/V|MV|Music\s+Video|Official\s+(?:Music\s+)?Video)\s*$/i;
 const SEPARATOR_TAIL = /\s*[-–—/|｜·・]\s*$/;
 
+/** Leading decorative tag brackets carrying video/cover keywords. */
+const LEADING_TAG_BRACKET =
+	/^\s*([【『「《〈≪])([^【』「」《》〈〉≪≫]{1,40})([】』」》〉≫])/u;
+const LEADING_TAG_KEYWORD =
+	/(?:\b(?:mv|m\/v|pv|official|cover(?:ed)?|original|music\s+video|lyrics?)\b|[歌弾踊叩]ってみた|オリジナル|リリック)/i;
+
+/** Trailing plain paren group, e.g. "(Official Video)". */
+const QUALIFIER_PAREN_TAIL = /\s*[(（]([^()（）[\]【】]{1,80})[）)]\s*$/u;
+const QUALIFIER_TOKEN =
+	/^(?:official|music|video|mv|m\/v|pv|mashup|edm|lyrics?|visualizer|amv)$/i;
+
+/** Every space-separated token of the group is video/qualifier noise. */
+function isQualifierRun(content: string): boolean {
+	const tokens = content
+		.trim()
+		.split(/[\s/・,，]+/)
+		.filter(Boolean);
+	return tokens.length > 0 && tokens.every((t) => QUALIFIER_TOKEN.test(t));
+}
+
 /**
  * Peels decoration layers off the title end, e.g.
  * "失楽園 - Paradise Lost -『 失楽園 』MV【 #VocaDuo2026 】" →
  * "失楽園 - Paradise Lost". Strips hashtags, video markers and decorative
- * bracket pairs, then dangling separators.
+ * bracket pairs, then dangling separators. Also drops leading tag brackets
+ * ("【MV】怪物…" → "怪物…") and trailing qualifier parens
+ * ("Idols (EDM Mashup) (Official Video)" → "Idols").
  */
 function stripDecorations(title: string): string {
 	let out = title.replace(HASHTAG_TAIL, "");
@@ -312,6 +412,12 @@ function stripDecorations(title: string): string {
 		const next = out
 			.replace(VIDEO_MARKER_TAIL, "")
 			.replace(TAG_TAIL, "")
+			.replace(LEADING_TAG_BRACKET, (match, _open, content: string) =>
+				LEADING_TAG_KEYWORD.test(content) ? "" : match,
+			)
+			.replace(QUALIFIER_PAREN_TAIL, (match, content: string) =>
+				isQualifierRun(content) ? "" : match,
+			)
 			.trimEnd();
 		if (next === out) break;
 		out = next;
@@ -356,8 +462,9 @@ export interface TitleCredit {
 }
 
 const TAG_PATTERNS: Record<TitleTag, RegExp> = {
-	cover: /\bcover(?:ed|s)?\b/i,
-	remix: /\bremix(?:es|ed)?\b|\brmx\b/i,
+	// 歌ってみた (and 弾/踊/叩ってみた) = "tried singing/playing/dancing" covers.
+	cover: /\bcover(?:ed|s)?\b|[歌弾踊叩]ってみた/i,
+	remix: /\bremix(?:es|ed)?\b|\brmx\b|\bbootleg\b/i,
 	edit: /\bedit(?:ed)?\b/i,
 };
 

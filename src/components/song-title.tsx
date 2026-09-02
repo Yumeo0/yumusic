@@ -6,8 +6,8 @@ import {
 } from "@/lib/title";
 
 const GENERIC_TAG_PATTERNS: Record<string, RegExp> = {
-	cover: /\bcover(?:ed|s)?\b/i,
-	remix: /\bremix(?:es|ed)?\b|\brmx\b/i,
+	cover: /\bcover(?:ed|s)?\b|[歌弾踊叩]ってみた/i,
+	remix: /\bremix(?:es|ed)?\b|\brmx\b|\bbootleg\b/i,
 };
 
 const TAG_LABELS: Record<TitleTag, string> = {
