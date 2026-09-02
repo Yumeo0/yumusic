@@ -5,13 +5,16 @@ import {
 	Pin,
 	Play,
 	RefreshCw,
+	Search,
 	Shuffle,
+	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
 import { SongTitle } from "@/components/song-title";
+import { Input } from "@/components/ui/input";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -117,6 +120,7 @@ export function PlaylistDetails() {
 	const [loading, setLoading] = useState(true);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [search, setSearch] = useState("");
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -190,6 +194,7 @@ export function PlaylistDetails() {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylist changes on every re-render and should not be used as a hook dependency.
 	useEffect(() => {
 		fetchPlaylist();
+		setSearch("");
 	}, [id]);
 
 	const onBack = () => navigate("/playlists");
@@ -228,6 +233,22 @@ export function PlaylistDetails() {
 	const { songs } = playlist;
 	const showCount =
 		songs.length > 0 && !/\d+\s+songs?\b/i.test(playlist.subtitle);
+
+	// Search filter — matches titles and artist names, keeps the original
+	// playlist position for numbering while queuing the visible songs.
+	const query = search.trim().toLowerCase();
+	const visible = songs
+		.map((song, index) => ({ song, index }))
+		.filter(({ song }) => {
+			if (!query) return true;
+			return [
+				song.title,
+				song.artist,
+				...(song.artists ?? []).map((a) => a.name),
+			]
+				.filter(Boolean)
+				.some((text) => text.toLowerCase().includes(query));
+		});
 
 	return (
 		<div className="mx-auto w-full max-w-5xl px-6 pt-10 sm:px-10">
@@ -305,6 +326,29 @@ export function PlaylistDetails() {
 				</div>
 			</header>
 
+			{/* Search */}
+			{songs.length > 0 && (
+				<div className="relative mt-6 max-w-sm">
+					<Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+					<Input
+						className="h-9 pr-8 pl-9"
+						onChange={(event) => setSearch(event.target.value)}
+						placeholder="Search in playlist"
+						value={search}
+					/>
+					{search && (
+						<button
+							aria-label="Clear search"
+							className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+							onClick={() => setSearch("")}
+							type="button"
+						>
+							<X className="size-4" />
+						</button>
+					)}
+				</div>
+			)}
+
 			{/* Tracklist */}
 			<div className="mt-8 space-y-0.5 pb-4">
 				{loadingMore && (
@@ -313,7 +357,7 @@ export function PlaylistDetails() {
 						Loading more…
 					</p>
 				)}
-				{songs.map((song, index) => {
+				{visible.map(({ song, index }) => {
 					const isCurrent = currentSong?.id === song.id;
 
 					return (
@@ -323,7 +367,14 @@ export function PlaylistDetails() {
 								isCurrent && "bg-primary/8",
 							)}
 							key={song.id || `playlist-item-${index}`}
-							onClick={() => play(song, songs.slice(index + 1))}
+							onClick={() =>
+								play(
+									song,
+									visible
+										.slice(visible.findIndex((v) => v.index === index) + 1)
+										.map((v) => v.song),
+								)
+							}
 							type="button"
 						>
 							{/* Index / play / EQ */}
@@ -377,6 +428,11 @@ export function PlaylistDetails() {
 						</button>
 					);
 				})}
+				{visible.length === 0 && search.trim() && songs.length > 0 && (
+					<p className="py-10 text-sm text-muted-foreground">
+						No tracks match "{search.trim()}".
+					</p>
+				)}
 				{songs.length === 0 && (
 					<p className="py-10 text-sm text-muted-foreground">
 						This playlist is empty.
