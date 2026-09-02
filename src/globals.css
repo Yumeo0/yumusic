@@ -146,9 +146,13 @@
 @layer base {
 	* {
 		@apply border-border outline-ring/50;
+		/* No grey flash boxes around taps on touch devices */
+		-webkit-tap-highlight-color: transparent;
 	}
 	html {
 		background: var(--background);
+		/* Keep zoomed-out text legible after orientation changes */
+		-webkit-text-size-adjust: 100%;
 	}
 	body {
 		@apply bg-background text-foreground font-sans antialiased;
@@ -177,6 +181,13 @@
 }
 
 /* ─── Utilities ────────────────────────────────────────────────── */
+
+/* Full app height: dynamic viewport height where supported (mobile
+   system UI), falling back to plain viewport height on older WebViews */
+@utility h-app {
+	height: 100vh;
+	height: 100dvh;
+}
 
 /* Vertical fade mask (lyrics panel) */
 @utility fade-mask-y {

@@ -32,7 +32,7 @@ export function Titlebar() {
 
 	return (
 		<div
-			className="relative z-[70] flex h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none"
+			className="relative z-[70] hidden h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none md:flex"
 			data-tauri-drag-region
 		>
 			<div className="pointer-events-none flex items-center gap-2 pl-1">

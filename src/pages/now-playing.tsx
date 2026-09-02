@@ -1,12 +1,14 @@
 import {
 	ChevronDown,
 	ListMusic,
+	MicVocal,
 	Music2,
 	Pause,
 	Play,
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
+import { useRef, useState } from "react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
 import { SongTitle } from "@/components/song-title";
@@ -44,6 +46,23 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 		videoElementRef,
 	} = usePlayer();
 
+	// Mobile: lyrics are opt-in via the transport toggle. Desktop always
+	// shows the lyrics column — the state only affects max-md classes.
+	const [showLyrics, setShowLyrics] = useState(false);
+
+	// Swipe up on the artwork opens the queue (mobile).
+	const swipeStartY = useRef<number | null>(null);
+	const handleSwipeStart = (event: React.TouchEvent) => {
+		swipeStartY.current = event.touches[0]?.clientY ?? null;
+	};
+	const handleSwipeEnd = (event: React.TouchEvent) => {
+		if (swipeStartY.current === null) return;
+		const deltaY =
+			(event.changedTouches[0]?.clientY ?? 0) - swipeStartY.current;
+		swipeStartY.current = null;
+		if (deltaY < -60 && !isQueueOpen) toggleQueue();
+	};
+
 	const { currentTime, duration } = useMediaTime(
 		videoElementRef,
 		currentSong?.id,
@@ -60,7 +79,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 	};
 
 	return (
-		<div className="relative flex h-screen flex-col overflow-hidden bg-background">
+		<div className="relative flex h-full flex-col overflow-hidden bg-background">
 			{/* Blurred cover as the backdrop, re-fading on track change */}
 			{currentSong.thumbnail && (
 				<div
@@ -77,12 +96,13 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 				</div>
 			)}
 
-			{/* Top-right actions: queue + close */}
-			<div className="absolute top-12 right-6 z-20 flex items-center gap-2">
+			{/* Top-right actions: queue (desktop — mobile swipes the artwork
+			    up instead) + close */}
+			<div className="absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,env(safe-area-inset-top))] max-md:right-4 flex items-center gap-2">
 				<button
 					aria-label="Toggle queue"
 					className={cn(
-						"grid size-9 place-items-center rounded-full transition-colors duration-200",
+						"grid size-9 place-items-center rounded-full transition-colors duration-200 max-md:hidden",
 						isQueueOpen
 							? "bg-primary/15 text-primary"
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -103,10 +123,21 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 				</button>
 			</div>
 
-			{/* Body: lyrics left · art + controls right */}
-			<main className="relative z-10 grid min-h-0 flex-1 gap-10 px-6 pt-14 pb-8 sm:px-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:gap-14">
+			{/* Body: art + controls first, two columns from md up. On mobile
+			    lyrics are hidden until toggled — they then take the upper
+			    part of the screen while the artwork block shrinks below.
+			    Fixed heights keep the cover and controls from shifting when
+			    lyrics load or scroll. */}
+			<main className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 px-6 pt-14 pb-8 max-md:pt-[max(3.5rem,env(safe-area-inset-top))] sm:px-10 md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:gap-6 lg:gap-14">
 				{/* Lyrics */}
-				<section className="flex min-h-0 flex-col">
+				<section
+					className={cn(
+						"flex min-h-0 flex-col md:order-1 md:h-auto md:min-h-0",
+						showLyrics
+							? "order-1 max-md:h-auto max-md:flex-1"
+							: "order-2 h-36 shrink-0 max-md:hidden",
+					)}
+				>
 					<LyricsPanel
 						artist={currentSong.artist}
 						className="mx-auto w-full max-w-xl"
@@ -124,9 +155,18 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 				</section>
 
 				{/* Artwork + controls */}
-				<section className="flex min-h-0 flex-col items-center justify-center gap-6">
-					{/* Artwork */}
-					<div className="group relative">
+				<section
+					className={cn(
+						"order-1 flex min-h-0 flex-1 flex-col items-center justify-center gap-4 max-md:overflow-hidden md:order-2 md:gap-6",
+						showLyrics && "max-md:flex-none",
+					)}
+				>
+					{/* Artwork — swipe up opens the queue (mobile) */}
+					<div
+						className="group relative touch-none"
+						onTouchEnd={handleSwipeEnd}
+						onTouchStart={handleSwipeStart}
+					>
 						<div
 							aria-hidden
 							className="absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl"
@@ -134,12 +174,24 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 						{currentSong.thumbnail ? (
 							<img
 								alt={currentSong.title}
-								className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
+								className={cn(
+									"animate-track-in relative aspect-square rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)] md:w-[min(40vh,320px)]",
+									showLyrics
+										? "max-md:w-[min(20vh,160px)]"
+										: "max-md:w-[min(34vh,280px)]",
+								)}
 								key={`art-${currentSong.id}`}
 								src={proxiedImageUrl(currentSong.thumbnail)}
 							/>
 						) : (
-							<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
+							<div
+								className={cn(
+									"relative grid aspect-square place-items-center rounded-2xl border border-foreground/10 bg-card md:w-[min(40vh,320px)]",
+									showLyrics
+										? "max-md:w-[min(20vh,160px)]"
+										: "max-md:w-[min(34vh,280px)]",
+								)}
+							>
 								<Music2 className="size-14 text-muted-foreground" />
 							</div>
 						)}
@@ -208,17 +260,35 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 								<SkipForward className="size-5.5 fill-current" />
 							</button>
 						</div>
-						{/* Volume — expands leftward on hover, anchored to the right edge */}
+						{/* Lyrics toggle — mobile only, mirrors the desktop volume's
+					    anchored position so the transport stays centered */}
+						<button
+							aria-label="Toggle lyrics"
+							className={cn(
+								"absolute top-1/2 left-0 grid size-11 -translate-y-1/2 place-items-center rounded-full transition-colors duration-200 md:hidden",
+								showLyrics
+									? "bg-primary/15 text-primary"
+									: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
+							)}
+							onClick={() => setShowLyrics((value) => !value)}
+							title="Lyrics"
+							type="button"
+						>
+							<MicVocal className="size-5" />
+						</button>
+						{/* Volume — expands leftward on hover, anchored to the right edge.
+					    Hidden on touch devices: the hardware volume keys apply. */}
 						<VolumeControl
-							className="absolute top-1/2 right-0 -translate-y-1/2"
+							className="absolute top-1/2 right-0 -translate-y-1/2 max-md:hidden"
 							reverse
 						/>
 					</div>
 
 					{/* Up next — the next card plus ~3 more tucked underneath it
-					    (whole cards, only their top edges peeking). On hover they
-					    slide down into the reserved space, so nothing else moves. */}
-					<div className="w-full max-w-md">
+				    (whole cards, only their top edges peeking). On hover they
+				    slide down into the reserved space, so nothing else moves.
+				    Hover-only affordance — phones use the queue sheet instead. */}
+					<div className="w-full max-w-md max-lg:hidden">
 						<div className="mb-1.5 flex items-baseline justify-between">
 							<p className="text-xs font-medium text-muted-foreground">
 								Up next

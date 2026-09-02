@@ -24,7 +24,7 @@ export default function HomePage() {
 	return (
 		<div
 			className={cn(
-				"mx-auto flex w-full flex-col px-6 pt-28 sm:px-8",
+				"mx-auto flex w-full flex-col px-6 pt-6 sm:px-8 sm:pt-10",
 				query ? "max-w-3xl" : "max-w-5xl",
 			)}
 		>

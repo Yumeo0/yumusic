@@ -47,7 +47,7 @@ export function Player() {
 
 	return (
 		<footer
-			className="fixed inset-x-0 bottom-0 z-40 cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
+			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+env(safe-area-inset-bottom))] cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			onClick={toggleNowPlaying}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
@@ -55,7 +55,7 @@ export function Player() {
 				<ProgressBar onSeek={handleSeek} progress={progress} />
 			</div>
 
-			<div className="grid h-[68px] grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 sm:px-5">
+			<div className="grid h-[68px] grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5">
 				{/* Track identity — click to open fullscreen */}
 				<button
 					className="group flex min-w-0 items-center gap-3 text-left"
@@ -146,8 +146,9 @@ export function Player() {
 					</button>
 				</div>
 
-				{/* Timecodes + queue + volume */}
-				<div className="flex items-center justify-end gap-3">
+				{/* Timecodes + queue + volume (desktop only — phones use the
+			    now-playing screen, where volume follows the hardware keys) */}
+				<div className="flex items-center justify-end gap-3 max-md:hidden">
 					<span className="font-mono text-xs text-muted-foreground tabular-nums">
 						<span className="text-foreground/80">
 							{formatTime(currentTime)}

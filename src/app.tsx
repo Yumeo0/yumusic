@@ -464,9 +464,9 @@ function AppShell({
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
 			<Titlebar />
-			<div className="h-[calc(100vh-2.25rem)] flex bg-background text-foreground overflow-hidden">
-				{/* ── Sidebar ─────────────────────────────────── */}
-				<aside className="flex w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar">
+			<div className="flex max-md:h-app bg-background text-foreground md:h-[calc(100vh-2.25rem)] overflow-hidden">
+				{/* ── Sidebar (desktop) ───────────────────────── */}
+				<aside className="hidden w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div className="flex min-h-0 flex-1 flex-col px-4 pt-8">
 						<nav className="space-y-1">
 							<SidebarItem
@@ -561,7 +561,8 @@ function AppShell({
 				{/* ── Main content ────────────────────────────── */}
 				<main className="relative flex-1 overflow-hidden">
 					<ScrollArea className="h-full">
-						<div className="pb-32">
+						{/* Extra bottom room on mobile clears the nav bar + player */}
+						<div className="pb-44 md:pb-32">
 							<div className="animate-page-in" key={location.pathname}>
 								<Routes>
 									<Route element={<HomePage />} path="/" />
@@ -569,7 +570,17 @@ function AppShell({
 									<Route element={<PlaylistsPage />} path="/playlists" />
 									<Route element={<PlaylistDetails />} path="/playlists/:id" />
 									<Route element={<ArtistPage />} path="/artist/:id" />
-									<Route element={<SettingsPage />} path="/settings" />
+									<Route
+										element={
+											<SettingsPage
+												handleLogin={handleLogin}
+												handleLogout={handleLogout}
+												isLoggedIn={isLoggedIn}
+												userProfile={userProfile}
+											/>
+										}
+										path="/settings"
+									/>
 								</Routes>
 							</div>
 						</div>
@@ -584,7 +595,60 @@ function AppShell({
 				/>
 				<Player />
 			</div>
+			<MobileNav />
 		</>
+	);
+}
+
+/**
+ * Mobile bottom navigation — replaces the desktop sidebar on phones.
+ * Sits below the player bar, which lifts above it while a song plays.
+ * Account management lives on the settings page.
+ */
+function MobileNav() {
+	const location = useLocation();
+	const navigate = useNavigate();
+
+	return (
+		<nav
+			className="fixed inset-x-0 bottom-0 z-[45] flex min-h-13 items-stretch border-t border-foreground/8 bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+			data-mobile-nav
+		>
+			<MobileNavItem
+				icon={<HouseIcon className="size-5" strokeWidth={2.2} />}
+				isActive={location.pathname === "/" || location.pathname === "/home"}
+				label="Home"
+				onClick={() => navigate("/")}
+			/>
+			<MobileNavItem
+				icon={<LibraryIcon className="size-5" strokeWidth={2.2} />}
+				isActive={location.pathname.startsWith("/playlists")}
+				label="Playlists"
+				onClick={() => navigate("/playlists")}
+			/>
+			<MobileNavItem
+				icon={<SettingsIcon className="size-5" strokeWidth={2.2} />}
+				isActive={location.pathname.startsWith("/settings")}
+				label="Settings"
+				onClick={() => navigate("/settings")}
+			/>
+		</nav>
+	);
+}
+
+function MobileNavItem({ icon, label, isActive, onClick }: SidebarItemProps) {
+	return (
+		<button
+			className={cn(
+				"flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200 active:scale-95",
+				isActive ? "text-primary" : "text-muted-foreground",
+			)}
+			onClick={onClick}
+			type="button"
+		>
+			{icon}
+			<span>{label}</span>
+		</button>
 	);
 }
 

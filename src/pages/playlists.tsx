@@ -122,6 +122,7 @@ export function PlaylistDetails() {
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
+	const [searchOpen, setSearchOpen] = useState(false);
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -252,7 +253,7 @@ export function PlaylistDetails() {
 		});
 
 	return (
-		<div className="mx-auto w-full max-w-5xl px-6 pt-10 sm:px-10">
+		<div className="mx-auto w-full max-w-7xl px-6 pt-6 sm:px-10 sm:pt-10">
 			<div className="flex items-center justify-between">
 				<BackButton onClick={onBack} />
 				<button
@@ -266,94 +267,108 @@ export function PlaylistDetails() {
 				</button>
 			</div>
 
-			{/* Header */}
-			<header className="animate-track-in mt-6 flex items-end gap-6">
+			{/* Header — cover on top, identity + icon actions below, centered */}
+			<header className="animate-track-in mt-4 text-center sm:mt-6">
 				{playlist.thumbnail ? (
 					<img
 						alt={playlist.title}
-						className="size-40 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-48"
+						className="mx-auto size-36 rounded-xl border border-foreground/10 object-cover sm:size-40"
 						loading="lazy"
 						src={proxiedImageUrl(playlist.thumbnail)}
 					/>
 				) : (
-					<div className="grid size-40 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card sm:size-48">
+					<div className="mx-auto grid size-36 place-items-center rounded-xl border border-foreground/10 bg-card sm:size-40">
 						<Music2 className="size-10 text-muted-foreground" />
 					</div>
 				)}
-				<div className="min-w-0 pb-1">
-					<h1 className="truncate text-3xl font-bold tracking-tight sm:text-4xl">
-						{playlist.title}
-					</h1>
-					<p className="mt-2 text-sm text-muted-foreground">
-						{[
-							playlist.subtitle,
-							showCount
-								? `${songs.length} ${songs.length === 1 ? "track" : "tracks"}`
-								: "",
-						]
-							.filter(Boolean)
-							.join(" · ")}
-					</p>
-					<div className="mt-4 flex items-center gap-2.5">
-						<button
-							className="flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-							disabled={songs.length === 0}
-							onClick={() => {
-								play(songs[0], songs.slice(1));
-							}}
-							type="button"
-						>
-							<Play className="size-4 translate-x-px fill-current" />
-							Play all
-						</button>
-						<button
-							className="flex h-10 items-center gap-2 rounded-full border border-foreground/12 px-5 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-							disabled={songs.length < 2}
-							onClick={() => {
-								const shuffled = [...songs];
-								for (let i = shuffled.length - 1; i > 0; i--) {
-									const j = Math.floor(Math.random() * (i + 1));
-									[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-								}
-								play(shuffled[0], shuffled.slice(1));
-							}}
-							title="Shuffle play"
-							type="button"
-						>
-							<Shuffle className="size-4" />
-							Shuffle
-						</button>
-					</div>
+				<h1 className="mt-4 truncate text-3xl font-bold tracking-tight sm:text-4xl">
+					{playlist.title}
+				</h1>
+				<p className="mt-2 text-sm text-muted-foreground">
+					{[
+						playlist.subtitle,
+						showCount
+							? `${songs.length} ${songs.length === 1 ? "track" : "tracks"}`
+							: "",
+					]
+						.filter(Boolean)
+						.join(" · ")}
+				</p>
+				<div className="mt-4 flex items-center justify-center gap-2">
+					<button
+						aria-label="Shuffle play"
+						className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+						disabled={songs.length < 2}
+						onClick={() => {
+							const shuffled = [...songs];
+							for (let i = shuffled.length - 1; i > 0; i--) {
+								const j = Math.floor(Math.random() * (i + 1));
+								[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+							}
+							play(shuffled[0], shuffled.slice(1));
+						}}
+						title="Shuffle play"
+						type="button"
+					>
+						<Shuffle className="size-5" />
+					</button>
+					<button
+						aria-label="Play all"
+						className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+						disabled={songs.length === 0}
+						onClick={() => {
+							play(songs[0], songs.slice(1));
+						}}
+						title="Play all"
+						type="button"
+					>
+						<Play className="size-5 translate-x-px fill-current" />
+					</button>
+					{/* Search — collapsed into the action row; expands in place */}
+					{songs.length > 0 &&
+						(searchOpen ? (
+							<div className="relative w-64">
+								<Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+								<Input
+									autoFocus
+									className="h-11 rounded-full pr-8 pl-9"
+									onChange={(event) => setSearch(event.target.value)}
+									placeholder="Search in playlist"
+									value={search}
+								/>
+								<button
+									aria-label={search ? "Clear search" : "Close search"}
+									className="absolute top-1/2 right-2 -translate-y-1/2 grid size-6 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+									onClick={() => {
+										if (search) {
+											setSearch("");
+										} else {
+											setSearchOpen(false);
+										}
+									}}
+									type="button"
+								>
+									<X className="size-4" />
+								</button>
+							</div>
+						) : (
+							<button
+								aria-label="Search in playlist"
+								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
+								onClick={() => setSearchOpen(true)}
+								title="Search in playlist"
+								type="button"
+							>
+								<Search className="size-5" />
+							</button>
+						))}
 				</div>
 			</header>
 
-			{/* Search */}
-			{songs.length > 0 && (
-				<div className="relative mt-6 max-w-sm">
-					<Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-					<Input
-						className="h-9 pr-8 pl-9"
-						onChange={(event) => setSearch(event.target.value)}
-						placeholder="Search in playlist"
-						value={search}
-					/>
-					{search && (
-						<button
-							aria-label="Clear search"
-							className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-							onClick={() => setSearch("")}
-							type="button"
-						>
-							<X className="size-4" />
-						</button>
-					)}
-				</div>
-			)}
-
-			{/* Tracklist */}
-			<div className="mt-8 space-y-0.5 pb-4">
+			{/* Tracklist — edge-to-edge on mobile */}
+			<div className="mt-8 space-y-0.5 pb-4 -mx-6 sm:mx-0">
 				{loadingMore && (
-					<p className="mb-2 flex items-center gap-2 py-1 text-xs text-muted-foreground">
+					<p className="mb-2 flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground sm:px-0">
 						<EqualizerBars className="size-3 text-primary" />
 						Loading more…
 					</p>
@@ -364,7 +379,7 @@ export function PlaylistDetails() {
 					return (
 						<button
 							className={cn(
-								"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
+								"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors duration-150 hover:bg-foreground/5 sm:px-2.5",
 								isCurrent && "bg-primary/8",
 							)}
 							key={song.id || `playlist-item-${index}`}
@@ -430,12 +445,12 @@ export function PlaylistDetails() {
 					);
 				})}
 				{visible.length === 0 && search.trim() && songs.length > 0 && (
-					<p className="py-10 text-sm text-muted-foreground">
+					<p className="px-4 py-10 text-sm text-muted-foreground sm:px-0">
 						No tracks match "{search.trim()}".
 					</p>
 				)}
 				{songs.length === 0 && (
-					<p className="py-10 text-sm text-muted-foreground">
+					<p className="px-4 py-10 text-sm text-muted-foreground sm:px-0">
 						This playlist is empty.
 					</p>
 				)}
@@ -507,9 +522,9 @@ export default function PlaylistsPage() {
 
 	if (loading) {
 		return (
-			<div className="mx-auto w-full max-w-5xl px-6 pt-12 sm:px-10">
+			<div className="mx-auto w-full max-w-5xl px-6 pt-6 sm:px-10 sm:pt-10">
 				<div className="shimmer-surface mb-8 h-8 w-48 rounded-lg" />
-				<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+				<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
 					{Array.from({ length: 10 }, (_, i) => (
 						<div
 							// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
@@ -526,14 +541,14 @@ export default function PlaylistsPage() {
 
 	if (error) {
 		return (
-			<div className="mx-auto w-full max-w-5xl px-6 pt-12 sm:px-10">
+			<div className="mx-auto w-full max-w-5xl px-6 pt-6 sm:px-10 sm:pt-10">
 				<h2 className="text-lg font-semibold text-destructive">{error}</h2>
 			</div>
 		);
 	}
 
 	return (
-		<div className="mx-auto w-full max-w-5xl px-6 pt-12 sm:px-10">
+		<div className="mx-auto w-full max-w-5xl px-6 pt-6 sm:px-10 sm:pt-10">
 			<div className="mb-8 flex items-center justify-between">
 				<h1 className="text-2xl font-bold tracking-tight">Playlists</h1>
 				<button
@@ -547,7 +562,7 @@ export default function PlaylistsPage() {
 				</button>
 			</div>
 
-			<div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+			<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
 				{playlists.map((item, index) => (
 					<div
 						className="group animate-track-in relative"

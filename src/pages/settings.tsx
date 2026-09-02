@@ -1,11 +1,24 @@
-import { Trash2 } from "lucide-react";
+import { LogIn, LogOut, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { validateListenbrainzToken } from "@/lib/listenbrainz";
 import { useSettings } from "@/lib/settings";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+	isLoggedIn: boolean;
+	userProfile: { name?: string; photo?: string } | null;
+	handleLogin: () => void;
+	handleLogout: () => void;
+}
+
+export default function SettingsPage({
+	handleLogin,
+	handleLogout,
+	isLoggedIn,
+	userProfile,
+}: SettingsPageProps) {
 	const [settings, update] = useSettings();
 	const [cleared, setCleared] = useState(false);
 	const [tokenState, setTokenState] = useState<{
@@ -38,14 +51,66 @@ export default function SettingsPage() {
 	};
 
 	return (
-		<div className="mx-auto w-full max-w-3xl px-6 pt-12 sm:px-10">
+		<div className="mx-auto w-full max-w-3xl px-6 pt-6 sm:px-10 sm:pt-10">
 			<p className="mb-2 font-mono text-[11px] font-medium tracking-[0.24em] text-primary">
 				APP
 			</p>
 			<h1 className="text-3xl font-bold tracking-tight">Settings</h1>
 
+			{/* Account */}
+			<section className="mt-8">
+				<h2 className="mb-3 text-sm font-semibold text-foreground">Account</h2>
+				<div className="divide-y divide-foreground/6 overflow-hidden rounded-xl border border-foreground/8 bg-card">
+					{isLoggedIn ? (
+						<div className="flex items-center justify-between gap-6 p-4">
+							<div className="flex min-w-0 items-center gap-3">
+								{userProfile?.photo ? (
+									<img
+										alt={userProfile.name}
+										className="size-9 shrink-0 rounded-full object-cover"
+										src={proxiedImageUrl(userProfile.photo)}
+									/>
+								) : (
+									<div className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
+										{userProfile?.name?.[0]?.toUpperCase() || "U"}
+									</div>
+								)}
+								<p className="truncate text-sm font-medium">
+									{userProfile?.name || "User"}
+								</p>
+							</div>
+							<button
+								className="flex h-9 shrink-0 items-center gap-2 rounded-lg px-3.5 text-sm font-medium text-destructive transition-colors duration-150 hover:bg-destructive/10 active:scale-95"
+								onClick={handleLogout}
+								type="button"
+							>
+								<LogOut className="size-4" />
+								Log Out
+							</button>
+						</div>
+					) : (
+						<div className="flex items-center justify-between gap-6 p-4">
+							<div className="min-w-0">
+								<p className="text-sm font-medium">Not logged in</p>
+								<p className="mt-0.5 text-xs text-muted-foreground">
+									Log in to see your playlists, mixes and recommendations.
+								</p>
+							</div>
+							<button
+								className="flex h-9 shrink-0 items-center gap-2 rounded-lg bg-primary px-3.5 text-sm font-semibold text-primary-foreground transition-all duration-150 hover:brightness-110 active:scale-95"
+								onClick={handleLogin}
+								type="button"
+							>
+								<LogIn className="size-4" />
+								Log In
+							</button>
+						</div>
+					)}
+				</div>
+			</section>
+
 			{/* Lyrics */}
-			<section className="mt-10">
+			<section className="mt-8">
 				<h2 className="mb-3 text-sm font-semibold text-foreground">Lyrics</h2>
 				<div className="divide-y divide-foreground/6 overflow-hidden rounded-xl border border-foreground/8 bg-card">
 					<div className="flex items-center justify-between gap-6 p-4">
