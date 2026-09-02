@@ -19,6 +19,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Player } from "./components/player";
 import { QueuePanel } from "./components/queue-panel";
+import { Titlebar } from "./components/titlebar";
 import { UserMenu } from "./components/user-menu";
 import { PlayerProvider, usePlayer } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
@@ -461,7 +462,8 @@ function AppShell({
 			<AmbientSync />
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
-			<div className="h-screen flex bg-background text-foreground overflow-hidden">
+			<Titlebar />
+			<div className="h-[calc(100vh-2.25rem)] flex bg-background text-foreground overflow-hidden">
 				{/* ── Sidebar ─────────────────────────────────── */}
 				<aside className="flex w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar">
 					<div className="flex min-h-0 flex-1 flex-col px-4 pt-8">

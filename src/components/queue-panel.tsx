@@ -23,7 +23,7 @@ export function QueuePanel({
 	return (
 		<aside
 			className={cn(
-				"fixed top-0 right-0 z-[60] flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out",
+				"fixed top-9 right-0 z-[60] flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out",
 				fullscreen ? "bottom-0" : "bottom-[90px]",
 				open ? "translate-x-0" : "pointer-events-none translate-x-full",
 			)}

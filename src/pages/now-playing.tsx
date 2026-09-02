@@ -77,7 +77,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 			)}
 
 			{/* Top-right actions: queue + close */}
-			<div className="absolute top-5 right-6 z-20 flex items-center gap-2">
+			<div className="absolute top-12 right-6 z-20 flex items-center gap-2">
 				<button
 					aria-label="Toggle queue"
 					className={cn(

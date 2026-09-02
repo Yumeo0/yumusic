@@ -143,7 +143,7 @@ export function HomeFeed() {
 		<div>
 			{sections.map((section, si) => (
 				<section
-					className="animate-track-in"
+					className="animate-track-in pb-3"
 					// biome-ignore lint/suspicious/noArrayIndexKey: home feed sections may repeat titles
 					key={`feed-${section.title}-${si}`}
 					style={{ animationDelay: `${si * 80}ms` }}

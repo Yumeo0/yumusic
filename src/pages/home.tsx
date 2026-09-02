@@ -5,14 +5,6 @@ import { HomeFeed } from "@/components/home-feed";
 import { cn } from "@/lib/utils";
 import SearchResults from "../components/search-results";
 
-const SUGGESTIONS = [
-	"lofi beats",
-	"city pop",
-	"jazz fusion",
-	"synthwave",
-	"afrobeats",
-];
-
 export default function HomePage() {
 	const [searchParams, setSearchParams] = useSearchParams();
 	const query = searchParams.get("q") || "";
@@ -49,22 +41,6 @@ export default function HomePage() {
 					/>
 				</div>
 			</form>
-
-			{/* Quick picks */}
-			{!query && (
-				<div className="mt-4 flex flex-wrap gap-2">
-					{SUGGESTIONS.map((s) => (
-						<button
-							className="rounded-full border border-foreground/10 px-3.5 py-1.5 text-xs text-muted-foreground transition-colors duration-200 hover:border-primary/40 hover:text-primary"
-							key={s}
-							onClick={() => setSearchParams({ q: s })}
-							type="button"
-						>
-							{s}
-						</button>
-					))}
-				</div>
-			)}
 
 			{query && (
 				<div className="mt-10">
