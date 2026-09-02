@@ -15,6 +15,7 @@ import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { useArtistName } from "@/lib/artist-names";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistListOf, artistNames } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
@@ -236,7 +237,7 @@ export default function ArtistPage() {
 					<img
 						alt={artist.name}
 						className="size-40 shrink-0 rounded-full border border-foreground/10 object-cover sm:size-48"
-						src={artist.thumbnail}
+						src={proxiedImageUrl(artist.thumbnail)}
 					/>
 				) : (
 					<div className="grid size-40 shrink-0 place-items-center rounded-full border border-foreground/10 bg-card sm:size-48">
@@ -325,7 +326,7 @@ export default function ArtistPage() {
 											alt={song.title}
 											className="size-10 rounded-md border border-foreground/10 object-cover"
 											loading="lazy"
-											src={song.thumbnail}
+											src={proxiedImageUrl(song.thumbnail)}
 										/>
 									) : (
 										<div className="size-10 rounded-md bg-muted" />
@@ -387,7 +388,7 @@ export default function ArtistPage() {
 											alt={item.title}
 											className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
 											loading="lazy"
-											src={item.thumbnail}
+											src={proxiedImageUrl(item.thumbnail)}
 										/>
 									) : (
 										<div className="grid size-full place-items-center text-muted-foreground">

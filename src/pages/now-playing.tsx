@@ -15,6 +15,7 @@ import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatTime } from "@/lib/utils";
 
 interface NowPlayingPageProps {
@@ -70,7 +71,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					<img
 						alt=""
 						className="size-full scale-125 object-cover opacity-30 blur-3xl"
-						src={currentSong.thumbnail}
+						src={proxiedImageUrl(currentSong.thumbnail)}
 					/>
 					<div className="absolute inset-0 bg-background/60" />
 				</div>
@@ -135,7 +136,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 								alt={currentSong.title}
 								className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
 								key={`art-${currentSong.id}`}
-								src={currentSong.thumbnail}
+								src={proxiedImageUrl(currentSong.thumbnail)}
 							/>
 						) : (
 							<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
@@ -280,7 +281,7 @@ function QueueRow({ song, onPlay }: { song: Song; onPlay: () => void }) {
 					alt={song.title}
 					className="size-9 shrink-0 rounded-md object-cover"
 					loading="lazy"
-					src={song.thumbnail}
+					src={proxiedImageUrl(song.thumbnail)}
 				/>
 			) : (
 				<div className="size-9 shrink-0 rounded-md bg-muted" />

@@ -1,5 +1,6 @@
 import { LogOut } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 interface UserMenuProps {
@@ -41,7 +42,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
 					<img
 						alt={user.name}
 						className="size-9 rounded-full object-cover"
-						src={user.photo}
+						src={proxiedImageUrl(user.photo)}
 					/>
 				) : (
 					<div className="grid size-9 place-items-center rounded-full bg-primary/20 text-sm font-semibold text-primary">

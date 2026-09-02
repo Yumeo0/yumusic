@@ -8,6 +8,30 @@ use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 
 const ALLOWED_HEADERS: &str = "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-goog-visitor-id, x-goog-api-key, x-origin, x-youtube-client-version, x-youtube-client-name, x-goog-api-format-version, x-goog-authuser, x-user-agent, Accept-Language, X-Goog-FieldMask, Range, Referer, Cookie, X-Proxy-Headers";
 
+/// Artwork CDN hosts. Upstream throttles these aggressively (429), so their
+/// GETs are paced, retried with backoff and cooled down individually.
+fn is_artwork_host(host: &str) -> bool {
+	host.ends_with("ytimg.com")
+		|| host.ends_with("googleusercontent.com")
+		|| host.ends_with("ggpht.com")
+}
+
+/// Max concurrent upstream artwork fetches: turns the webview's parallel
+/// grid-load burst into a paced stream so the CDN's burst limit isn't hit.
+const IMAGE_FETCH_CONCURRENCY: usize = 8;
+/// 1 initial attempt + 3 retries on 429/5xx.
+const MAX_IMAGE_ATTEMPTS: usize = 4;
+const MIN_BACKOFF: Duration = Duration::from_millis(750);
+const MAX_BACKOFF: Duration = Duration::from_secs(5);
+/// A 429 mid-flight pauses *all* artwork fetches briefly.
+const GLOBAL_COOLDOWN: Duration = Duration::from_secs(2);
+/// After exhausting retries for one image, fail fast for other requests to
+/// it instead of re-hitting upstream (the <img> stays broken either way).
+const PER_TARGET_COOLDOWN: Duration = Duration::from_secs(30);
+/// Cooldown windows this long are failed fast instead of waited out.
+const COOLDOWN_WAIT_CAP: Duration = Duration::from_secs(5);
+const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// In-memory cache for proxied images, bounded by total bytes with LRU
 /// eviction. Needed because custom-scheme responses are not kept in the
 /// WebView's HTTP cache, so every proxied image would otherwise be
@@ -146,6 +170,90 @@ fn client() -> &'static reqwest::Client {
 	CLIENT.get_or_init(reqwest::Client::new)
 }
 
+/// Pacing state for artwork fetches: a global pause window when upstream
+/// signals 429, plus per-target fail-fast cooldowns. Concurrency is paced
+/// separately via [`image_semaphore`].
+struct ImageGate {
+	cooldown_until: Instant,
+	target_cooldowns: HashMap<String, Instant>,
+}
+
+fn image_gate() -> &'static Mutex<ImageGate> {
+	static GATE: OnceLock<Mutex<ImageGate>> = OnceLock::new();
+	GATE.get_or_init(|| {
+		Mutex::new(ImageGate {
+			cooldown_until: Instant::now(),
+			target_cooldowns: HashMap::new(),
+		})
+	})
+}
+
+fn image_semaphore() -> &'static tokio::sync::Semaphore {
+	static SEMAPHORE: OnceLock<tokio::sync::Semaphore> = OnceLock::new();
+	SEMAPHORE.get_or_init(|| tokio::sync::Semaphore::new(IMAGE_FETCH_CONCURRENCY))
+}
+
+/// How long an upstream artwork fetch must wait before it may start:
+/// `Some(Some(wait))` to sleep out a short cooldown, `Some(None)` when the
+/// target is in a long cooldown (caller should fail fast), `None` when the
+/// fetch may start immediately.
+fn image_cooldown_delay(target: &str) -> Option<Option<Duration>> {
+	let now = Instant::now();
+	let gate = image_gate().lock().ok()?;
+	let global = gate.cooldown_until.saturating_duration_since(now);
+	let target_wait = gate
+		.target_cooldowns
+		.get(target)
+		.map_or(Duration::ZERO, |until| {
+			until.saturating_duration_since(now)
+		});
+	if global > COOLDOWN_WAIT_CAP || target_wait > COOLDOWN_WAIT_CAP {
+		return Some(None);
+	}
+	Some(Some(global.max(target_wait)))
+}
+
+/// Records an upstream 429: pauses all artwork fetches briefly and, when
+/// `per_target`, blocks further upstream attempts for that image.
+fn mark_image_throttled(target: Option<&str>) {
+	let now = Instant::now();
+	if let Ok(mut gate) = image_gate().lock() {
+		let new_until = now + GLOBAL_COOLDOWN;
+		if new_until > gate.cooldown_until {
+			gate.cooldown_until = new_until;
+		}
+		if let Some(target) = target {
+			gate.target_cooldowns
+				.insert(target.to_owned(), now + PER_TARGET_COOLDOWN);
+		}
+	}
+}
+
+/// Response used when a request hits an image in a long 429 cooldown.
+fn throttled_response(origin: &str) -> Response<Vec<u8>> {
+	let mut response = Response::new(Vec::new());
+	*response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+	apply_cors(&mut response, origin);
+	response
+}
+
+/// Backoff before retrying a throttled/failed artwork fetch: honors
+/// `Retry-After` for 429s, otherwise exponential (0.75s, 1.5s, 3s, …).
+fn image_backoff(status: StatusCode, headers: &HeaderMap, attempt: usize) -> Duration {
+	if status == StatusCode::TOO_MANY_REQUESTS {
+		if let Some(seconds) = headers
+			.get("retry-after")
+			.and_then(|value| value.to_str().ok())
+			.and_then(|value| value.trim().parse::<u64>().ok())
+		{
+			return Duration::from_secs(seconds.min(MAX_BACKOFF.as_secs()).max(1));
+		}
+	}
+	let shift = (attempt - 1).min(4) as u32;
+	Duration::from_millis((MIN_BACKOFF.as_millis() as u64).saturating_mul(1 << shift))
+		.min(MAX_BACKOFF)
+}
+
 pub fn handle<R: Runtime>(
 	_ctx: UriSchemeContext<'_, R>,
 	request: Request<Vec<u8>>,
@@ -265,10 +373,30 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 
 	// Only plain GETs without range requests are eligible for the image cache.
 	let cacheable_request = method == Method::GET && request.headers().get("range").is_none();
+	let is_artwork = cacheable_request && is_artwork_host(&host);
 	if cacheable_request {
 		if let Some(response) = cache_lookup(&request, &target, &origin) {
 			return Ok(response);
 		}
+	}
+
+	// Pace artwork fetches: ride out short cooldown windows, fail fast for
+	// targets in a long cooldown, then take one of the limited fetch slots.
+	let mut permit: Option<tokio::sync::SemaphorePermit<'static>> = None;
+	if is_artwork {
+		match image_cooldown_delay(&target) {
+			Some(None) => return Ok(throttled_response(&origin)),
+			Some(Some(wait)) if wait > Duration::ZERO => {
+				tokio::time::sleep(wait).await;
+			}
+			_ => {}
+		}
+		permit = Some(
+			image_semaphore()
+				.acquire()
+				.await
+				.map_err(|e| e.to_string())?,
+		);
 	}
 
 	let mut upstream_headers = HeaderMap::new();
@@ -323,15 +451,43 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 	}
 
 	let body = request.into_body();
-	let mut upstream_request = client()
-		.request(method, &target)
-		.headers(upstream_headers);
-	if !body.is_empty() {
-		upstream_request = upstream_request.body(body);
-	}
 
-	let upstream_response = upstream_request.send().await.map_err(|e| e.to_string())?;
+	// Artwork hosts throttle hard (429), so their fetches are retried with
+	// backoff while paced through the shared semaphore; other requests are
+	// sent once, untouched.
+	let upstream_response = {
+		let mut attempt = 0usize;
+		loop {
+			let mut upstream_request = client()
+				.request(method.clone(), &target)
+				.headers(upstream_headers.clone());
+			if !body.is_empty() {
+				upstream_request = upstream_request.body(body.clone());
+			}
+			if is_artwork {
+				upstream_request = upstream_request.timeout(IMAGE_TIMEOUT);
+			}
+
+			let response = upstream_request.send().await.map_err(|e| e.to_string())?;
+			let status = response.status();
+			let retryable = status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+			if !is_artwork || !retryable || attempt + 1 >= MAX_IMAGE_ATTEMPTS {
+				break response;
+			}
+			attempt += 1;
+			if status == StatusCode::TOO_MANY_REQUESTS {
+				// Pause other artwork fetches too; we're in a throttle window.
+				mark_image_throttled(None);
+			}
+			tokio::time::sleep(image_backoff(status, response.headers(), attempt)).await;
+		}
+	};
 	let status = upstream_response.status();
+	if is_artwork && status == StatusCode::TOO_MANY_REQUESTS {
+		// Retries exhausted: fail fast for further requests to this image.
+		mark_image_throttled(Some(&target));
+	}
+	drop(permit);
 
 	let mut passthrough = HeaderMap::new();
 	for name in [

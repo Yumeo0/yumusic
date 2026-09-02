@@ -4,6 +4,7 @@ import { ArtistLinks } from "@/components/artist-link";
 import { SongTitle } from "@/components/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
@@ -169,7 +170,7 @@ export function HomeFeed() {
 											alt={song.title}
 											className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
 											loading="lazy"
-											src={song.thumbnail}
+											src={proxiedImageUrl(song.thumbnail)}
 										/>
 									)}
 									<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">

@@ -26,6 +26,7 @@ import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
 import { usePinnedPlaylists } from "./lib/pinned";
 import { useSettings } from "./lib/settings";
+import { proxiedImageUrl } from "./lib/tauri";
 import {
 	cleanSearchTitle,
 	displayTitle,
@@ -514,7 +515,7 @@ function AppShell({
 													<img
 														alt=""
 														className="size-5 shrink-0 rounded object-cover"
-														src={playlist.thumbnail}
+														src={proxiedImageUrl(playlist.thumbnail)}
 													/>
 												) : (
 													<Music2 className="size-4 shrink-0" />

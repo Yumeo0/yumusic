@@ -5,6 +5,7 @@ import { ArtistLinks } from "@/components/artist-link";
 import { SongTitle } from "@/components/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import { getYoutubeClient } from "../lib/youtube-client";
@@ -117,7 +118,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 										alt={video.title}
 										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
 										loading="lazy"
-										src={song.thumbnail}
+										src={proxiedImageUrl(song.thumbnail)}
 									/>
 								)}
 								{video.duration?.text && (

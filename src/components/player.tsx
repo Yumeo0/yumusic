@@ -9,6 +9,7 @@ import {
 import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatTime } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
 import { VolumeControl } from "./volume-control";
@@ -71,7 +72,7 @@ export function Player() {
 								alt={currentSong.title}
 								className="size-11 rounded-md border border-foreground/10 object-cover"
 								key={currentSong.id}
-								src={currentSong.thumbnail}
+								src={proxiedImageUrl(currentSong.thumbnail)}
 							/>
 						) : (
 							<div className="size-11 rounded-md bg-muted" />

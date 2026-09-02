@@ -19,6 +19,7 @@ import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { usePinnedPlaylists } from "@/lib/pinned";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import {
@@ -272,7 +273,7 @@ export function PlaylistDetails() {
 						alt={playlist.title}
 						className="size-40 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-48"
 						loading="lazy"
-						src={playlist.thumbnail}
+						src={proxiedImageUrl(playlist.thumbnail)}
 					/>
 				) : (
 					<div className="grid size-40 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card sm:size-48">
@@ -400,7 +401,7 @@ export function PlaylistDetails() {
 									alt={song.title}
 									className="size-10 rounded-md border border-foreground/10 object-cover"
 									loading="lazy"
-									src={song.thumbnail}
+									src={proxiedImageUrl(song.thumbnail)}
 								/>
 							) : (
 								<div className="size-10 rounded-md bg-muted" />
@@ -564,7 +565,7 @@ export default function PlaylistsPage() {
 										alt={item.title}
 										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
 										loading="lazy"
-										src={item.thumbnail}
+										src={proxiedImageUrl(item.thumbnail)}
 									/>
 								) : (
 									<div className="grid size-full place-items-center text-muted-foreground">

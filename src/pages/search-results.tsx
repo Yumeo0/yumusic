@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { SongTitle } from "@/components/song-title";
 import { Card } from "@/components/ui/card";
+import { proxiedImageUrl } from "../lib/tauri";
 import { getYoutubeClient } from "../lib/youtube-client";
 
 interface SearchResultsPageProps {
@@ -86,7 +87,7 @@ export default function SearchResultsPage({ query }: SearchResultsPageProps) {
 								alt={video.title}
 								className="w-full h-full object-cover"
 								loading="lazy"
-								src={video.thumbnails[0]?.url}
+								src={proxiedImageUrl(video.thumbnails[0]?.url)}
 							/>
 							{video.duration?.text && (
 								<div className="absolute bottom-2 right-2 bg-black/80 text-white px-2 py-1 rounded text-xs">

@@ -1,6 +1,7 @@
 import { ListMusic, X } from "lucide-react";
 import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
+import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
 import { EqualizerBars } from "./waveform";
@@ -87,7 +88,7 @@ export function QueuePanel({
 											alt=""
 											className="size-10 rounded-md border border-foreground/10 object-cover"
 											loading="lazy"
-											src={song.thumbnail}
+											src={proxiedImageUrl(song.thumbnail)}
 										/>
 									) : (
 										<div className="size-10 rounded-md bg-muted" />

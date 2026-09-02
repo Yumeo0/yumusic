@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PROXY_ORIGIN } from "./tauri";
+import { proxiedImageUrl } from "./tauri";
 
 const MAX_VOLUME = 0.15;
 
@@ -162,57 +162,25 @@ function extractDominantColor(
 }
 
 /**
- * Loads an image through an <img> element in CORS mode. This reuses the HTTP
- * cache entry that the crossOrigin artwork tags populated, so extraction is
- * request-free for covers already on screen (and cached for future sessions).
- */
-function loadImageElement(url: string): Promise<HTMLImageElement | null> {
-	return new Promise((resolve) => {
-		const img = new Image();
-		img.crossOrigin = "anonymous";
-		img.decoding = "async";
-		img.onload = () => resolve(img);
-		img.onerror = () => resolve(null);
-		img.src = url;
-	});
-}
-
-/**
  * Extracts the dominant ambient color with as little network traffic as
- * possible: a CORS-mode <img> load reuses the browser's HTTP cache entry
- * first. CORS-hostile hosts (e.g. i.ytimg.com/vi_webp sends no
- * Access-Control-Allow-Origin) fall back to the app's Tauri proxy, which
- * adds CORS headers itself. Returns null on any failure.
+ * possible: on-screen artwork is served through the Tauri proxy (which adds
+ * CORS headers), so this fetch reuses the proxy's in-memory image cache —
+ * request-free for covers already on screen, no extra upstream download.
+ * Returns null on any failure.
  */
 async function extractFromUrl(url: string): Promise<string | null> {
-	const element = await loadImageElement(url);
-	if (element) {
-		try {
-			const color = extractDominantColor(element);
-			if (color) return color;
-		} catch {
-			// canvas unexpectedly tainted — fall through to the proxy fetch
-		}
-	}
-
 	try {
-		const parsed = new URL(url);
-		const proxyUrl = new URL(
-			`${PROXY_ORIGIN}${parsed.pathname}${parsed.search}`,
-		);
-		proxyUrl.searchParams.set("__host", parsed.host);
-		const res = await fetch(proxyUrl.toString(), { mode: "cors" });
-		if (res.ok) {
-			const blob = await res.blob();
-			const bitmap = await createImageBitmap(blob);
-			const color = extractDominantColor(bitmap);
-			bitmap.close();
-			if (color) return color;
-		}
+		const res = await fetch(proxiedImageUrl(url), { mode: "cors" });
+		if (!res.ok) return null;
+		const blob = await res.blob();
+		const bitmap = await createImageBitmap(blob);
+		const color = extractDominantColor(bitmap);
+		bitmap.close();
+		return color;
 	} catch {
 		// proxy unreachable or unusable response
+		return null;
 	}
-	return null;
 }
 
 /**
