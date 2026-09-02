@@ -5,7 +5,7 @@ import { fetchMusixmatchSynced } from "@/lib/musixmatch";
 import { useRomanizedLines } from "@/lib/romanize";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { getSongLyrics } from "@/lib/youtube-client";
+import { getSongLyrics, type SongLyrics } from "@/lib/youtube-client";
 
 interface LyricsPanelProps {
 	songId: string;
@@ -22,7 +22,7 @@ interface LyricsPanelProps {
 interface LyricsSources {
 	lrclib: LrcLine[] | null;
 	musixmatch: LrcLine[] | null;
-	youtube: string | null;
+	youtube: SongLyrics | null;
 }
 
 type LyricsState =
@@ -31,17 +31,22 @@ type LyricsState =
 
 type LyricsView = "lrclib" | "musixmatch" | "youtube";
 
-const LYRICS_PROVIDERS: Array<{ id: LyricsView; label: string }> = [
-	{ id: "lrclib", label: "LRCLIB" },
-	{ id: "musixmatch", label: "Musixmatch" },
-	{ id: "youtube", label: "YouTube" },
+const LYRICS_PROVIDERS: Array<{
+	id: LyricsView;
+	label: string;
+	attribution: string;
+}> = [
+	{ id: "lrclib", label: "LRCLIB", attribution: "LRCLIB" },
+	{ id: "musixmatch", label: "Musixmatch", attribution: "Musixmatch" },
+	{ id: "youtube", label: "YouTube", attribution: "YouTube Music" },
 ];
 
 /**
- * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch) and
- * static YouTube Music lyrics in parallel, lets the user switch between the
- * providers, optionally shows romanization under each line, and falls back
- * to a quiet placeholder when nothing is available.
+ * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch, and
+ * YouTube Music's timed lyrics) plus static YouTube Music lyrics in parallel,
+ * lets the user switch between the providers, optionally shows romanization
+ * under each line, and falls back to a quiet placeholder when nothing is
+ * available.
  */
 export function LyricsPanel({
 	songId,
@@ -71,7 +76,7 @@ export function LyricsPanel({
 			const sources: LyricsSources = {
 				lrclib: lrclib && lrclib.length > 0 ? lrclib : null,
 				musixmatch: musixmatch && musixmatch.length > 0 ? musixmatch : null,
-				youtube,
+				youtube: youtube && (youtube.synced || youtube.plain) ? youtube : null,
 			};
 			setState({ status: "done", sources });
 			const firstAvailable = LYRICS_PROVIDERS.find(
@@ -98,7 +103,8 @@ export function LyricsPanel({
 	const activeSynced =
 		sources && view !== "youtube"
 			? sources[view as Exclude<LyricsView, "youtube">]
-			: null;
+			: (sources?.youtube?.synced ?? null);
+	const attribution = LYRICS_PROVIDERS.find((p) => p.id === view)?.attribution;
 
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -131,14 +137,19 @@ export function LyricsPanel({
 			{state.status === "loading" && <LyricsSkeleton />}
 			{sources && activeSynced && (
 				<SyncedLines
+					attribution={attribution}
 					currentTime={currentTime}
 					lines={activeSynced}
 					onSeekTime={onSeekTime}
 					romanize={romanize}
 				/>
 			)}
-			{sources && !activeSynced && sources.youtube && (
-				<LyricsLines romanize={romanize} text={sources.youtube} />
+			{sources && !activeSynced && sources.youtube?.plain && (
+				<LyricsLines
+					attribution={attribution}
+					romanize={romanize}
+					text={sources.youtube.plain}
+				/>
 			)}{" "}
 			{sources &&
 				!sources.lrclib &&
@@ -153,11 +164,13 @@ function SyncedLines({
 	currentTime,
 	onSeekTime,
 	romanize,
+	attribution,
 }: {
 	lines: LrcLine[];
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	romanize: boolean;
+	attribution?: string;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	// Visual anchor per line index: the line itself, or the dots row that
@@ -314,12 +327,21 @@ function SyncedLines({
 						</p>
 					);
 				})}
+				{attribution && <LyricsAttribution source={attribution} />}
 			</div>
 		</div>
 	);
 }
 
-function LyricsLines({ text, romanize }: { text: string; romanize: boolean }) {
+function LyricsLines({
+	text,
+	romanize,
+	attribution,
+}: {
+	text: string;
+	romanize: boolean;
+	attribution?: string;
+}) {
 	const lines = useMemo(() => text.split("\n"), [text]);
 	const romanized = useRomanizedLines(lines, romanize);
 
@@ -349,11 +371,17 @@ function LyricsLines({ text, romanize }: { text: string; romanize: boolean }) {
 						</p>
 					),
 				)}
-				<p className="mt-8 text-[11px] text-muted-foreground/50">
-					Lyrics via YouTube Music
-				</p>
+				{attribution && <LyricsAttribution source={attribution} />}
 			</div>
 		</div>
+	);
+}
+
+function LyricsAttribution({ source }: { source: string }) {
+	return (
+		<p className="mt-8 text-[11px] text-muted-foreground/50">
+			Lyrics via {source}
+		</p>
 	);
 }
 
