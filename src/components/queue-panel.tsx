@@ -1,6 +1,8 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, X } from "lucide-react";
+import { useRef } from "react";
 import { SongTitle } from "@/components/song-title";
-import { usePlayer } from "@/contexts/player-context";
+import { usePlayer, useQueueSheetRef } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
@@ -13,21 +15,44 @@ interface QueuePanelProps {
 	fullscreen?: boolean;
 }
 
-/** Right-side queue drawer, toggleable from the player bar and fullscreen. */
+/**
+ * Queue drawer. Desktop: slides in from the right. Mobile: a bottom sheet
+ * that slides up — matching the swipe-up gesture, whose reveal progress is
+ * driven through the shared sheet ref while the finger is down.
+ */
 export function QueuePanel({
 	open,
 	onClose,
 	fullscreen = false,
 }: QueuePanelProps) {
 	const { queue, currentIndex, isPlaying, play } = usePlayer();
+	const sheetRef = useQueueSheetRef();
+
+	// The queue can hold thousands of tracks; only render the visible rows.
+	// The panel stays mounted even when closed (for the drag-follow reveal),
+	// so this keeps its DOM and re-render cost tiny in every state.
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const rowVirtualizer = useVirtualizer({
+		count: queue.length,
+		getScrollElement: () => scrollRef.current,
+		estimateSize: () => 58,
+		overscan: 8,
+	});
 
 	return (
 		<aside
 			className={cn(
-				"fixed top-9 right-0 z-[60] flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0",
-				fullscreen ? "bottom-0" : "bottom-[90px]",
-				open ? "translate-x-0" : "pointer-events-none translate-x-full",
+				// Desktop: blurred translucent drawer from the right. Mobile: the
+				// sheet follows the finger every frame while dragging, and
+				// re-filtering a backdrop blur per frame tanks the framerate —
+				// so the blur is desktop-only and the sheet sits opaque.
+				"fixed top-9 right-0 z-60 flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0 max-md:pt-(--safe-area-top) max-md:bg-background max-md:backdrop-blur-none",
+				fullscreen ? "bottom-0" : "bottom-22.5",
+				open
+					? "translate-x-0 max-md:translate-y-0"
+					: "pointer-events-none translate-x-full max-md:translate-x-0 max-md:translate-y-full",
 			)}
+			ref={sheetRef}
 		>
 			<div className="flex items-center justify-between border-b border-foreground/8 px-4 py-3.5">
 				<div className="flex items-center gap-2.5">
@@ -49,26 +74,38 @@ export function QueuePanel({
 				</button>
 			</div>
 
-			<div className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]">
+			<div
+				className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]"
+				ref={scrollRef}
+			>
 				{queue.length === 0 ? (
 					<p className="p-4 text-sm text-muted-foreground/70">
 						Queue is empty — play something to fill it up.
 					</p>
 				) : (
-					<div className="space-y-0.5">
-						{queue.map((song, i) => {
+					<div
+						className="relative"
+						style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+					>
+						{rowVirtualizer.getVirtualItems().map((virtualRow) => {
+							const i = virtualRow.index;
+							const song = queue[i];
 							const isCurrent = i === currentIndex;
 							return (
 								<button
 									className={cn(
-										"group grid w-full grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
+										"group absolute inset-x-0 grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
 										isCurrent
-											? "bg-primary/[0.09]"
-											: "hover:bg-foreground/[0.05]",
+											? "bg-primary/9"
+											: "hover:bg-foreground/5",
 									)}
-									// biome-ignore lint/suspicious/noArrayIndexKey: queue may contain duplicate video ids
+									data-index={virtualRow.index}
 									key={`queue-${song.id}-${i}`}
 									onClick={() => play(song)}
+									ref={rowVirtualizer.measureElement}
+									style={{
+										transform: `translateY(${virtualRow.start}px)`,
+									}}
 									type="button"
 								>
 									<span className="relative grid place-items-center">

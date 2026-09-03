@@ -16,6 +16,7 @@
 	"dependencies": {
 		"@base-ui/react": "^1.7.0",
 		"@mjba/lyrics": "^1.3.0",
+		"@tanstack/react-virtual": "^3.14.10",
 		"@tauri-apps/api": "^2.11.1",
 		"bgutils-js": "^4.0.3",
 		"class-variance-authority": "^0.7.1",

@@ -470,7 +470,7 @@ function AppShell({
 					<div className="flex min-h-0 flex-1 flex-col px-4 pt-8">
 						<nav className="space-y-1">
 							<SidebarItem
-								icon={<HouseIcon className="size-[18px]" strokeWidth={2.2} />}
+								icon={<HouseIcon className="size-4.5" strokeWidth={2.2} />}
 								isActive={
 									location.pathname === "/" || location.pathname === "/home"
 								}
@@ -478,14 +478,14 @@ function AppShell({
 								onClick={() => navigate("/")}
 							/>
 							<SidebarItem
-								icon={<LibraryIcon className="size-[18px]" strokeWidth={2.2} />}
+								icon={<LibraryIcon className="size-4.5" strokeWidth={2.2} />}
 								isActive={location.pathname.startsWith("/playlists")}
 								label="Playlists"
 								onClick={() => navigate("/playlists")}
 							/>
 							<SidebarItem
 								icon={
-									<SettingsIcon className="size-[18px]" strokeWidth={2.2} />
+									<SettingsIcon className="size-4.5" strokeWidth={2.2} />
 								}
 								isActive={location.pathname.startsWith("/settings")}
 								label="Settings"
@@ -495,7 +495,7 @@ function AppShell({
 
 						{/* Pinned playlists */}
 						{pinned.length > 0 && (
-							<div className="mt-6 min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 [scrollbar-width:thin]">
+							<div className="mt-6 min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
 								{pinned.map((playlist) => {
 									const isActive =
 										location.pathname === `/playlists/${playlist.id}`;
@@ -506,7 +506,7 @@ function AppShell({
 													"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
 													isActive
 														? "bg-primary/12 text-primary"
-														: "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+														: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
 												)}
 												onClick={() => navigate(`/playlists/${playlist.id}`)}
 												type="button"
@@ -540,14 +540,14 @@ function AppShell({
 					<div
 						className={cn(
 							"border-t border-foreground/6 p-4",
-							currentSong && "pb-[104px]",
+							currentSong && "pb-26",
 						)}
 					>
 						{isLoggedIn ? (
 							<UserMenu onLogout={handleLogout} user={userProfile || {}} />
 						) : (
 							<button
-								className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/[0.05] hover:text-foreground"
+								className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/5 hover:text-foreground"
 								onClick={handleLogin}
 								type="button"
 							>
@@ -563,7 +563,7 @@ function AppShell({
 					<ScrollArea className="h-full">
 						{/* Extra top/bottom room on mobile: status-bar safe area,
 						    plus nav bar + player clearance */}
-						<div className="max-md:pt-[var(--safe-area-top)] pb-44 md:pb-32">
+						<div className="max-md:pt-(--safe-area-top) pb-44 md:pb-32">
 							<div className="animate-page-in" key={location.pathname}>
 								<Routes>
 									<Route element={<HomePage />} path="/" />
@@ -612,7 +612,7 @@ function MobileNav() {
 
 	return (
 		<nav
-			className="fixed inset-x-0 bottom-0 z-[45] flex min-h-13 items-stretch border-t pt-4 border-foreground/8 bg-sidebar/95 pb-[var(--safe-area-bottom)] backdrop-blur-xl md:hidden"
+			className="fixed inset-x-0 bottom-0 z-45 flex min-h-13 items-stretch border-t pt-4 border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
 			data-mobile-nav
 		>
 			<MobileNavItem
@@ -675,7 +675,7 @@ function SidebarItem({ icon, label, isActive, onClick }: SidebarItemProps) {
 				"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
 				isActive
 					? "bg-primary/12 text-primary"
-					: "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+					: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
 			)}
 			onClick={onClick}
 			type="button"

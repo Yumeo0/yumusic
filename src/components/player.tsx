@@ -6,9 +6,11 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
+import { useRef } from "react";
 import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatTime } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
@@ -30,6 +32,17 @@ export function Player() {
 		videoElementRef,
 	} = usePlayer();
 
+	// Swipe up on the mini player reveals the queue sheet progressively.
+	// The bar sits above Android's bottom gesture zone, so the touch
+	// reliably reaches the webview — unlike swipes starting at the very
+	// bottom edge, which the system claims for the Home gesture. Only
+	// touches on the main row count; the progress strip above is seeking.
+	const swipeRowRef = useRef<HTMLDivElement>(null);
+	const swipeHandlers = useQueueDragGesture((clientY) => {
+		const rowTop = swipeRowRef.current?.getBoundingClientRect().top;
+		return rowTop !== undefined && clientY >= rowTop;
+	});
+
 	const { currentTime, duration } = useMediaTime(
 		videoElementRef,
 		currentSong?.id,
@@ -49,13 +62,17 @@ export function Player() {
 		<footer
 			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			onClick={toggleNowPlaying}
+			{...swipeHandlers}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
 			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
 				<ProgressBar onSeek={handleSeek} progress={progress} />
 			</div>
 
-			<div className="grid h-[68px] grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5">
+			<div
+				className="grid h-17 grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
+				ref={swipeRowRef}
+			>
 				{/* Track identity — click to open fullscreen */}
 				<button
 					className="group flex min-w-0 items-center gap-3 text-left"
@@ -129,7 +146,7 @@ export function Player() {
 						{isPlaying ? (
 							<Pause className="size-5 fill-current" />
 						) : (
-							<Play className="size-5 translate-x-[1px] fill-current" />
+							<Play className="size-5 translate-x-px fill-current" />
 						)}
 					</button>
 					<button
@@ -171,7 +188,7 @@ export function Player() {
 						title="Queue"
 						type="button"
 					>
-						<ListMusic className="size-[18px]" />
+						<ListMusic className="size-4.5" />
 					</button>
 					{/* Volume interactions must not open the fullscreen */}
 					<div onClick={(e) => e.stopPropagation()}>

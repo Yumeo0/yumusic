@@ -70,6 +70,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [history, setHistory] = useState<Song[]>([]);
 	const [isNowPlayingOpen, setIsNowPlayingOpen] = useState(false);
 	const [isQueueOpen, setIsQueueOpen] = useState(false);
+	const queueSheetRef = useRef<HTMLElement | null>(null);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
 	const playerRef = useRef<shaka.Player | null>(null);
@@ -538,16 +539,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setVolume,
 			}}
 		>
-			{children}
-			{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
-			<video
-				className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
-				onEnded={() => {
-					if (hasNext) next();
-				}}
-				playsInline
-				ref={videoElementRef}
-			/>
+			<QueueSheetContext.Provider value={queueSheetRef}>
+				{children}
+				{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
+				<video
+					className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+					onEnded={() => {
+						if (hasNext) next();
+					}}
+					playsInline
+					ref={videoElementRef}
+				/>
+			</QueueSheetContext.Provider>
 		</PlayerContext.Provider>
 	);
 }
@@ -558,4 +561,18 @@ export function usePlayer() {
 		throw new Error("usePlayer must be used within a PlayerProvider");
 	}
 	return context;
+}
+
+/**
+ * Ref to the queue sheet's root element. The swipe-up gesture drives the
+ * sheet's transform imperatively through this ref so the panel can follow
+ * the finger every frame without re-rendering the (potentially very long)
+ * queue list.
+ */
+const QueueSheetContext = createContext<
+	RefObject<HTMLElement | null> | undefined
+>(undefined);
+
+export function useQueueSheetRef() {
+	return useContext(QueueSheetContext);
 }

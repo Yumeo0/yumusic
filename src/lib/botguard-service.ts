@@ -15,6 +15,13 @@ export class BotguardService {
 		null;
 	public integrityTokenBasedMinter?: WebPoMinter;
 	public bgChallenge?: IBotguardClientSideBgChallenge;
+	/**
+	 * Minted po tokens per identifier (visitor data). Running the BotGuard
+	 * program is expensive — seconds of blocking JS on phones — and a token
+	 * is bound to its identifier, not to a single playback, so one mint per
+	 * identifier is enough for the whole session.
+	 */
+	private readonly mintedTokens = new Map<string, string>();
 
 	async init() {
 		if (this.initializationPromise) {
@@ -129,13 +136,16 @@ export class BotguardService {
 	}
 
 	public async mintToken(identifier: string): Promise<string> {
+		const cached = this.mintedTokens.get(identifier);
+		if (cached) return cached;
+
 		await this.init();
 
-		if (this.integrityTokenBasedMinter) {
-			return this.integrityTokenBasedMinter.mintAsWebsafeString(identifier);
-		}
-
-		return createColdStartToken(identifier);
+		const token = this.integrityTokenBasedMinter
+			? await this.integrityTokenBasedMinter.mintAsWebsafeString(identifier)
+			: createColdStartToken(identifier);
+		this.mintedTokens.set(identifier, token);
+		return token;
 	}
 
 	public isInitialized() {
@@ -143,6 +153,7 @@ export class BotguardService {
 	}
 
 	public dispose() {
+		this.mintedTokens.clear();
 		if (this.botguardClient && this.bgChallenge) {
 			void this.botguardClient.shutdown();
 			this.botguardClient = undefined;

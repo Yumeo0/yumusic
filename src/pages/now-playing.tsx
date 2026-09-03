@@ -1,5 +1,6 @@
 import {
 	ChevronDown,
+	ChevronsUp,
 	ListMusic,
 	MicVocal,
 	Music2,
@@ -17,6 +18,7 @@ import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatTime } from "@/lib/utils";
 
@@ -50,18 +52,16 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 	// shows the lyrics column — the state only affects max-md classes.
 	const [showLyrics, setShowLyrics] = useState(false);
 
-	// Swipe up on the artwork opens the queue (mobile).
-	const swipeStartY = useRef<number | null>(null);
-	const handleSwipeStart = (event: React.TouchEvent) => {
-		swipeStartY.current = event.touches[0]?.clientY ?? null;
-	};
-	const handleSwipeEnd = (event: React.TouchEvent) => {
-		if (swipeStartY.current === null) return;
-		const deltaY =
-			(event.changedTouches[0]?.clientY ?? 0) - swipeStartY.current;
-		swipeStartY.current = null;
-		if (deltaY < -60 && !isQueueOpen) toggleQueue();
-	};
+	// Swipe up anywhere below the progress bar reveals the queue sheet,
+	// which follows the finger and snaps open on release. Touches starting
+	// on the artwork, title or seek bar itself are ignored.
+	const seekRef = useRef<HTMLDivElement>(null);
+	const swipeHandlers = useQueueDragGesture((clientY) => {
+		const seekBottom =
+			seekRef.current?.getBoundingClientRect().bottom ??
+			Number.NEGATIVE_INFINITY;
+		return clientY >= seekBottom;
+	});
 
 	const { currentTime, duration } = useMediaTime(
 		videoElementRef,
@@ -79,7 +79,10 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 	};
 
 	return (
-		<div className="relative flex h-full flex-col overflow-hidden bg-background">
+		<div
+			className="relative flex h-full flex-col overflow-hidden bg-background"
+			{...swipeHandlers}
+		>
 			{/* Blurred cover as the backdrop, re-fading on track change */}
 			{currentSong.thumbnail && (
 				<div
@@ -96,13 +99,14 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 				</div>
 			)}
 
-			{/* Top-right actions: queue (desktop — mobile swipes the artwork
-			    up instead) + close */}
+			{/* Top-right actions: queue + close. The queue button stays visible
+			    on mobile — bottom-edge swipes belong to Android's gesture
+			    navigation, so the artwork swipe alone is not reliable. */}
 			<div className="absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,var(--safe-area-top))] max-md:right-4 flex items-center gap-2">
 				<button
 					aria-label="Toggle queue"
 					className={cn(
-						"grid size-9 place-items-center rounded-full transition-colors duration-200 max-md:hidden",
+						"grid size-9 place-items-center rounded-full transition-colors duration-200",
 						isQueueOpen
 							? "bg-primary/15 text-primary"
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -154,71 +158,94 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					/>
 				</section>
 
-				{/* Artwork + controls */}
+				{/* Artwork + controls. On mobile the controls stay pinned to the
+			    bottom: the artwork block flexes into the space above them. */}
 				<section
 					className={cn(
-						"order-1 flex min-h-0 flex-1 flex-col items-center justify-center gap-4 max-md:overflow-hidden md:order-2 md:gap-6",
+						"order-1 flex min-h-0 flex-1 flex-col items-center gap-4 max-md:overflow-hidden md:order-2 md:justify-center md:gap-6",
 						showLyrics && "max-md:flex-none",
 					)}
 				>
-					{/* Artwork — swipe up opens the queue (mobile) */}
+					{/* Artwork + title. Compact row in mobile lyrics mode, stacked
+					    and centered otherwise. */}
 					<div
-						className="group relative touch-none"
-						onTouchEnd={handleSwipeEnd}
-						onTouchStart={handleSwipeStart}
-					>
-						<div
-							aria-hidden
-							className="absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl"
-						/>
-						{currentSong.thumbnail ? (
-							<img
-								alt={currentSong.title}
-								className={cn(
-									"animate-track-in relative aspect-square rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)] md:w-[min(40vh,320px)]",
-									showLyrics
-										? "max-md:w-[min(20vh,160px)]"
-										: "max-md:w-[min(34vh,280px)]",
-								)}
-								key={`art-${currentSong.id}`}
-								src={proxiedImageUrl(currentSong.thumbnail)}
-							/>
-						) : (
-							<div
-								className={cn(
-									"relative grid aspect-square place-items-center rounded-2xl border border-foreground/10 bg-card md:w-[min(40vh,320px)]",
-									showLyrics
-										? "max-md:w-[min(20vh,160px)]"
-										: "max-md:w-[min(34vh,280px)]",
-								)}
-							>
-								<Music2 className="size-14 text-muted-foreground" />
-							</div>
+						className={cn(
+							"flex w-full items-center gap-4 max-md:flex-1",
+							showLyrics
+								? "max-md:justify-start"
+								: "max-md:flex-col max-md:justify-center",
+							"md:flex-col md:gap-6",
 						)}
-					</div>
-
-					{/* Title + artist */}
-					<div className="max-w-full text-center">
-						<h1
-							className="animate-track-in truncate text-2xl font-bold tracking-tight sm:text-3xl"
-							key={`title-${currentSong.id}`}
+					>
+						{/* Artwork */}
+						<div
+							className={cn(
+								"group relative touch-none select-none",
+								showLyrics && "max-md:w-16 max-md:shrink-0",
+							)}
 						>
-							<SongTitle
-								artist={currentSong.artist}
-								title={currentSong.title}
+							<div
+								aria-hidden
+								className={cn(
+									"absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl",
+									showLyrics && "max-md:hidden",
+								)}
 							/>
-						</h1>
-						<p
-							className="animate-track-in mt-1 text-base text-muted-foreground"
-							key={`artist-${currentSong.id}`}
-							style={{ animationDelay: "60ms" }}
+							{currentSong.thumbnail ? (
+								<img
+									alt={currentSong.title}
+									className={cn(
+										"animate-track-in relative aspect-square rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)] md:w-[min(40vh,320px)]",
+										showLyrics
+											? "max-md:w-16 max-md:rounded-xl"
+											: "max-md:w-[min(34vh,280px)]",
+									)}
+									draggable={false}
+									key={`art-${currentSong.id}`}
+									src={proxiedImageUrl(currentSong.thumbnail)}
+								/>
+							) : (
+								<div
+									className={cn(
+										"relative grid aspect-square place-items-center rounded-2xl border border-foreground/10 bg-card md:w-[min(40vh,320px)]",
+										showLyrics
+											? "max-md:w-16 max-md:rounded-xl"
+											: "max-md:w-[min(34vh,280px)]",
+									)}
+								>
+									<Music2 className="size-14 text-muted-foreground" />
+								</div>
+							)}
+						</div>
+
+						{/* Title + artist */}
+						<div
+							className={cn(
+								"max-w-full text-center",
+								showLyrics && "min-w-0 flex-1 max-md:text-left",
+							)}
 						>
-							<ArtistLinks song={currentSong} />
-						</p>
+							<h1
+								className="animate-track-in truncate text-2xl font-bold tracking-tight sm:text-3xl"
+								key={`title-${currentSong.id}`}
+							>
+								<SongTitle
+									artist={currentSong.artist}
+									title={currentSong.title}
+								/>
+							</h1>
+							<p
+								className="animate-track-in mt-1 truncate text-base text-muted-foreground"
+								key={`artist-${currentSong.id}`}
+								style={{ animationDelay: "60ms" }}
+							>
+								<ArtistLinks song={currentSong} />
+							</p>
+						</div>
 					</div>
 
-					{/* Seek + timecodes */}
-					<div className="w-full max-w-md">
+					{/* Seek + timecodes — swipes starting here or above are ignored */}
+					<div className="w-full max-w-md" ref={seekRef}>
 						<ProgressBar onSeek={handleSeek} progress={progress} />
 						<div className="mt-0.5 flex justify-between font-mono text-[11px] text-muted-foreground tabular-nums">
 							<span>{formatTime(currentTime)}</span>
@@ -247,7 +274,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 								{isPlaying ? (
 									<Pause className="size-6 fill-current" />
 								) : (
-									<Play className="size-6 translate-x-[1px] fill-current" />
+									<Play className="size-6 translate-x-px fill-current" />
 								)}
 							</button>
 							<button
@@ -284,6 +311,18 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 						/>
 					</div>
 
+					{/* Queue affordance (mobile): tapping opens the sheet, swiping
+					    up anywhere below the progress bar drags it in. */}
+					<button
+						aria-label="Open queue"
+						className="mx-auto flex items-center gap-1.5 rounded-full bg-foreground/6 px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-foreground/10 hover:text-foreground active:scale-95 md:hidden"
+						onClick={() => toggleQueue()}
+						type="button"
+					>
+						<ChevronsUp className="size-3.5" />
+						Queue
+					</button>
+
 					{/* Up next — the next card plus ~3 more tucked underneath it
 				    (whole cards, only their top edges peeking). On hover they
 				    slide down into the reserved space, so nothing else moves.
@@ -307,13 +346,13 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 										song={queue[currentIndex + 1]}
 									/>
 								</div>
-								<div className="h-[176px] overflow-hidden">
+								<div className="h-44 overflow-hidden">
 									{queue
 										.slice(currentIndex + 2, currentIndex + 5)
 										.map((song, k) => (
 											<div
 												className={cn(
-													"relative -mt-[46px] origin-top scale-[0.97] transition-all duration-300 ease-out group-hover/upn:mt-1.5 group-hover/upn:scale-100",
+													"relative -mt-11.5 origin-top scale-[0.97] transition-all duration-300 ease-out group-hover/upn:mt-1.5 group-hover/upn:scale-100",
 												)}
 												// biome-ignore lint/suspicious/noArrayIndexKey: queue may contain duplicate video ids
 												key={`queue-${song.id}-${currentIndex + 2 + k}`}
