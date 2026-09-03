@@ -1,12 +1,13 @@
-import { Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
 import { SongTitle } from "@/components/song-title";
+import { SwipeToQueue } from "@/components/swipe-to-queue";
+import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
-import { hiResThumb } from "@/lib/utils";
+import { cn, hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import { getYoutubeClient } from "../lib/youtube-client";
 
@@ -15,7 +16,7 @@ interface SearchResultsPageProps {
 }
 
 export default function SearchResults({ query }: SearchResultsPageProps) {
-	const { play, currentSong, isPlaying } = usePlayer();
+	const { play, addToQueue, currentSong, isPlaying } = usePlayer();
 	const [results, setResults] = useState<YTNodes.MusicResponsiveListItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -69,17 +70,19 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 		return (
 			<div>
 				<SectionHeader label={`Searching for "${query}"`} />
-				<div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+				<div className="space-y-2">
 					{Array.from({ length: 8 }, (_, i) => (
 						<div
-							className="animate-track-in"
+							className="animate-track-in flex items-center gap-3 px-2.5"
 							// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
 							key={i}
 							style={{ animationDelay: `${i * 45}ms` }}
 						>
-							<div className="shimmer-surface aspect-square rounded-xl" />
-							<div className="shimmer-surface mt-3 h-4 w-3/4 rounded-md" />
-							<div className="shimmer-surface mt-2 h-3 w-1/2 rounded-md" />
+							<div className="shimmer-surface size-10 rounded-md" />
+							<div className="min-w-0 flex-1">
+								<div className="shimmer-surface h-4 w-2/5 rounded-md" />
+								<div className="shimmer-surface mt-2 h-3 w-1/4 rounded-md" />
+							</div>
 						</div>
 					))}
 				</div>
@@ -99,65 +102,57 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 	return (
 		<div>
 			<SectionHeader count={results.length} label={`Results for "${query}"`} />
-			<div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+			<div className="space-y-0.5">
 				{results.map((video, i) => {
 					const song = toSong(video);
 					const isCurrent = currentSong?.id === song.id;
 					return (
-						<button
-							className="group animate-track-in relative overflow-hidden rounded-xl border border-foreground/8 bg-card text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40"
+						<SwipeToQueue
 							// biome-ignore lint/suspicious/noArrayIndexKey: search results may repeat video ids across shelves
 							key={`${video.id}-${i}`}
-							onClick={() => play(song)}
-							style={{ animationDelay: `${Math.min(i * 35, 400)}ms` }}
-							type="button"
+							onQueue={() => addToQueue([song])}
 						>
-							<div className="relative aspect-square overflow-hidden">
-								{song.thumbnail && (
+							<button
+								className={cn(
+									"group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
+									isCurrent && "bg-primary/8",
+								)}
+								onClick={() => play(song)}
+								style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}
+								type="button"
+							>
+								{song.thumbnail ? (
 									<img
 										alt={video.title}
-										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+										className="size-10 rounded-md border border-foreground/10 object-cover"
 										loading="lazy"
 										src={proxiedImageUrl(song.thumbnail)}
 									/>
+								) : (
+									<div className="size-10 rounded-md bg-muted" />
 								)}
-								{video.duration?.text && (
-									<span className="absolute top-2 right-2 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/90">
-										{video.duration.text}
+								<div className="min-w-0">
+									<h3
+										className={cn(
+											"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+											isCurrent && "text-primary",
+										)}
+									>
+										<SongTitle artist={song.artist} title={video.title ?? ""} />
+									</h3>
+									<p className="truncate text-xs text-muted-foreground">
+										<ArtistLinks song={song} />
+									</p>
+								</div>
+								{isCurrent && isPlaying ? (
+									<EqualizerBars className="mr-1 size-3.5 text-primary" />
+								) : (
+									<span className="pr-1 font-mono text-xs text-muted-foreground/70 tabular-nums">
+										{video.duration?.text}
 									</span>
 								)}
-								{/* Play on hover */}
-								<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-									{isCurrent && isPlaying ? (
-										<span
-											aria-hidden
-											className="inline-flex h-3.5 items-end gap-0.5"
-										>
-											{[0, 1, 2].map((j) => (
-												<span
-													className="animate-eq w-0.75 origin-bottom rounded-full bg-current"
-													key={j}
-													style={{
-														height: "100%",
-														animationDelay: `${j * 160}ms`,
-													}}
-												/>
-											))}
-										</span>
-									) : (
-										<Play className="size-4 translate-x-px fill-current" />
-									)}
-								</span>
-							</div>
-							<div className="p-2">
-								<h3 className="mt-2 line-clamp-2 text-sm font-semibold">
-									<SongTitle artist={song.artist} title={video.title ?? ""} />
-								</h3>
-								<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-									<ArtistLinks song={song} />
-								</p>
-							</div>
-						</button>
+							</button>
+						</SwipeToQueue>
 					);
 				})}
 			</div>

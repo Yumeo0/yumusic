@@ -49,7 +49,7 @@ export function QueuePanel({
 				</button>
 			</div>
 
-			<div className="min-h-0 flex-1 overflow-y-auto p-2">
+			<div className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]">
 				{queue.length === 0 ? (
 					<p className="p-4 text-sm text-muted-foreground/70">
 						Queue is empty — play something to fill it up.

@@ -30,6 +30,14 @@
 	--sidebar: oklch(0.145 0.012 70);
 	--sidebar-foreground: oklch(0.925 0.02 85);
 	--radius: 0.75rem;
+
+	/* System safe-area insets (requires viewport-fit=cover in the viewport
+	   meta). The 0px fallback keeps layouts sane on browsers that don't
+	   support env() — desktop and older WebViews resolve to zero. */
+	--safe-area-top: env(safe-area-inset-top, 0px);
+	--safe-area-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-area-left: env(safe-area-inset-left, 0px);
+	--safe-area-right: env(safe-area-inset-right, 0px);
 }
 
 @theme inline {

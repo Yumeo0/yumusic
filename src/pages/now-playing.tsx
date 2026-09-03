@@ -98,7 +98,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 
 			{/* Top-right actions: queue (desktop — mobile swipes the artwork
 			    up instead) + close */}
-			<div className="absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,env(safe-area-inset-top))] max-md:right-4 flex items-center gap-2">
+			<div className="absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,var(--safe-area-top))] max-md:right-4 flex items-center gap-2">
 				<button
 					aria-label="Toggle queue"
 					className={cn(
@@ -128,7 +128,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 			    part of the screen while the artwork block shrinks below.
 			    Fixed heights keep the cover and controls from shifting when
 			    lyrics load or scroll. */}
-			<main className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 px-6 pt-14 pb-8 max-md:pt-[max(3.5rem,env(safe-area-inset-top))] sm:px-10 md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:gap-6 lg:gap-14">
+			<main className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 px-6 pt-14 pb-8 max-md:pt-[max(3.5rem,var(--safe-area-top))] max-md:pb-[calc(2rem+var(--safe-area-bottom))] sm:px-10 md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:gap-6 lg:gap-14">
 				{/* Lyrics */}
 				<section
 					className={cn(

@@ -17,6 +17,14 @@ function proxyOrigin(): string {
 export const PROXY_ORIGIN = proxyOrigin();
 
 /**
+ * Android WebView's `shouldInterceptRequest` does not expose request bodies
+ * to custom protocol handlers, so wry always delivers an empty body to the
+ * proxy on Android. The frontend compensates by base64-encoding the body
+ * into the X-Proxy-Body header, which the proxy decodes server-side.
+ */
+export const NEEDS_BODY_HEADER = navigator.userAgent.includes("Android");
+
+/**
  * Rewrites a remote image URL to load through the app's Tauri proxy. The
  * proxy keeps an in-memory image cache (custom-scheme responses bypass the
  * WebView's HTTP cache), paces concurrent upstream fetches and backs off on

@@ -561,8 +561,9 @@ function AppShell({
 				{/* ── Main content ────────────────────────────── */}
 				<main className="relative flex-1 overflow-hidden">
 					<ScrollArea className="h-full">
-						{/* Extra bottom room on mobile clears the nav bar + player */}
-						<div className="pb-44 md:pb-32">
+						{/* Extra top/bottom room on mobile: status-bar safe area,
+						    plus nav bar + player clearance */}
+						<div className="max-md:pt-[var(--safe-area-top)] pb-44 md:pb-32">
 							<div className="animate-page-in" key={location.pathname}>
 								<Routes>
 									<Route element={<HomePage />} path="/" />
@@ -611,7 +612,7 @@ function MobileNav() {
 
 	return (
 		<nav
-			className="fixed inset-x-0 bottom-0 z-[45] flex min-h-13 items-stretch border-t border-foreground/8 bg-sidebar/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
+			className="fixed inset-x-0 bottom-0 z-[45] flex min-h-13 items-stretch border-t pt-4 border-foreground/8 bg-sidebar/95 pb-[var(--safe-area-bottom)] backdrop-blur-xl md:hidden"
 			data-mobile-nav
 		>
 			<MobileNavItem

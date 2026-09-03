@@ -47,7 +47,7 @@ export function Player() {
 
 	return (
 		<footer
-			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+env(safe-area-inset-bottom))] cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
+			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			onClick={toggleNowPlaying}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}

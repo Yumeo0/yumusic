@@ -58,6 +58,35 @@ rust {
     rootDirRel = "../../../"
 }
 
+// The Tauri CLI rewrites generated/*.kt template files during the build,
+// restoring a buggy RustWebView.getCookies that crashes the whole app with
+// a NullPointerException when a URL has no cookies yet (breaks the Google
+// login flow). The culprit: every rustBuild* task shells out to
+// `tauri android android-studio-script`, which regenerates the Kotlin
+// templates mid-build. Re-apply the null-safe fix as late as possible:
+// once the task graph is ready, before each rust build task executes, and
+// immediately before each Kotlin compile task runs (this last hook is the
+// one that actually guarantees the fixed source reaches the compiler).
+// Keep in sync if the generated class changes upstream.
+val webviewKt = file("src/main/java/dev/yumeo/yumusic/generated/RustWebView.kt")
+fun patchRustWebView() {
+    if (!webviewKt.exists()) return
+    val buggy = "return cookieManager.getCookie(url)"
+    val fixed = "return cookieManager.getCookie(url) ?: \"\""
+    val text = webviewKt.readText()
+    if (fixed in text || buggy !in text) return
+    webviewKt.writeText(text.replace(buggy, fixed))
+    println("[patch-android] null-safe RustWebView.getCookies applied")
+}
+
+gradle.taskGraph.whenReady { patchRustWebView() }
+tasks.matching { it.name.startsWith("rustBuild") }.configureEach {
+    doFirst { patchRustWebView() }
+}
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    doFirst { patchRustWebView() }
+}
+
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")

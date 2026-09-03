@@ -9,7 +9,28 @@ import {
 } from "youtubei.js/web";
 import { botguardService } from "./botguard-service";
 import type { LrcLine } from "./lrclib";
-import { PROXY_ORIGIN } from "./tauri";
+import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "./tauri";
+
+/** Base64-encodes a request body for transport inside an HTTP header. */
+async function bodyToBase64(body: BodyInit): Promise<string | null> {
+	let bytes: Uint8Array;
+	if (typeof body === "string") {
+		bytes = new TextEncoder().encode(body);
+	} else if (body instanceof Blob) {
+		bytes = new Uint8Array(await body.arrayBuffer());
+	} else if (body instanceof ArrayBuffer) {
+		bytes = new Uint8Array(body);
+	} else if (ArrayBuffer.isView(body)) {
+		bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+	} else {
+		return null;
+	}
+	let binary = "";
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	}
+	return btoa(binary);
+}
 
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
@@ -110,11 +131,17 @@ export async function fetchFunction(
 			controller.abort();
 		}, 30000);
 
+		const proxyHeaders: Record<string, string> = {
+			"X-Proxy-Headers": JSON.stringify(headersObj),
+		};
+		if (NEEDS_BODY_HEADER && body != null) {
+			const encoded = await bodyToBase64(body);
+			if (encoded) proxyHeaders["X-Proxy-Body"] = encoded;
+		}
+
 		const response = await fetch(proxyUrl.toString(), {
 			method: method,
-			headers: {
-				"X-Proxy-Headers": JSON.stringify(headersObj),
-			},
+			headers: proxyHeaders,
 			body: body,
 			signal: controller.signal,
 		});
@@ -136,9 +163,12 @@ export async function fetchFunction(
 	}
 }
 
+// Bun's `fetch` type carries a `preconnect` member; provide a no-op so
+// the custom fetch is assignable to youtubei.js' `typeof fetch` option.
+Object.assign(fetchFunction, { preconnect: () => undefined });
+
 export async function getYoutubeClient(cookie?: string) {
 	if (youtube && !cookie) return youtube;
-
 	// If cookie is provided, we force recreation or if we don't have one yet
 	if (cookie || !youtube) {
 		// Try to get cookie from electron if not provided
@@ -148,7 +178,10 @@ export async function getYoutubeClient(cookie?: string) {
 			cache: new UniversalCache(false),
 			generate_session_locally: true,
 			cookie: userCookie || undefined,
-			fetch: fetchFunction,
+			// Bun's `fetch` type carries a required `preconnect` member that the
+			// DOM-flavored custom fetch lacks; the runtime object satisfies it
+			// via the Object.assign above.
+			fetch: fetchFunction as typeof fetch,
 		});
 	}
 

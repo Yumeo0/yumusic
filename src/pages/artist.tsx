@@ -11,6 +11,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
 import { SongTitle } from "@/components/song-title";
+import { SwipeToQueue } from "@/components/swipe-to-queue";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -158,7 +159,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const { play, currentSong, isPlaying } = usePlayer();
+	const { play, addToQueue, currentSong, isPlaying } = usePlayer();
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -297,57 +298,61 @@ export default function ArtistPage() {
 						{artist.songs.map((song, index) => {
 							const isCurrent = currentSong?.id === song.id;
 							return (
-								<button
-									className={cn(
-										"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05]",
-										isCurrent && "bg-primary/[0.08]",
-									)}
+								<SwipeToQueue
 									key={song.id || `artist-song-${index}`}
-									onClick={() => play(song, artist.songs.slice(index + 1))}
-									type="button"
+									onQueue={() => addToQueue([song])}
 								>
-									<span className="relative grid place-items-center">
-										{isCurrent ? (
-											<EqualizerBars
-												className="size-3.5 text-primary"
-												playing={isPlaying}
+									<button
+										className={cn(
+											"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05]",
+											isCurrent && "bg-primary/[0.08]",
+										)}
+										onClick={() => play(song, artist.songs.slice(index + 1))}
+										type="button"
+									>
+										<span className="relative grid place-items-center">
+											{isCurrent ? (
+												<EqualizerBars
+													className="size-3.5 text-primary"
+													playing={isPlaying}
+												/>
+											) : (
+												<>
+													<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+														{index + 1}
+													</span>
+													<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
+												</>
+											)}
+										</span>
+										{song.thumbnail ? (
+											<img
+												alt={song.title}
+												className="size-10 rounded-md border border-foreground/10 object-cover"
+												loading="lazy"
+												src={proxiedImageUrl(song.thumbnail)}
 											/>
 										) : (
-											<>
-												<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-													{index + 1}
-												</span>
-												<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
-											</>
+											<div className="size-10 rounded-md bg-muted" />
 										)}
-									</span>
-									{song.thumbnail ? (
-										<img
-											alt={song.title}
-											className="size-10 rounded-md border border-foreground/10 object-cover"
-											loading="lazy"
-											src={proxiedImageUrl(song.thumbnail)}
-										/>
-									) : (
-										<div className="size-10 rounded-md bg-muted" />
-									)}
-									<div className="min-w-0">
-										<h3
-											className={cn(
-												"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-												isCurrent && "text-primary",
-											)}
-										>
-											<SongTitle artist={song.artist} title={song.title} />
-										</h3>
-										<p className="truncate text-xs text-muted-foreground">
-											<ArtistLinks song={song} />
-										</p>
-									</div>
-									<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
-										{song.duration}
-									</span>
-								</button>
+										<div className="min-w-0">
+											<h3
+												className={cn(
+													"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+													isCurrent && "text-primary",
+												)}
+											>
+												<SongTitle artist={song.artist} title={song.title} />
+											</h3>
+											<p className="truncate text-xs text-muted-foreground">
+												<ArtistLinks song={song} />
+											</p>
+										</div>
+										<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
+											{song.duration}
+										</span>
+									</button>
+								</SwipeToQueue>
 							);
 						})}
 					</div>

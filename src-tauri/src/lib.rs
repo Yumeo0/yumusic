@@ -14,6 +14,22 @@ fn cookie_path(app: &AppHandle) -> Result<PathBuf, String> {
 	Ok(dir.join("cookie.json"))
 }
 
+/// Joins cookies into a header value, keeping only the first occurrence of
+/// each name. Google rejects headers that list a cookie twice with a
+/// redirect to accounts.google.com/CookieMismatch; older YuMusic versions
+/// stored such duplicated headers, so this is applied on read as well.
+fn dedup_cookie_header(header: &str) -> String {
+	let mut seen = std::collections::HashSet::new();
+	header
+		.split("; ")
+		.filter(|pair| {
+			let name = pair.split('=').next().unwrap_or_default();
+			!name.is_empty() && seen.insert(name.to_string())
+		})
+		.collect::<Vec<_>>()
+		.join("; ")
+}
+
 #[tauri::command]
 fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
 	let path = cookie_path(&app)?;
@@ -25,7 +41,7 @@ fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
 	Ok(value
 		.get("cookie")
 		.and_then(|cookie| cookie.as_str())
-		.map(String::from))
+		.map(dedup_cookie_header))
 }
 
 #[tauri::command]
@@ -48,7 +64,13 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 		.build()
 		.map_err(|e| e.to_string())?;
 
-	let youtube_url = Url::parse("https://www.youtube.com/").map_err(|e| e.to_string())?;
+	// Check both the desktop and mobile YouTube origins: after signing in, the
+	// webview can land on m.youtube.com, whose cookies would not be returned
+	// when querying www.youtube.com on some platforms (e.g. Android).
+	let youtube_urls = [
+		Url::parse("https://www.youtube.com/").map_err(|e| e.to_string())?,
+		Url::parse("https://m.youtube.com/").map_err(|e| e.to_string())?,
+	];
 
 	loop {
 		tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -57,16 +79,22 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 			break;
 		}
 
-		let cookies = match window.cookies_for_url(youtube_url.clone()) {
-			Ok(cookies) => cookies,
-			Err(_) => continue,
-		};
-
-		let header = cookies
-			.iter()
-			.map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
-			.collect::<Vec<_>>()
-			.join("; ");
+		// Both origins carry the same session cookies; deduplicate by name.
+		// A Cookie header that lists every cookie twice gets rejected by
+		// Google with a redirect to accounts.google.com/CookieMismatch,
+		// which then looks like a signed-out session everywhere.
+		let mut seen = std::collections::HashSet::new();
+		let mut parts: Vec<String> = Vec::new();
+		for url in &youtube_urls {
+			if let Ok(cookies) = window.cookies_for_url(url.clone()) {
+				for cookie in cookies {
+					if seen.insert(cookie.name().to_string()) {
+						parts.push(format!("{}={}", cookie.name(), cookie.value()));
+					}
+				}
+			}
+		}
+		let header = parts.join("; ");
 
 		if header.contains("__Secure-3PSID") {
 			let path = cookie_path(&app)?;
@@ -74,7 +102,18 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 				serde_json::to_string(&serde_json::json!({ "cookie": header.clone() }))
 					.map_err(|e| e.to_string())?;
 			fs::write(&path, data).map_err(|e| e.to_string())?;
-			let _ = window.close();
+
+			if cfg!(target_os = "android") {
+				// Android runs the whole app in a single activity, so closing
+				// the login window is a no-op and finishing the activity would
+				// quit the app. Instead, navigate the same webview back to the
+				// app frontend.
+				if let Ok(app_url) = Url::parse("http://tauri.localhost/") {
+					let _ = window.navigate(app_url);
+				}
+			} else {
+				let _ = window.close();
+			}
 			return Ok(Some(header));
 		}
 	}

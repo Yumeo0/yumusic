@@ -7,6 +7,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
+		"android": "bun scripts/android-dev.ts",
 		"build": "tsc --noEmit && vite build",
 		"preview": "vite preview",
 		"tauri": "tauri",
@@ -34,6 +35,7 @@
 		"@biomejs/biome": "2.5.11",
 		"@tailwindcss/vite": "^4.3.3",
 		"@tauri-apps/cli": "^2.11.4",
+		"@types/bun": "^1.4.0",
 		"@types/node": "^26.4.0",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.5",

@@ -1,3 +1,4 @@
+use base64::Engine;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -6,7 +7,7 @@ use serde_json::Value;
 use tauri::http::{HeaderMap, HeaderName, HeaderValue, Method, Request, Response, StatusCode};
 use tauri::{Runtime, UriSchemeContext, UriSchemeResponder};
 
-const ALLOWED_HEADERS: &str = "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-goog-visitor-id, x-goog-api-key, x-origin, x-youtube-client-version, x-youtube-client-name, x-goog-api-format-version, x-goog-authuser, x-user-agent, Accept-Language, X-Goog-FieldMask, Range, Referer, Cookie, X-Proxy-Headers";
+const ALLOWED_HEADERS: &str = "Origin, X-Requested-With, Content-Type, Accept, Authorization, x-goog-visitor-id, x-goog-api-key, x-origin, x-youtube-client-version, x-youtube-client-name, x-goog-api-format-version, x-goog-authuser, x-user-agent, Accept-Language, X-Goog-FieldMask, Range, Referer, Cookie, X-Proxy-Headers, X-Proxy-Body";
 
 /// Artwork CDN hosts. Upstream throttles these aggressively (429), so their
 /// GETs are paced, retried with backoff and cooled down individually.
@@ -450,7 +451,23 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		upstream_headers.insert("authorization", auth.clone());
 	}
 
-	let body = request.into_body();
+	// Android's WebView API (shouldInterceptRequest) does not expose request
+	// bodies to custom protocol handlers, so wry always hands us an empty body
+	// there. The frontend works around this by sending the body base64-encoded
+	// in the X-Proxy-Body header; fall back to it when the body is empty.
+	let proxy_body = request
+		.headers()
+		.get("x-proxy-body")
+		.and_then(|value| value.to_str().ok())
+		.map(String::from);
+	let mut body = request.into_body();
+	if body.is_empty() {
+		if let Some(encoded) = proxy_body {
+			if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
+				body = decoded;
+			}
+		}
+	}
 
 	// Artwork hosts throttle hard (429), so their fetches are retried with
 	// backoff while paced through the shared semaphore; other requests are

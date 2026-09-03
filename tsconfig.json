@@ -13,12 +13,11 @@
 		"isolatedModules": true,
 		"jsx": "react-jsx",
 		"lib": ["ESNext", "DOM", "DOM.Iterable"],
-		"types": ["vite/client"],
+		"types": ["vite/client", "bun"],
 
 		"paths": {
 			"@/*": ["./src/*"]
 		}
 	},
-	"include": ["src"],
-	"exclude": ["src/**/*.test.ts"]
+	"include": ["src", "scripts", "vite.config.ts"]
 }

@@ -282,7 +282,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 			let contentLength: string | undefined;
 
 			while (!abortController.signal.aborted) {
-				let readObj: ReadableStreamReadResult<Uint8Array>;
+				let readObj: Awaited<ReturnType<typeof reader.read>>;
 				try {
 					readObj = await reader.read();
 				} catch {
