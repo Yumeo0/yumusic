@@ -216,6 +216,14 @@
 	}
 }
 
+/* Long track lists: let the browser skip layout/paint for rows that are
+   scrolled out of view, so hovering or scrolling a 1000+ row playlist
+   doesn't restyle the whole tree. */
+@utility cv-row {
+	content-visibility: auto;
+	contain-intrinsic-size: auto 56px;
+}
+
 /* Shimmering skeleton surface */
 @utility shimmer-surface {
 	background: linear-gradient(

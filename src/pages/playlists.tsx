@@ -473,7 +473,16 @@ export default function PlaylistsPage() {
 
 	const fetchPlaylists = async (force = false) => {
 		const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
-		if (!force && cached && Date.now() - cached.timestamp < SYNC_INTERVAL_MS) {
+		// An empty cached list is treated as absent: it usually means a fetch
+		// raced the login cookie, and caching it for 24h would pin the
+		// "no playlists" state even after the session is available.
+		const cacheUsable = !!cached && cached.data.length > 0;
+		if (
+			!force &&
+			cached &&
+			cacheUsable &&
+			Date.now() - cached.timestamp < SYNC_INTERVAL_MS
+		) {
 			setPlaylists(cached.data);
 			setLoading(false);
 			return;
@@ -489,31 +498,40 @@ export default function PlaylistsPage() {
 				return;
 			}
 
-			const foundItems: YTNodes.MusicTwoRowItem[] = [];
+			// The library renders playlists either as square grid tiles
+			// (MusicTwoRowItem) or as list rows (MusicResponsiveListItem),
+			// depending on the section layout — accept both.
+			const list: LibraryPlaylist[] = [];
 			for (const section of library.contents ?? []) {
-				if (section.contents) {
-					foundItems.push(
-						...section.contents.filterType(YTNodes.MusicTwoRowItem),
-					);
+				for (const item of section.contents ?? []) {
+					if (item.is(YTNodes.MusicTwoRowItem)) {
+						if (item.item_type !== "playlist") continue;
+						list.push({
+							id: item.id || "",
+							title: item.title?.text || "Unknown Title",
+							subtitle: cleanSubtitle(item.subtitle?.text || ""),
+							thumbnail: hiResThumb(
+								item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+							),
+						});
+					} else if (item.is(YTNodes.MusicResponsiveListItem)) {
+						if (item.item_type !== "playlist") continue;
+						const thumbs = item.thumbnail?.contents ?? [];
+						list.push({
+							id: item.id || "",
+							title: item.title || "Unknown Title",
+							subtitle: cleanSubtitle(item.subtitle?.text || ""),
+							thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+						});
+					}
 				}
 			}
-
-			const list: LibraryPlaylist[] = foundItems
-				.filter((item) => item.item_type === "playlist")
-				.map((item) => ({
-					id: item.id || "",
-					title: item.title?.text || "Unknown Title",
-					subtitle: cleanSubtitle(item.subtitle?.text || ""),
-					thumbnail: hiResThumb(
-						item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
-					),
-				}));
 			setPlaylists(list);
-			writeCache(LIBRARY_CACHE_KEY, list);
+			if (list.length > 0) writeCache(LIBRARY_CACHE_KEY, list);
 		} catch (err) {
 			console.error("Error fetching playlists:", err);
 			// Stale cache beats an error screen
-			if (cached) setPlaylists(cached.data);
+			if (cacheUsable && cached) setPlaylists(cached.data);
 			else setError("Failed to load playlists.");
 		} finally {
 			setLoading(false);

@@ -9,7 +9,7 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState, type RefObject } from "react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
 import { SongTitle } from "@/components/song-title";
@@ -63,20 +63,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 		return clientY >= seekBottom;
 	});
 
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		currentSong?.id,
-	);
-	const progress = duration > 0 ? currentTime / duration : 0;
-
 	if (!currentSong) return null;
-
-	const handleSeek = (percent: number) => {
-		const videoEl = videoElementRef?.current;
-		if (videoEl && duration > 0) {
-			videoEl.currentTime = percent * duration;
-		}
-	};
 
 	return (
 		<div
@@ -142,19 +129,9 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 							: "order-2 h-36 shrink-0 max-md:hidden",
 					)}
 				>
-					<LyricsPanel
-						artist={currentSong.artist}
-						className="mx-auto w-full max-w-xl"
-						currentTime={currentTime}
-						duration={duration}
-						onSeekTime={(seconds) => {
-							const videoEl = videoElementRef?.current;
-							if (videoEl) {
-								videoEl.currentTime = seconds;
-							}
-						}}
-						songId={currentSong.id}
-						title={currentSong.title}
+					<NowPlayingLyrics
+						song={currentSong}
+						videoElementRef={videoElementRef}
 					/>
 				</section>
 
@@ -246,11 +223,10 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 
 					{/* Seek + timecodes — swipes starting here or above are ignored */}
 					<div className="w-full max-w-md" ref={seekRef}>
-						<ProgressBar onSeek={handleSeek} progress={progress} />
-						<div className="mt-0.5 flex justify-between font-mono text-[11px] text-muted-foreground tabular-nums">
-							<span>{formatTime(currentTime)}</span>
-							<span>{formatTime(duration)}</span>
-						</div>
+						<NowPlayingSeek
+							songId={currentSong.id}
+							videoElementRef={videoElementRef}
+						/>
 					</div>
 
 					{/* Transport + volume */}
@@ -375,6 +351,69 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 				</section>
 			</main>
 		</div>
+	);
+}
+
+type VideoRef = RefObject<HTMLVideoElement | null> | null;
+
+/**
+ * Seek bar + timecodes. Isolated so the several-times-a-second timeupdate
+ * only re-renders this strip, not the backdrop, artwork and up-next rows.
+ */
+function NowPlayingSeek({
+	songId,
+	videoElementRef,
+}: {
+	songId: string;
+	videoElementRef: VideoRef;
+}) {
+	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	const handleSeek = (percent: number) => {
+		const videoEl = videoElementRef?.current;
+		if (videoEl && duration > 0) {
+			videoEl.currentTime = percent * duration;
+		}
+	};
+	return (
+		<>
+			<ProgressBar
+				onSeek={handleSeek}
+				progress={duration > 0 ? currentTime / duration : 0}
+			/>
+			<div className="mt-0.5 flex justify-between font-mono text-[11px] text-muted-foreground tabular-nums">
+				<span>{formatTime(currentTime)}</span>
+				<span>{formatTime(duration)}</span>
+			</div>
+		</>
+	);
+}
+
+/** Lyrics subscribe to the clock themselves so the fullscreen tree stays put. */
+function NowPlayingLyrics({
+	song,
+	videoElementRef,
+}: {
+	song: Song;
+	videoElementRef: VideoRef;
+}) {
+	const { currentTime, duration } = useMediaTime(videoElementRef, song.id);
+	const onSeekTime = useCallback(
+		(seconds: number) => {
+			const videoEl = videoElementRef?.current;
+			if (videoEl) videoEl.currentTime = seconds;
+		},
+		[videoElementRef],
+	);
+	return (
+		<LyricsPanel
+			artist={song.artist}
+			className="mx-auto w-full max-w-xl"
+			currentTime={currentTime}
+			duration={duration}
+			onSeekTime={onSeekTime}
+			songId={song.id}
+			title={song.title}
+		/>
 	);
 }
 

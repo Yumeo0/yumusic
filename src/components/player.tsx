@@ -6,7 +6,7 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 import { SongTitle } from "@/components/song-title";
 import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
@@ -43,20 +43,7 @@ export function Player() {
 		return rowTop !== undefined && clientY >= rowTop;
 	});
 
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		currentSong?.id,
-	);
-	const progress = duration > 0 ? currentTime / duration : 0;
-
 	if (!currentSong) return null;
-
-	const handleSeek = (percent: number) => {
-		const videoEl = videoElementRef?.current;
-		if (videoEl && duration > 0) {
-			videoEl.currentTime = percent * duration;
-		}
-	};
 
 	return (
 		<footer
@@ -66,7 +53,7 @@ export function Player() {
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
 			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
-				<ProgressBar onSeek={handleSeek} progress={progress} />
+				<MiniProgress songId={currentSong.id} videoElementRef={videoElementRef} />
 			</div>
 
 			<div
@@ -166,13 +153,7 @@ export function Player() {
 				{/* Timecodes + queue + volume (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
-					<span className="font-mono text-xs text-muted-foreground tabular-nums">
-						<span className="text-foreground/80">
-							{formatTime(currentTime)}
-						</span>
-						<span className="mx-1 text-foreground/25">/</span>
-						{formatTime(duration)}
-					</span>
+					<MiniTime songId={currentSong.id} videoElementRef={videoElementRef} />
 					<button
 						aria-label="Toggle queue"
 						className={cn(
@@ -197,5 +178,51 @@ export function Player() {
 				</div>
 			</div>
 		</footer>
+	);
+}
+
+type VideoRef = RefObject<HTMLVideoElement | null> | null;
+
+/**
+ * Progress strip and timecodes subscribe to the media clock on their own, so
+ * the blurred footer doesn't re-render (and re-filter its backdrop) several
+ * times a second as playback advances.
+ */
+function MiniProgress({
+	songId,
+	videoElementRef,
+}: {
+	songId: string;
+	videoElementRef: VideoRef;
+}) {
+	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	const handleSeek = (percent: number) => {
+		const videoEl = videoElementRef?.current;
+		if (videoEl && duration > 0) {
+			videoEl.currentTime = percent * duration;
+		}
+	};
+	return (
+		<ProgressBar
+			onSeek={handleSeek}
+			progress={duration > 0 ? currentTime / duration : 0}
+		/>
+	);
+}
+
+function MiniTime({
+	songId,
+	videoElementRef,
+}: {
+	songId: string;
+	videoElementRef: VideoRef;
+}) {
+	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	return (
+		<span className="font-mono text-xs text-muted-foreground tabular-nums">
+			<span className="text-foreground/80">{formatTime(currentTime)}</span>
+			<span className="mx-1 text-foreground/25">/</span>
+			{formatTime(duration)}
+		</span>
 	);
 }

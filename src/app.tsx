@@ -411,14 +411,13 @@ function Layout() {
 
 	const handleLogin = async () => {
 		const cookie = await window.electron.login();
-		if (cookie) {
-			setIsLoggedIn(true);
-			await getYoutubeClient(cookie);
-			const profile = await getUserProfile();
-			if (profile) {
-				setUserProfile(profile);
-			}
-		}
+		if (!cookie) return;
+		// Rebuild the shared client with the new session, then reload so every
+		// mounted view (home feed, library, profile) refetches authenticated
+		// data — effects that already ran against the signed-out client would
+		// otherwise never refresh.
+		await getYoutubeClient(cookie);
+		window.location.reload();
 	};
 
 	const handleLogout = async () => {
@@ -466,7 +465,7 @@ function AppShell({
 			<Titlebar />
 			<div className="flex max-md:h-app bg-background text-foreground md:h-[calc(100vh-2.25rem)] overflow-hidden">
 				{/* ── Sidebar (desktop) ───────────────────────── */}
-				<aside className="hidden w-80 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
+				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div className="flex min-h-0 flex-1 flex-col px-4 pt-8">
 						<nav className="space-y-1">
 							<SidebarItem

@@ -66,11 +66,19 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 
 	// Check both the desktop and mobile YouTube origins: after signing in, the
 	// webview can land on m.youtube.com, whose cookies would not be returned
-	// when querying www.youtube.com on some platforms (e.g. Android).
+	// when querying www.youtube.com on some platforms (e.g. Android). The
+	// music origin is queried too in case the session is scoped to it.
 	let youtube_urls = [
 		Url::parse("https://www.youtube.com/").map_err(|e| e.to_string())?,
 		Url::parse("https://m.youtube.com/").map_err(|e| e.to_string())?,
+		Url::parse("https://music.youtube.com/").map_err(|e| e.to_string())?,
 	];
+
+	// The flow can stall on accounts.google.com, which only sets the
+	// third-party cookie variants. Bounce the webview to YouTube once (after
+	// the account cookies appear) so the first-party session cookies are
+	// issued there.
+	let mut nudged_to_youtube = false;
 
 	loop {
 		tokio::time::sleep(Duration::from_millis(1000)).await;
@@ -96,7 +104,17 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 		}
 		let header = parts.join("; ");
 
-		if header.contains("__Secure-3PSID") {
+		// `__Secure-3PSID` alone is not proof of a usable session: Google also
+		// sets the third-party variant while the flow is still on
+		// accounts.google.com. The API's `SAPISIDHASH` authorization needs a
+		// first-party secret, so wait until `SAPISID`/`__Secure-1PAPISID` shows
+		// up too (they are issued once the webview lands back on youtube.com).
+		// Capturing earlier stored a session the API treats as signed out — no
+		// profile, no home feed and an empty library.
+		let has_first_party_secret =
+			header.contains("SAPISID=") || header.contains("__Secure-1PAPISID=");
+
+		if header.contains("__Secure-3PSID") && has_first_party_secret {
 			let path = cookie_path(&app)?;
 			let data =
 				serde_json::to_string(&serde_json::json!({ "cookie": header.clone() }))
@@ -115,6 +133,13 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 				let _ = window.close();
 			}
 			return Ok(Some(header));
+		}
+
+		if header.contains("__Secure-3PSID") && !nudged_to_youtube {
+			nudged_to_youtube = true;
+			if let Some(home) = youtube_urls.first() {
+				let _ = window.navigate(home.clone());
+			}
 		}
 	}
 

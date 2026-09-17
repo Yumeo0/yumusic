@@ -14,35 +14,35 @@
 		"lint": "biome check ."
 	},
 	"dependencies": {
-		"@base-ui/react": "^1.7.0",
+		"@base-ui/react": "^1.8.0",
 		"@mjba/lyrics": "^1.3.0",
-		"@tanstack/react-virtual": "^3.14.10",
+		"@tanstack/react-virtual": "^3.14.13",
 		"@tauri-apps/api": "^2.11.1",
 		"bgutils-js": "^4.0.3",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"googlevideo": "^4.1.1",
-		"lucide-react": "^1.38.0",
+		"lucide-react": "^1.46.0",
 		"lyric-romanizer": "^0.3.1",
-		"react": "^19.2.8",
-		"react-dom": "^19.2.8",
-		"react-router-dom": "^7.18.3",
-		"shaka-player": "^5.2.8",
-		"tailwind-merge": "^3.6.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
+		"react-router-dom": "^7.18.4",
+		"shaka-player": "^5.2.10",
+		"tailwind-merge": "^3.7.0",
 		"tw-animate-css": "^1.4.0",
 		"youtubei.js": "link:youtubei.js"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.11",
+		"@biomejs/biome": "2.5.14",
 		"@tailwindcss/vite": "^4.3.3",
 		"@tauri-apps/cli": "^2.11.4",
-		"@types/bun": "^1.4.0",
+		"@types/bun": "^1.4.2",
 		"@types/node": "^26.4.0",
-		"@types/react": "^19.2.18",
-		"@types/react-dom": "^19.2.5",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
 		"@vitejs/plugin-react": "^6.1.1",
 		"tailwindcss": "^4.3.3",
 		"typescript": "~7.0.2",
-		"vite": "^8.2.2"
+		"vite": "^8.3.0"
 	}
 }

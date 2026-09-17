@@ -36,6 +36,11 @@ export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
 
 let youtube: Innertube | null = null;
+/** Cookie the cached client was built with (`null` = signed out). */
+let youtubeCookie: string | null = null;
+/** In-flight creation, shared by callers asking for the same auth state. */
+let youtubePending: Promise<Innertube> | null = null;
+let youtubePendingCookie: string | null = null;
 
 // Set up JavaScript evaluator for deciphering URLs
 Platform.shim.eval = async (
@@ -167,25 +172,58 @@ export async function fetchFunction(
 // the custom fetch is assignable to youtubei.js' `typeof fetch` option.
 Object.assign(fetchFunction, { preconnect: () => undefined });
 
+/**
+ * Returns the shared Innertube client, creating it at most once per auth
+ * state. Concurrent callers share the in-flight creation, and a signed-out
+ * creation can never replace an already-authenticated client — without these
+ * guarantees, data fetches that start before the login cookie is available
+ * (the home feed mounts before the layout's login check) could clobber the
+ * session and silently drop the account: wrong recommendations, an empty
+ * library and a nameless "User" in the sidebar.
+ */
 export async function getYoutubeClient(cookie?: string) {
-	if (youtube && !cookie) return youtube;
-	// If cookie is provided, we force recreation or if we don't have one yet
-	if (cookie || !youtube) {
-		// Try to get cookie from electron if not provided
-		const userCookie = cookie || (await window.electron.getCookie());
+	const desired = cookie || (await window.electron.getCookie()) || null;
 
-		youtube = await Innertube.create({
-			cache: new UniversalCache(false),
-			generate_session_locally: true,
-			cookie: userCookie || undefined,
-			// Bun's `fetch` type carries a required `preconnect` member that the
-			// DOM-flavored custom fetch lacks; the runtime object satisfies it
-			// via the Object.assign above.
-			fetch: fetchFunction as typeof fetch,
-		});
+	// Reuse the current client when it already matches; never downgrade an
+	// authenticated client just because no cookie was available this call.
+	if (youtube && (desired === youtubeCookie || !desired)) {
+		return youtube;
 	}
 
-	return youtube;
+	// Share an in-flight creation for the same auth state.
+	if (youtubePending && youtubePendingCookie === desired) {
+		return youtubePending;
+	}
+
+	youtubePendingCookie = desired;
+	let pending: Promise<Innertube>;
+	pending = Innertube.create({
+		cache: new UniversalCache(false),
+		generate_session_locally: true,
+		cookie: desired || undefined,
+		// Bun's `fetch` type carries a required `preconnect` member that the
+		// DOM-flavored custom fetch lacks; the runtime object satisfies it
+		// via the Object.assign above.
+		fetch: fetchFunction as typeof fetch,
+	})
+		.then((client) => {
+			// Only adopt this client if no newer auth state was requested while
+			// this creation was in flight.
+			if (youtubePendingCookie === desired) {
+				youtube = client;
+				youtubeCookie = desired;
+			}
+			return client;
+		})
+		.finally(() => {
+			if (youtubePending === pending) {
+				youtubePending = null;
+				youtubePendingCookie = null;
+			}
+		});
+	youtubePending = pending;
+
+	return pending;
 }
 
 export async function getUserProfile() {
@@ -381,12 +419,12 @@ export async function getSongStream(videoId: string) {
 		throw new Error("Missing visitor data");
 	}
 
+	// The /player endpoint rejects requests without a PoToken, so pass a
+	// visitor-bound one here. Playback mints separate per-video tokens.
 	await botguardService.init();
 	const poToken = await botguardService.mintToken(visitorData);
 	client.session.po_token = poToken;
 
-	// Use the same approach as the working sabr-shaka-example
-	// This ensures proper player session initialization
 	const playerResponse = await client.actions.execute("/player", {
 		videoId,
 		contentCheckOk: true,

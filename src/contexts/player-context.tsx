@@ -1,5 +1,5 @@
-import { SabrStreamingAdapter } from "googlevideo/sabr-streaming-adapter";
-import { buildSabrFormat } from "googlevideo/utils";
+import { SabrStream } from "googlevideo/sabr-stream";
+import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
 import {
 	createContext,
 	type ReactNode,
@@ -9,14 +9,12 @@ import {
 	useRef,
 	useState,
 } from "react";
-import shaka from "shaka-player/dist/shaka-player.ui";
-import { Constants, Utils } from "youtubei.js";
-import { type Innertube, YT } from "youtubei.js/web";
+import { Constants } from "youtubei.js";
+import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
-import { ShakaPlayerAdapter } from "@/lib/shaka-player-adapter";
 import { biggestThumb, hiResThumb } from "@/lib/utils";
-import { getSongStream } from "@/lib/youtube-client";
+import { fetchFunction, getSongStream } from "@/lib/youtube-client";
 
 export interface Song {
 	id: string;
@@ -60,6 +58,35 @@ interface PlayerContextType {
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
+/** Appends one media chunk and resolves once the SourceBuffer is ready again. */
+function appendToSourceBuffer(
+	sourceBuffer: SourceBuffer,
+	data: Uint8Array,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const cleanup = () => {
+			sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+			sourceBuffer.removeEventListener("error", onError);
+		};
+		const onUpdateEnd = () => {
+			cleanup();
+			resolve();
+		};
+		const onError = () => {
+			cleanup();
+			reject(new Error("SourceBuffer append failed"));
+		};
+		sourceBuffer.addEventListener("updateend", onUpdateEnd);
+		sourceBuffer.addEventListener("error", onError);
+		try {
+			sourceBuffer.appendBuffer(data as unknown as BufferSource);
+		} catch (error) {
+			cleanup();
+			reject(error as Error);
+		}
+	});
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
 	const [isPlaying, setIsPlaying] = useState(false);
@@ -73,12 +100,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const queueSheetRef = useRef<HTMLElement | null>(null);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
-	const playerRef = useRef<shaka.Player | null>(null);
-	const poTokenRef = useRef<string | null>(null);
-	const [sabrAdapter, setSabrAdapter] = useState<SabrStreamingAdapter | null>(
-		null,
-	);
-	const [playerReady, setPlayerReady] = useState(false);
+	const sabrStreamRef = useRef<SabrStream | null>(null);
 	const [volume, _setVolume] = useState(() => {
 		const savedVolume = localStorage.getItem("yumusic-volume");
 		const parsed = savedVolume ? Number.parseFloat(savedVolume) : NaN;
@@ -87,233 +109,130 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			: MAX_VOLUME;
 	});
 
-	// Initialize Shaka Player
+	// Load video when videoInfo changes
 	useEffect(() => {
-		shaka.polyfill.installAll();
-
-		if (!shaka.Player.isBrowserSupported()) {
-			console.error(
-				"[PlayerContext] Shaka Player is not supported on this browser.",
-			);
-			return;
-		}
-
+		if (!videoInfo || !innertube) return;
 		const videoEl = videoElementRef.current;
-		if (!videoEl) {
+		if (!videoEl) return;
+
+		const videoId = videoInfo.basic_info.id;
+		if (!videoId || !videoInfo.streaming_data) return;
+		if (videoInfo.basic_info.is_live || videoInfo.basic_info.is_post_live_dvr) {
+			console.warn("[PlayerContext] Live streams are not supported yet.");
 			return;
 		}
+		const streamingData = videoInfo.streaming_data;
+		const decipher = async (url?: string) =>
+			(await innertube.session.player?.decipher(url)) as string;
 
-		const player = new shaka.Player();
-		player.configure({
-			abr: { enabled: true },
-			streaming: {
-				bufferingGoal: 120,
-				rebufferingGoal: 2,
-			},
-		});
+		let cancelled = false;
+		let objectUrl: string | null = null;
+		let mediaSource: MediaSource | null = null;
+		let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
-		player
-			.attach(videoEl)
-			.then(() => {
-				playerRef.current = player;
-				setPlayerReady(true);
-			})
-			.catch((error) => {
-				console.error("[PlayerContext] Failed to attach player:", error);
-			});
-
-		return () => {
-			if (playerRef.current) {
-				const currentPlayer = playerRef.current;
-				playerRef.current = null;
-				setPlayerReady(false);
-
-				currentPlayer.destroy().catch((error) => {
-					console.warn("[PlayerContext] Error during cleanup:", error);
-				});
-			}
+		const client = innertube.session.context.client;
+		const ustreamerConfig =
+			videoInfo.player_config?.media_common_config
+				.media_ustreamer_request_config?.video_playback_ustreamer_config;
+		const clientInfo = {
+			osName: client.osName,
+			osVersion: client.osVersion,
+			clientName: parseInt(
+				Constants.CLIENT_NAME_IDS[
+					client.clientName as keyof typeof Constants.CLIENT_NAME_IDS
+				],
+				10,
+			),
+			clientVersion: client.clientVersion,
 		};
-	}, []);
+		const sabrFormats = streamingData.adaptive_formats.map(buildSabrFormat);
 
-	// Load video when videoInfo changes and player is ready
-	// biome-ignore lint/correctness/useExhaustiveDependencies: the SABR adapter is intentionally recreated per video inside the effect.
-	useEffect(() => {
+		/**
+		 * googlevideo's SabrStream manages the SABR session. Its audio is fed
+		 * straight into a MediaSource — the app is audio-only, so there's no
+		 * manifest and no Shaka. YouTube currently caps a SABR session at
+		 * roughly a minute; that limit is upstream and awaiting a library fix.
+		 */
 		const loadVideo = async () => {
-			if (!playerReady || !playerRef.current) {
+			const stream = new SabrStream({
+				fetch: fetchFunction as unknown as typeof fetch,
+			});
+			sabrStreamRef.current = stream;
+			stream.setClientInfo(clientInfo);
+			stream.setPoToken(await botguardService.mintToken(videoId));
+			stream.setStreamingURL(
+				await decipher(streamingData.server_abr_streaming_url),
+			);
+			stream.setUstreamerConfig(ustreamerConfig ?? "");
+			stream.setServerAbrFormats(sabrFormats);
+			if (videoInfo.basic_info.duration) {
+				stream.setDurationMs(videoInfo.basic_info.duration * 1000);
+			}
+
+			const { audioStream, selectedFormats } = await stream.start({
+				enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
+			});
+			if (cancelled) {
+				stream.abort();
 				return;
 			}
 
-			if (!videoInfo || !innertube) {
-				return;
-			}
+			const mime = selectedFormats.audioFormat?.mimeType;
+			if (!mime) throw new Error("SABR audio format is missing.");
 
-			const cpn = Utils.generateRandomString(16);
-			const videoId = videoInfo.basic_info.id;
-
-			// Dispose old SABR adapter and create a new one for the new video
-			if (sabrAdapter) {
-				try {
-					sabrAdapter.dispose();
-				} catch (error) {
-					console.warn("[PlayerContext] Error disposing SABR adapter:", error);
-				}
-			}
-			await playerRef.current.unload();
-
-			// Create a new SABR adapter instance for this video
-			const newSabrAdapter = new SabrStreamingAdapter({
-				playerAdapter: new ShakaPlayerAdapter(),
-				clientInfo: {
-					osName: innertube.session.context.client.osName,
-					osVersion: innertube.session.context.client.osVersion,
-					clientName: parseInt(
-						Constants.CLIENT_NAME_IDS[
-							innertube.session.context.client
-								.clientName as keyof typeof Constants.CLIENT_NAME_IDS
-						],
-						10,
-					),
-					clientVersion: innertube.session.context.client.clientVersion,
-				},
-			});
-			setSabrAdapter(newSabrAdapter);
-
-			const isLive = videoInfo.basic_info.is_live;
-			const isPostLiveDVR =
-				!!videoInfo.basic_info.is_post_live_dvr ||
-				(videoInfo.basic_info.is_live_content &&
-					!!(
-						videoInfo.streaming_data?.dash_manifest_url ||
-						videoInfo.streaming_data?.hls_manifest_url
-					));
-
-			newSabrAdapter.onMintPoToken(async () => {
-				const visitorData = innertube.session.context.client.visitorData;
-				if (!visitorData) {
-					throw new Error("Missing visitor data");
-				}
-				return botguardService.mintToken(visitorData);
-			});
-
-			newSabrAdapter.onReloadPlayerResponse(async (reloadContext: unknown) => {
-				const visitorData = innertube.session.context.client.visitorData;
-				if (!visitorData) {
-					throw new Error("Missing visitor data");
-				}
-				const poToken = await botguardService.mintToken(visitorData);
-				poTokenRef.current = poToken;
-
-				const reloadedInfo = await innertube.actions.execute("/player", {
-					videoId,
-					contentCheckOk: true,
-					racyCheckOk: true,
-					playbackContext: {
-						adPlaybackContext: {
-							pyv: true,
-						},
-						contentPlaybackContext: {
-							signatureTimestamp: innertube.session.player?.signature_timestamp,
-						},
-						reloadPlaybackContext: reloadContext,
-					},
-					serviceIntegrityDimensions: {
-						poToken,
-					},
+			mediaSource = new MediaSource();
+			objectUrl = URL.createObjectURL(mediaSource);
+			videoEl.src = objectUrl;
+			await new Promise<void>((resolve) => {
+				mediaSource?.addEventListener("sourceopen", () => resolve(), {
+					once: true,
 				});
-
-				const parsedInfo = new YT.VideoInfo(
-					[reloadedInfo],
-					innertube.actions,
-					cpn,
-				);
-				newSabrAdapter.setStreamingURL(
-					await innertube.session.player?.decipher(
-						parsedInfo.streaming_data?.server_abr_streaming_url,
-					),
-				);
-				newSabrAdapter.setUstreamerConfig(
-					videoInfo.player_config?.media_common_config
-						.media_ustreamer_request_config?.video_playback_ustreamer_config,
-				);
 			});
+			if (cancelled || !mediaSource) return;
 
-			newSabrAdapter.attach(playerRef.current);
-
-			if (videoInfo.streaming_data && !isPostLiveDVR && !isLive) {
-				newSabrAdapter.setStreamingURL(
-					await innertube.session.player?.decipher(
-						videoInfo.streaming_data?.server_abr_streaming_url,
-					),
-				);
-				newSabrAdapter.setUstreamerConfig(
-					videoInfo.player_config?.media_common_config
-						.media_ustreamer_request_config?.video_playback_ustreamer_config,
-				);
-				newSabrAdapter.setServerAbrFormats(
-					videoInfo.streaming_data.adaptive_formats.map(buildSabrFormat),
-				);
+			const sourceBuffer = mediaSource.addSourceBuffer(mime);
+			if (videoInfo.basic_info.duration) {
+				mediaSource.duration = videoInfo.basic_info.duration;
 			}
 
-			let manifestUri: string | undefined;
-			if (videoInfo.streaming_data) {
-				if (isLive) {
-					manifestUri = videoInfo.streaming_data.dash_manifest_url
-						? `${videoInfo.streaming_data.dash_manifest_url}/mpd_version/7`
-						: videoInfo.streaming_data.hls_manifest_url;
-				} else if (isPostLiveDVR) {
-					manifestUri =
-						videoInfo.streaming_data.hls_manifest_url ||
-						`${videoInfo.streaming_data.dash_manifest_url}/mpd_version/7`;
-				} else {
-					const mpd = await videoInfo.toDash({
-						manifest_options: {
-							is_sabr: true,
-							captions_format: "vtt",
-							include_thumbnails: false,
-						},
+			reader = audioStream.getReader();
+			let started = false;
+			while (!cancelled) {
+				const { value, done } = await reader.read();
+				if (done) break;
+				if (!value || value.byteLength === 0) continue;
+				await appendToSourceBuffer(sourceBuffer, value);
+				if (!started) {
+					started = true;
+					videoEl.play().catch((error) => {
+						// Ignore AbortError: play() interrupted by a pause.
+						if ((error as Error).name !== "AbortError") {
+							console.error("[PlayerContext] Auto-playback failed:", error);
+						}
 					});
-					manifestUri = `data:application/dash+xml;base64,${btoa(mpd)}`;
 				}
-			}
-
-			if (!manifestUri) throw new Error("Could not find a valid manifest URI.");
-
-			try {
-				await playerRef.current.load(manifestUri);
-
-				// Start playback automatically after loading
-				if (videoElementRef.current) {
-					videoElementRef.current
-						.play()
-						.catch((e) => console.error("Auto-playback failed", e));
-				}
-			} catch (error) {
-				// shaka.util.Error instances carry severity/category/code/data;
-				// log them as plain values, since DevTools shows the minified
-				// constructor name for the raw object.
-				console.error(
-					"[PlayerContext] Failed to load manifest:",
-					JSON.stringify(
-						{
-							message: (error as Error)?.message,
-							severity: (error as { severity?: unknown }).severity,
-							category: (error as { category?: unknown }).category,
-							code: (error as { code?: unknown }).code,
-							data: (error as { data?: unknown }).data,
-							stack: (error as Error)?.stack?.split("\n").slice(0, 6),
-						},
-						(_, v) => (typeof v === "bigint" ? v.toString() : v),
-						2,
-					),
-				);
-				throw error;
 			}
 		};
 
 		loadVideo().catch((error) => {
-			console.error("[PlayerContext] Load video error:", error);
+			if (!cancelled) {
+				console.error("[PlayerContext] Load video error:", error);
+			}
 		});
-	}, [videoInfo, innertube, playerReady]);
+
+		return () => {
+			cancelled = true;
+			reader?.cancel().catch(() => undefined);
+			sabrStreamRef.current?.abort();
+			sabrStreamRef.current = null;
+			if (videoEl.src.startsWith("blob:")) {
+				videoEl.removeAttribute("src");
+				videoEl.load();
+			}
+			if (objectUrl) URL.revokeObjectURL(objectUrl);
+			mediaSource = null;
+		};
+	}, [videoInfo, innertube]);
 
 	// Play/pause control
 	useEffect(() => {
@@ -371,7 +290,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		setCurrentSong(song);
 		setVideoInfo(null);
 		setInnertube(null);
-		poTokenRef.current = null;
 
 		try {
 			const result = await getSongStream(song.id);
@@ -385,7 +303,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					"[YuMusic] streaming data:",
 					JSON.parse(JSON.stringify(result.videoInfo.streaming_data ?? {})),
 				);
-				poTokenRef.current = result.poToken;
 				setVideoInfo(result.videoInfo);
 				setInnertube(result.innertube);
 				setIsPlaying(true);

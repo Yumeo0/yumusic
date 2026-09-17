@@ -65,7 +65,7 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 	};
 
 	return (
-		<div className="relative overflow-hidden">
+		<div className="cv-row relative overflow-hidden">
 			<span
 				aria-hidden
 				className="absolute top-1/2 left-3.5 -translate-y-1/2 text-primary transition-opacity duration-100"
@@ -75,13 +75,20 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 			</span>
 			<div
 				className={cn(
-					"relative touch-pan-y will-change-transform",
+					"relative touch-pan-y",
 					queued && "bg-primary/10 transition-colors duration-300",
 				)}
 				onTouchEnd={handleTouchEnd}
 				onTouchMove={handleTouchMove}
 				onTouchStart={handleTouchStart}
-				style={{ transform: `translateX(${drag}px)` }}
+				style={{
+					transform: `translateX(${drag}px)`,
+					// Only the row under the finger is promoted to its own
+					// compositor layer; setting `will-change` on every row in a
+					// long playlist forces hundreds of layers and tanks hover and
+					// scroll performance.
+					willChange: drag > 0 ? "transform" : undefined,
+				}}
 			>
 				{children}
 			</div>

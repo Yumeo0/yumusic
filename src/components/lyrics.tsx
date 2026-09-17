@@ -1,5 +1,5 @@
 import { AudioLines, MicVocal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchSyncedLyrics, type LrcLine } from "@/lib/lrclib";
 import { fetchMusixmatchSynced } from "@/lib/musixmatch";
 import { useRomanizedLines } from "@/lib/romanize";
@@ -252,6 +252,14 @@ function SyncedLines({
 		holdUntilRef.current = Date.now() + 4000;
 	};
 
+	// Stable so the memoized lines don't all re-render on every clock tick.
+	const setAnchor = useCallback(
+		(index: number, el: HTMLParagraphElement | null) => {
+			anchorRefs.current[index] = el;
+		},
+		[],
+	);
+
 	return (
 		<div
 			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
@@ -293,38 +301,17 @@ function SyncedLines({
 					}
 					const line = lines[seg.index];
 					return (
-						<p
-							className={cn(
-								"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
-								romanize ? "py-3" : "py-1.5",
-								seg.index === activeIndex
-									? "text-foreground [text-shadow:0_0_24px_color-mix(in_oklab,var(--primary)_35%,transparent)]"
-									: "text-foreground/25 hover:text-foreground/60",
-							)}
+						<LyricLine
+							index={seg.index}
+							isActive={seg.index === activeIndex}
 							key={`lrc-${seg.index}`}
-							onClick={() => onSeekTime(line.time)}
-							ref={(el) => {
-								anchorRefs.current[seg.index] = el;
-							}}
-						>
-							{seg.index === activeIndex && line.text
-								? line.text.split("").map((char, ci) => (
-										<span
-											className="inline-block animate-char-wave"
-											// biome-ignore lint/suspicious/noArrayIndexKey: positional wave, characters never reorder
-											key={`c-${ci}`}
-											style={{ animationDelay: `${ci * 30}ms` }}
-										>
-											{char === " " ? "\u00A0" : char}
-										</span>
-									))
-								: line.text}
-							{romanize && romanized?.get(seg.index) && (
-								<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
-									{romanized.get(seg.index)}
-								</span>
-							)}
-						</p>
+							onRef={setAnchor}
+							onSeekTime={onSeekTime}
+							romanize={romanize}
+							romanizedText={romanized?.get(seg.index)}
+							text={line.text}
+							time={line.time}
+						/>
 					);
 				})}
 				{attribution && <LyricsAttribution source={attribution} />}
@@ -332,6 +319,62 @@ function SyncedLines({
 		</div>
 	);
 }
+
+/**
+ * One lyric line. Memoized on `isActive` so a clock tick only re-renders the
+ * line that actually changed state instead of the whole (often long) list.
+ */
+const LyricLine = memo(function LyricLine({
+	text,
+	time,
+	index,
+	isActive,
+	romanize,
+	romanizedText,
+	onSeekTime,
+	onRef,
+}: {
+	text: string;
+	time: number;
+	index: number;
+	isActive: boolean;
+	romanize: boolean;
+	romanizedText?: string;
+	onSeekTime: (seconds: number) => void;
+	onRef: (index: number, el: HTMLParagraphElement | null) => void;
+}) {
+	return (
+		<p
+			className={cn(
+				"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
+				romanize ? "py-3" : "py-1.5",
+				isActive
+					? "text-foreground [text-shadow:0_0_24px_color-mix(in_oklab,var(--primary)_35%,transparent)]"
+					: "text-foreground/25 hover:text-foreground/60",
+			)}
+			onClick={() => onSeekTime(time)}
+			ref={(el) => onRef(index, el)}
+		>
+			{isActive && text
+				? text.split("").map((char, ci) => (
+						<span
+							className="inline-block animate-char-wave"
+							// biome-ignore lint/suspicious/noArrayIndexKey: positional wave, characters never reorder
+							key={`c-${ci}`}
+							style={{ animationDelay: `${ci * 30}ms` }}
+						>
+							{char === " " ? "\u00A0" : char}
+						</span>
+					))
+				: text}
+			{romanize && romanizedText && (
+				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
+					{romanizedText}
+				</span>
+			)}
+		</p>
+	);
+});
 
 function LyricsLines({
 	text,
