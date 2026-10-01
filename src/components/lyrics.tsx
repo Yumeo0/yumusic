@@ -9,7 +9,7 @@ import { fetchMusixmatchSynced } from "@/lib/musixmatch";
 import { useRomanizedLines } from "@/lib/romanize";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { getSongLyrics, type SongLyrics } from "@/lib/youtube-client";
+import { getSongLyrics } from "@/lib/youtube-client";
 
 interface LyricsPanelProps {
 	songId: string;
@@ -23,22 +23,20 @@ interface LyricsPanelProps {
 	className?: string;
 }
 
+interface ProviderLyrics {
+	synced: LrcLine[] | null;
+	plain: string | null;
+	/** Matched on artist + title (or authoritative), not a loose match. */
+	confirmed: boolean;
+}
+
 interface LyricsSources {
-	lrclib: LrcLine[] | null;
-	musixmatch: LrcLine[] | null;
-	youtube: SongLyrics | null;
+	lrclib: ProviderLyrics | null;
+	musixmatch: ProviderLyrics | null;
+	youtube: ProviderLyrics | null;
 }
 
 const PROVIDER_BY_ID = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p]));
-
-/** Whether a provider's result carries time-aligned lines. */
-function hasSyncedLyrics(
-	id: LyricsProviderId,
-	sources: LyricsSources,
-): boolean {
-	if (id === "youtube") return Boolean(sources.youtube?.synced?.length);
-	return sources[id] !== null;
-}
 
 type LyricsState =
 	| { status: "loading" }
@@ -79,9 +77,15 @@ export function LyricsPanel({
 			]);
 			if (cancelled) return;
 			const sources: LyricsSources = {
-				lrclib: lrclib && lrclib.length > 0 ? lrclib : null,
-				musixmatch: musixmatch && musixmatch.length > 0 ? musixmatch : null,
-				youtube: youtube && (youtube.synced || youtube.plain) ? youtube : null,
+				lrclib: lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null,
+				musixmatch:
+					musixmatch && musixmatch.length > 0
+						? { synced: musixmatch, plain: null, confirmed: true }
+						: null,
+				youtube:
+					youtube && (youtube.synced || youtube.plain)
+						? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
+						: null,
 			};
 			setState({ status: "done", sources });
 		};
@@ -97,19 +101,25 @@ export function LyricsPanel({
 	const preferSynced = settings.preferSyncedLyrics;
 
 	// Pick the initial provider (respecting manual picks) once sources arrive
-	// or when the provider settings change.
+	// or when the provider settings change. A confirmed match beats a loose one
+	// even when the loose provider has higher priority.
 	useEffect(() => {
 		if (state.status !== "done") return;
 		const sources = state.sources;
-		const availableIds = order.filter(
-			(id) => sources[id as keyof LyricsSources] !== null,
-		);
+		const availableIds = order.filter((id) => sources[id] !== null);
 		if (availableIds.length === 0) return;
 		if (manualView.current && availableIds.includes(view)) return;
+		// A provider with a confirmed synced match always wins over a loose
+		// match; otherwise "prefer synced" picks the first provider with synced
+		// lines, then falls back to priority order.
+		const confirmedSynced = availableIds.find(
+			(id) => sources[id]?.synced && sources[id]?.confirmed,
+		);
 		const chosen = preferSynced
-			? (availableIds.find((id) => hasSyncedLyrics(id, sources)) ??
+			? (confirmedSynced ??
+				availableIds.find((id) => sources[id]?.synced) ??
 				availableIds[0])
-			: availableIds[0];
+			: (confirmedSynced ?? availableIds[0]);
 		setView(chosen);
 	}, [state, order, preferSynced, view]);
 
@@ -118,15 +128,11 @@ export function LyricsPanel({
 	const available = sources
 		? order.flatMap((id) => {
 				const provider = PROVIDER_BY_ID.get(id);
-				if (!provider) return [];
-				if (sources[provider.id as keyof LyricsSources] === null) return [];
+				if (!provider || sources[id] === null) return [];
 				return [provider];
 			})
 		: [];
-	const activeSynced =
-		sources && view !== "youtube"
-			? sources[view as Exclude<LyricsProviderId, "youtube">]
-			: (sources?.youtube?.synced ?? null);
+	const active = sources ? sources[view] : null;
 	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
 
 	return (
@@ -161,20 +167,20 @@ export function LyricsPanel({
 				)}
 			</div>
 			{state.status === "loading" && <LyricsSkeleton />}
-			{sources && activeSynced && (
+			{sources && active?.synced && (
 				<SyncedLines
 					attribution={attribution}
 					currentTime={currentTime}
-					lines={activeSynced}
+					lines={active.synced}
 					onSeekTime={onSeekTime}
 					romanize={romanize}
 				/>
 			)}
-			{sources && !activeSynced && sources.youtube?.plain && (
+			{sources && active && !active.synced && active.plain && (
 				<LyricsLines
 					attribution={attribution}
 					romanize={romanize}
-					text={sources.youtube.plain}
+					text={active.plain}
 				/>
 			)}{" "}
 			{sources &&

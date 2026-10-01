@@ -59,6 +59,28 @@ function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 	};
 }
 
+/**
+ * MusicTwoRowItem is used for the artist's "Videos" carousel (no music shelf),
+ * e.g. a VTuber channel that only uploads videos. These are still playable —
+ * the id is the video id — so build a Song, crediting the channel.
+ */
+function toSongFromTwoRow(
+	item: YTNodes.MusicTwoRowItem,
+	artistName: string,
+	artistId?: string,
+): Song {
+	return {
+		id: item.id ?? "",
+		title: item.title?.text || "Unknown Title",
+		artist: artistName,
+		artistId,
+		artists: artistName ? [{ name: artistName, id: artistId }] : undefined,
+		thumbnail: hiResThumb(
+			item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
+		),
+	};
+}
+
 async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	const cached = artistCache.get(id);
 	if (!force && cached && Date.now() - cached.timestamp < SYNC_INTERVAL_MS) {
@@ -134,6 +156,10 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 						thumbnail: hiResThumb(
 							item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
 						),
+						song:
+							item.item_type === "video"
+								? toSongFromTwoRow(item, name, id)
+								: undefined,
 					});
 				}
 			}
@@ -369,7 +395,7 @@ export default function ArtistPage() {
 						</h2>
 						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
 					</div>
-					<div className="no-scrollbar -mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
 						{shelf.items.map((item, i) => (
 							<button
 								className="group w-44 shrink-0 text-left disabled:cursor-default"
