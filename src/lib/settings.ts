@@ -1,4 +1,9 @@
 import { useEffect, useState } from "react";
+import {
+	DEFAULT_LYRICS_PROVIDER_ORDER,
+	type LyricsProviderId,
+	normalizeProviderOrder,
+} from "./lyrics-providers";
 
 export type TitleMode = "both" | "original" | "translation";
 
@@ -11,6 +16,10 @@ export interface Settings {
 	listenbrainzToken: string;
 	/** Original-language artist names (fetched per artist, cached). */
 	originalArtists: boolean;
+	/** Lyrics providers in priority order (highest first). */
+	lyricsProviderOrder: LyricsProviderId[];
+	/** Prefer a provider that has synced (time-aligned) lyrics. */
+	preferSyncedLyrics: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -23,12 +32,20 @@ const DEFAULTS: Settings = {
 	listenbrainz: false,
 	listenbrainzToken: "",
 	originalArtists: false,
+	lyricsProviderOrder: [...DEFAULT_LYRICS_PROVIDER_ORDER],
+	preferSyncedLyrics: true,
 };
 
 export function getSettings(): Settings {
 	try {
 		const raw = localStorage.getItem(SETTINGS_KEY);
-		return raw ? { ...DEFAULTS, ...JSON.parse(raw) } : { ...DEFAULTS };
+		if (!raw) return { ...DEFAULTS };
+		const parsed = JSON.parse(raw) as Partial<Settings>;
+		return {
+			...DEFAULTS,
+			...parsed,
+			lyricsProviderOrder: normalizeProviderOrder(parsed.lyricsProviderOrder),
+		};
 	} catch {
 		return { ...DEFAULTS };
 	}

@@ -1,6 +1,10 @@
 import { AudioLines, MicVocal } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchSyncedLyrics, type LrcLine } from "@/lib/lrclib";
+import {
+	LYRICS_PROVIDERS,
+	type LyricsProviderId,
+} from "@/lib/lyrics-providers";
 import { fetchMusixmatchSynced } from "@/lib/musixmatch";
 import { useRomanizedLines } from "@/lib/romanize";
 import { useSettings } from "@/lib/settings";
@@ -25,21 +29,20 @@ interface LyricsSources {
 	youtube: SongLyrics | null;
 }
 
+const PROVIDER_BY_ID = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p]));
+
+/** Whether a provider's result carries time-aligned lines. */
+function hasSyncedLyrics(
+	id: LyricsProviderId,
+	sources: LyricsSources,
+): boolean {
+	if (id === "youtube") return Boolean(sources.youtube?.synced?.length);
+	return sources[id] !== null;
+}
+
 type LyricsState =
 	| { status: "loading" }
 	| { status: "done"; sources: LyricsSources };
-
-type LyricsView = "lrclib" | "musixmatch" | "youtube";
-
-const LYRICS_PROVIDERS: Array<{
-	id: LyricsView;
-	label: string;
-	attribution: string;
-}> = [
-	{ id: "lrclib", label: "LRCLIB", attribution: "LRCLIB" },
-	{ id: "musixmatch", label: "Musixmatch", attribution: "Musixmatch" },
-	{ id: "youtube", label: "YouTube", attribution: "YouTube Music" },
-];
 
 /**
  * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch, and
@@ -58,13 +61,15 @@ export function LyricsPanel({
 	className,
 }: LyricsPanelProps) {
 	const [state, setState] = useState<LyricsState>({ status: "loading" });
-	const [view, setView] = useState<LyricsView>("lrclib");
+	const [view, setView] = useState<LyricsProviderId>("lrclib");
 	const [settings] = useSettings();
+	// A manual provider pick sticks for the current track (until the next song).
+	const manualView = useRef(false);
 
 	useEffect(() => {
 		let cancelled = false;
 		setState({ status: "loading" });
-		setView("lrclib");
+		manualView.current = false;
 
 		const load = async () => {
 			const [lrclib, musixmatch, youtube] = await Promise.all([
@@ -79,12 +84,6 @@ export function LyricsPanel({
 				youtube: youtube && (youtube.synced || youtube.plain) ? youtube : null,
 			};
 			setState({ status: "done", sources });
-			const firstAvailable = LYRICS_PROVIDERS.find(
-				(p) => sources[p.id as keyof LyricsSources] !== null,
-			);
-			if (firstAvailable) {
-				setView(firstAvailable.id);
-			}
 		};
 		load();
 
@@ -93,18 +92,42 @@ export function LyricsPanel({
 		};
 	}, [songId, title, artist, duration]);
 
+	// Provider order is user-configurable, so selection re-runs when it changes.
+	const order = settings.lyricsProviderOrder;
+	const preferSynced = settings.preferSyncedLyrics;
+
+	// Pick the initial provider (respecting manual picks) once sources arrive
+	// or when the provider settings change.
+	useEffect(() => {
+		if (state.status !== "done") return;
+		const sources = state.sources;
+		const availableIds = order.filter(
+			(id) => sources[id as keyof LyricsSources] !== null,
+		);
+		if (availableIds.length === 0) return;
+		if (manualView.current && availableIds.includes(view)) return;
+		const chosen = preferSynced
+			? (availableIds.find((id) => hasSyncedLyrics(id, sources)) ??
+				availableIds[0])
+			: availableIds[0];
+		setView(chosen);
+	}, [state, order, preferSynced, view]);
+
 	const romanize = settings.romanizeLyrics;
 	const sources = state.status === "done" ? state.sources : null;
 	const available = sources
-		? LYRICS_PROVIDERS.filter(
-				(p) => sources[p.id as keyof LyricsSources] !== null,
-			)
+		? order.flatMap((id) => {
+				const provider = PROVIDER_BY_ID.get(id);
+				if (!provider) return [];
+				if (sources[provider.id as keyof LyricsSources] === null) return [];
+				return [provider];
+			})
 		: [];
 	const activeSynced =
 		sources && view !== "youtube"
-			? sources[view as Exclude<LyricsView, "youtube">]
+			? sources[view as Exclude<LyricsProviderId, "youtube">]
 			: (sources?.youtube?.synced ?? null);
-	const attribution = LYRICS_PROVIDERS.find((p) => p.id === view)?.attribution;
+	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
 
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -125,7 +148,10 @@ export function LyricsPanel({
 										: "text-muted-foreground hover:text-foreground",
 								)}
 								key={provider.id}
-								onClick={() => setView(provider.id)}
+								onClick={() => {
+									manualView.current = true;
+									setView(provider.id);
+								}}
 								type="button"
 							>
 								{provider.label}

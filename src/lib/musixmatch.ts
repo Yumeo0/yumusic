@@ -15,9 +15,6 @@ import { fetchFunction } from "./youtube-client";
 const ROOT = "https://apic-appmobile.musixmatch.com/ws/1.1/";
 const APP_ID = "mac-ios-v2.0";
 const HEADERS: Record<string, string> = {
-	// Explicit empty cookie so the Tauri proxy doesn't attach the user's
-	// YouTube cookies to these third-party Musixmatch requests.
-	Cookie: "",
 	"X-Cookie": "x-mxm-token-guid=",
 	"x-mxm-app-version": "10.1.1",
 	"X-User-Agent": "Musixmatch/2025120901 CFNetwork/3860.300.31 Darwin/25.2.0",
@@ -40,17 +37,35 @@ function getToken(): Promise<string | null> {
 		tokenPromise = (async () => {
 			try {
 				const res = await fetchFunction(
-					`${ROOT}token.get?app_id=${APP_ID}&format=json`,
+					`${ROOT}token.get?app_id=${APP_ID}&format=json&t=${Date.now()}`,
 					{ headers: HEADERS },
 				);
 				const data = (await res.json()) as {
-					message?: { body?: { user_token?: string } };
+					message?: {
+						header?: { status_code?: number };
+						body?: { user_token?: string };
+					};
 				};
-				return data.message?.body?.user_token || null;
-			} catch {
+				const token = data.message?.body?.user_token || null;
+				if (!token) {
+					console.warn(
+						"[musixmatch] token.get returned no token (status",
+						data.message?.header?.status_code,
+						")",
+						JSON.stringify(data).slice(0, 200),
+					);
+				}
+				return token;
+			} catch (error) {
+				console.warn("[musixmatch] token request failed:", error);
 				return null;
 			}
 		})();
+		// Don't cache a failure: retry on the next lookup instead of staying
+		// token-less for the whole session.
+		tokenPromise.then((token) => {
+			if (!token) tokenPromise = null;
+		});
 	}
 	return tokenPromise;
 }
@@ -64,11 +79,15 @@ async function mget(
 		format: "json",
 		...params,
 		app_id: APP_ID,
+		t: Date.now().toString(),
 	});
 	if (token) query.set("usertoken", token);
 	const res = await fetchFunction(`${ROOT}${action}?${query}`, {
 		headers: HEADERS,
 	});
+	if (!res.ok) {
+		console.warn("[musixmatch] request failed", action, res.status);
+	}
 	return res.json();
 }
 
@@ -218,22 +237,39 @@ export async function fetchMusixmatchSynced(
 			message?: { body?: { macro_calls?: MacroCalls } };
 		};
 		const calls = data?.message?.body?.macro_calls;
-		if (!calls) return null;
+		if (!calls) {
+			console.warn("[musixmatch] no macro_calls in response", data);
+			return null;
+		}
 
 		const matcher = calls["matcher.track.get"]?.message;
-		if (matcher?.header?.status_code !== 200) return null;
+		if (matcher?.header?.status_code !== 200) {
+			console.warn(
+				"[musixmatch] matcher failed; call keys=",
+				Object.keys(calls),
+				"body=",
+				JSON.stringify(data?.message?.body ?? null).slice(0, 400),
+			);
+			return null;
+		}
 		const resolved = matcher.body?.track;
 		if (!resolved) return null;
 		if (resolved.instrumental) return null;
 
 		// Guard against a mismatched resolution (obscure titles, remixes…).
 		if (resolved.track_name && !fieldMatches(resolved.track_name, track, 0.6)) {
+			console.warn(
+				`[musixmatch] title mismatch: wanted "${track}", got "${resolved.track_name}"`,
+			);
 			return null;
 		}
 		if (
 			resolved.artist_name &&
 			!fieldMatches(resolved.artist_name, artist, 0.4)
 		) {
+			console.warn(
+				`[musixmatch] artist mismatch: wanted "${artist}", got "${resolved.artist_name}"`,
+			);
 			return null;
 		}
 
@@ -252,6 +288,9 @@ export async function fetchMusixmatchSynced(
 			if (lines.length > 0) return lines;
 		}
 
+		console.warn(
+			`[musixmatch] matched #${resolved.track_id} but no subtitle/richsync (has_subtitles=${resolved.has_subtitles}, has_richsync=${resolved.has_richsync})`,
+		);
 		return null;
 	} catch (error) {
 		console.warn("[musixmatch] failed to fetch lyrics:", error);

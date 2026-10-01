@@ -1,10 +1,23 @@
-import { LogIn, LogOut, Trash2 } from "lucide-react";
+import {
+	ChevronDown,
+	ChevronUp,
+	GripVertical,
+	LogIn,
+	LogOut,
+	Trash2,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { validateListenbrainzToken } from "@/lib/listenbrainz";
+import {
+	LYRICS_PROVIDERS,
+	type LyricsProviderId,
+} from "@/lib/lyrics-providers";
 import { useSettings } from "@/lib/settings";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+
+const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
 
 interface SettingsPageProps {
 	isLoggedIn: boolean;
@@ -21,10 +34,37 @@ export default function SettingsPage({
 }: SettingsPageProps) {
 	const [settings, update] = useSettings();
 	const [cleared, setCleared] = useState(false);
+	const [dragProvider, setDragProvider] = useState<LyricsProviderId | null>(
+		null,
+	);
 	const [tokenState, setTokenState] = useState<{
 		valid: boolean;
 		user?: string;
 	} | null>(null);
+
+	const reorderProviders = (next: LyricsProviderId[]) =>
+		update({ lyricsProviderOrder: next });
+
+	const moveProvider = (id: LyricsProviderId, direction: -1 | 1) => {
+		const order = [...settings.lyricsProviderOrder];
+		const index = order.indexOf(id);
+		const target = index + direction;
+		if (index < 0 || target < 0 || target >= order.length) return;
+		[order[index], order[target]] = [order[target], order[index]];
+		reorderProviders(order);
+	};
+
+	const dropProvider = (targetId: LyricsProviderId) => {
+		if (!dragProvider || dragProvider === targetId) return;
+		const order = [...settings.lyricsProviderOrder];
+		const from = order.indexOf(dragProvider);
+		const to = order.indexOf(targetId);
+		if (from < 0 || to < 0) return;
+		order.splice(from, 1);
+		order.splice(to, 0, dragProvider);
+		setDragProvider(null);
+		reorderProviders(order);
+	};
 
 	// Verify the ListenBrainz token whenever it changes (debounced).
 	useEffect(() => {
@@ -140,6 +180,82 @@ export default function SettingsPage({
 								)}
 							/>
 						</button>
+					</div>
+
+					<div className="flex items-center justify-between gap-6 p-4">
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Prefer synced lyrics</p>
+							<p className="mt-0.5 text-xs text-muted-foreground">
+								If the top provider only offers plain lyrics, use the
+								highest-priority provider that has time-aligned lyrics instead.
+							</p>
+						</div>
+						<button
+							aria-label="Toggle prefer synced lyrics"
+							aria-pressed={settings.preferSyncedLyrics}
+							className={cn(
+								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
+								settings.preferSyncedLyrics ? "bg-primary" : "bg-foreground/15",
+							)}
+							onClick={() =>
+								update({ preferSyncedLyrics: !settings.preferSyncedLyrics })
+							}
+							type="button"
+						>
+							<span
+								className={cn(
+									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
+									settings.preferSyncedLyrics && "translate-x-5",
+								)}
+							/>
+						</button>
+					</div>
+
+					<div className="p-4">
+						<p className="text-sm font-medium">Preferred providers</p>
+						<p className="mt-0.5 text-xs text-muted-foreground">
+							Drag to reorder, or use the arrows. The highest available provider
+							is used first.
+						</p>
+						<ul className="mt-3 space-y-1.5">
+							{settings.lyricsProviderOrder.map((id, index) => (
+								<li
+									className={cn(
+										"flex items-center gap-2 rounded-lg border border-foreground/8 bg-background/40 px-2.5 py-1.5 transition-opacity",
+										dragProvider === id && "opacity-40",
+									)}
+									draggable
+									key={id}
+									onDragEnd={() => setDragProvider(null)}
+									onDragOver={(event) => event.preventDefault()}
+									onDragStart={() => setDragProvider(id)}
+									onDrop={() => dropProvider(id)}
+								>
+									<GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground/50" />
+									<span className="flex-1 text-sm font-medium">
+										{PROVIDER_LABEL.get(id) ?? id}
+									</span>
+									<button
+										aria-label={`Move ${PROVIDER_LABEL.get(id) ?? id} up`}
+										className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+										disabled={index === 0}
+										onClick={() => moveProvider(id, -1)}
+										type="button"
+									>
+										<ChevronUp className="size-4" />
+									</button>
+									<button
+										aria-label={`Move ${PROVIDER_LABEL.get(id) ?? id} down`}
+										className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+										disabled={index === settings.lyricsProviderOrder.length - 1}
+										onClick={() => moveProvider(id, 1)}
+										type="button"
+									>
+										<ChevronDown className="size-4" />
+									</button>
+								</li>
+							))}
+						</ul>
 					</div>
 				</div>
 			</section>
