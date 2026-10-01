@@ -56,6 +56,11 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
 
+	// The up-next stack tucks up to three upcoming tracks under the next card
+	// and slides them out on hover. It reserves no height: the stack grows to
+	// fit its cards when revealed, pushing the content below it.
+	const upNextTucked = queue.slice(currentIndex + 2, currentIndex + 5);
+
 	// Mobile: lyrics are opt-in via the transport toggle. Desktop always
 	// shows the lyrics column — the state only affects max-md classes.
 	const [showLyrics, setShowLyrics] = useState(false);
@@ -128,20 +133,71 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 			    Fixed heights keep the cover and controls from shifting when
 			    lyrics load or scroll. */}
 			<main className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 px-6 pt-14 pb-8 max-md:pt-[max(3.5rem,var(--safe-area-top))] max-md:pb-[calc(2rem+var(--safe-area-bottom))] sm:px-10 md:grid md:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] md:gap-6 lg:gap-14">
-				{/* Lyrics */}
+				{/* Lyrics + Up next. On mobile the top padding clears the
+				    overlay's queue/close buttons so the provider toggle in the
+				    lyrics header doesn't sit under them. */}
 				<section
 					className={cn(
-						"flex min-h-0 flex-col md:order-1 md:h-auto md:min-h-0",
+						"flex min-h-0 flex-col max-md:pt-10 md:order-1 md:h-auto md:min-h-0",
 						showLyrics
 							? "order-1 max-md:h-auto max-md:flex-1"
 							: "order-2 h-36 shrink-0 max-md:hidden",
 					)}
 				>
-					<NowPlayingLyrics
-						knownDuration={knownDuration}
-						song={currentSong}
-						videoElementRef={videoElementRef}
-					/>
+					{/* Shrinks as the up-next stack below expands on hover */}
+					<div className="min-h-0 flex-1">
+						<NowPlayingLyrics
+							knownDuration={knownDuration}
+							song={currentSong}
+							videoElementRef={videoElementRef}
+						/>
+					</div>
+
+					{/* Up next — the next card plus ~3 more tucked underneath it,
+					    slid out on hover. Desktop only (phones use the sheet). */}
+					<div className="mx-auto mt-4 w-full max-w-xl shrink-0 max-lg:hidden">
+						<div className="mb-1.5 flex items-baseline justify-between">
+							<p className="text-xs font-medium text-muted-foreground">
+								Up next
+							</p>
+							{queue.length > currentIndex + 1 && (
+								<p className="text-[11px] text-muted-foreground/60">
+									{queue.length - currentIndex - 1} in queue
+								</p>
+							)}
+						</div>
+						{queue.length > currentIndex + 1 ? (
+							<div className="group/upn">
+								<div className="relative z-20">
+									<QueueRow
+										onPlay={() => play(queue[currentIndex + 1])}
+										song={queue[currentIndex + 1]}
+									/>
+								</div>
+								<div>
+									{upNextTucked.map((song, k) => (
+										<div
+											className={cn(
+												"relative -mt-11.5 origin-top scale-[0.97] transition-all duration-300 ease-out group-hover/upn:mt-1.5 group-hover/upn:scale-100",
+											)}
+											// biome-ignore lint/suspicious/noArrayIndexKey: queue may contain duplicate video ids
+											key={`queue-${song.id}-${currentIndex + 2 + k}`}
+											style={{
+												transitionDelay: `${k * 60}ms`,
+												zIndex: 10 - k,
+											}}
+										>
+											<QueueRow onPlay={() => play(song)} song={song} />
+										</div>
+									))}
+								</div>
+							</div>
+						) : (
+							<p className="p-1.5 text-sm text-muted-foreground/70">
+								Queue is empty.
+							</p>
+						)}
+					</div>
 				</section>
 
 				{/* Artwork + controls. On mobile the controls stay pinned to the
@@ -308,56 +364,6 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						<ChevronsUp className="size-3.5" />
 						Queue
 					</button>
-
-					{/* Up next — the next card plus ~3 more tucked underneath it
-				    (whole cards, only their top edges peeking). On hover they
-				    slide down into the reserved space, so nothing else moves.
-				    Hover-only affordance — phones use the queue sheet instead. */}
-					<div className="w-full max-w-md max-lg:hidden">
-						<div className="mb-1.5 flex items-baseline justify-between">
-							<p className="text-xs font-medium text-muted-foreground">
-								Up next
-							</p>
-							{queue.length > currentIndex + 1 && (
-								<p className="text-[11px] text-muted-foreground/60">
-									{queue.length - currentIndex - 1} in queue
-								</p>
-							)}
-						</div>
-						{queue.length > currentIndex + 1 ? (
-							<div className="group/upn">
-								<div className="relative z-20">
-									<QueueRow
-										onPlay={() => play(queue[currentIndex + 1])}
-										song={queue[currentIndex + 1]}
-									/>
-								</div>
-								<div className="h-44 overflow-hidden">
-									{queue
-										.slice(currentIndex + 2, currentIndex + 5)
-										.map((song, k) => (
-											<div
-												className={cn(
-													"relative -mt-11.5 origin-top scale-[0.97] transition-all duration-300 ease-out group-hover/upn:mt-1.5 group-hover/upn:scale-100",
-												)}
-												// biome-ignore lint/suspicious/noArrayIndexKey: queue may contain duplicate video ids
-												key={`queue-${song.id}-${currentIndex + 2 + k}`}
-												style={{
-													transitionDelay: `${k * 60}ms`,
-													zIndex: 10 - k,
-												}}
-											>
-												<QueueRow onPlay={() => play(song)} song={song} />
-											</div>
-										))}
-								</div>
-							</div>
-						) : (
-							<p className="p-1.5 text-sm text-muted-foreground/70">
-								Queue is empty.
-							</p>
-						)}
-					</div>
 				</section>
 			</main>
 		</div>
