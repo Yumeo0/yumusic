@@ -12,7 +12,7 @@ import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
 import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
-import { cn, formatTime } from "@/lib/utils";
+import { cn, formatDuration, formatTime } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
 import { VolumeControl } from "./volume-control";
 import { ProgressBar } from "./waveform";
@@ -30,6 +30,7 @@ export function Player() {
 		toggleQueue,
 		isQueueOpen,
 		videoElementRef,
+		duration: knownDuration,
 	} = usePlayer();
 
 	// Swipe up on the mini player reveals the queue sheet progressively.
@@ -53,7 +54,11 @@ export function Player() {
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
 			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
-				<MiniProgress songId={currentSong.id} videoElementRef={videoElementRef} />
+				<MiniProgress
+					knownDuration={knownDuration}
+					songId={currentSong.id}
+					videoElementRef={videoElementRef}
+				/>
 			</div>
 
 			<div
@@ -133,7 +138,7 @@ export function Player() {
 						{isPlaying ? (
 							<Pause className="size-5 fill-current" />
 						) : (
-							<Play className="size-5 translate-x-px fill-current" />
+							<Play className="size-5 -translate-x-[4.1667%] fill-current" />
 						)}
 					</button>
 					<button
@@ -153,7 +158,11 @@ export function Player() {
 				{/* Timecodes + queue + volume (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
-					<MiniTime songId={currentSong.id} videoElementRef={videoElementRef} />
+					<MiniTime
+						knownDuration={knownDuration}
+						songId={currentSong.id}
+						videoElementRef={videoElementRef}
+					/>
 					<button
 						aria-label="Toggle queue"
 						className={cn(
@@ -191,11 +200,17 @@ type VideoRef = RefObject<HTMLVideoElement | null> | null;
 function MiniProgress({
 	songId,
 	videoElementRef,
+	knownDuration,
 }: {
 	songId: string;
 	videoElementRef: VideoRef;
+	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	const { currentTime, duration } = useMediaTime(
+		videoElementRef,
+		songId,
+		knownDuration,
+	);
 	const handleSeek = (percent: number) => {
 		const videoEl = videoElementRef?.current;
 		if (videoEl && duration > 0) {
@@ -213,16 +228,22 @@ function MiniProgress({
 function MiniTime({
 	songId,
 	videoElementRef,
+	knownDuration,
 }: {
 	songId: string;
 	videoElementRef: VideoRef;
+	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	const { currentTime, duration } = useMediaTime(
+		videoElementRef,
+		songId,
+		knownDuration,
+	);
 	return (
 		<span className="font-mono text-xs text-muted-foreground tabular-nums">
 			<span className="text-foreground/80">{formatTime(currentTime)}</span>
 			<span className="mx-1 text-foreground/25">/</span>
-			{formatTime(duration)}
+			{formatDuration(duration)}
 		</span>
 	);
 }

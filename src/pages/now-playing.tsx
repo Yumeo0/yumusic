@@ -20,7 +20,7 @@ import { usePlayer } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
 import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
-import { cn, formatTime } from "@/lib/utils";
+import { cn, formatDuration, formatTime } from "@/lib/utils";
 
 interface NowPlayingPageProps {
 	onClose: () => void;
@@ -46,6 +46,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 		isQueueOpen,
 		toggleQueue,
 		videoElementRef,
+		duration: knownDuration,
 	} = usePlayer();
 
 	// Mobile: lyrics are opt-in via the transport toggle. Desktop always
@@ -130,6 +131,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					)}
 				>
 					<NowPlayingLyrics
+						knownDuration={knownDuration}
 						song={currentSong}
 						videoElementRef={videoElementRef}
 					/>
@@ -224,6 +226,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					{/* Seek + timecodes — swipes starting here or above are ignored */}
 					<div className="w-full max-w-md" ref={seekRef}>
 						<NowPlayingSeek
+							knownDuration={knownDuration}
 							songId={currentSong.id}
 							videoElementRef={videoElementRef}
 						/>
@@ -250,7 +253,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 								{isPlaying ? (
 									<Pause className="size-6 fill-current" />
 								) : (
-									<Play className="size-6 translate-x-px fill-current" />
+									<Play className="size-6 -translate-x-[4.1667%] fill-current" />
 								)}
 							</button>
 							<button
@@ -363,11 +366,17 @@ type VideoRef = RefObject<HTMLVideoElement | null> | null;
 function NowPlayingSeek({
 	songId,
 	videoElementRef,
+	knownDuration,
 }: {
 	songId: string;
 	videoElementRef: VideoRef;
+	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(videoElementRef, songId);
+	const { currentTime, duration } = useMediaTime(
+		videoElementRef,
+		songId,
+		knownDuration,
+	);
 	const handleSeek = (percent: number) => {
 		const videoEl = videoElementRef?.current;
 		if (videoEl && duration > 0) {
@@ -382,7 +391,7 @@ function NowPlayingSeek({
 			/>
 			<div className="mt-0.5 flex justify-between font-mono text-[11px] text-muted-foreground tabular-nums">
 				<span>{formatTime(currentTime)}</span>
-				<span>{formatTime(duration)}</span>
+				<span>{formatDuration(duration)}</span>
 			</div>
 		</>
 	);
@@ -392,11 +401,17 @@ function NowPlayingSeek({
 function NowPlayingLyrics({
 	song,
 	videoElementRef,
+	knownDuration,
 }: {
 	song: Song;
 	videoElementRef: VideoRef;
+	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(videoElementRef, song.id);
+	const { currentTime, duration } = useMediaTime(
+		videoElementRef,
+		song.id,
+		knownDuration,
+	);
 	const onSeekTime = useCallback(
 		(seconds: number) => {
 			const videoEl = videoElementRef?.current;

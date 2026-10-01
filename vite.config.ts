@@ -14,6 +14,16 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(import.meta.dirname, "./src"),
+			// @mjba/lyrics imports Node built-ins for its (optional) token
+			// cache; point them at no-op browser shims so the package can run
+			// in the webview. See src/lib/node-shims.ts.
+			"node:os": path.resolve(import.meta.dirname, "./src/lib/node-shims.ts"),
+			"node:path": path.resolve(import.meta.dirname, "./src/lib/node-shims.ts"),
+			"node:fs/promises": path.resolve(
+				import.meta.dirname,
+				"./src/lib/node-shims.ts",
+			),
+			"node:fs": path.resolve(import.meta.dirname, "./src/lib/node-shims.ts"),
 		},
 	},
 	clearScreen: false,

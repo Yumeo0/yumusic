@@ -1,0 +1,67 @@
+diff --git a/dist/src/parser/ytmusic/Library.js b/dist/src/parser/ytmusic/Library.js
+index 423ba07..e613e97 100644
+--- a/dist/src/parser/ytmusic/Library.js
++++ b/dist/src/parser/ytmusic/Library.js
+@@ -1,5 +1,6 @@
+ import { Parser, GridContinuation, MusicShelfContinuation, SectionListContinuation } from '../index.js';
+ import Grid from '../classes/Grid.js';
++import ItemSection from '../classes/ItemSection.js';
+ import MusicShelf from '../classes/MusicShelf.js';
+ import MusicSideAlignedItem from '../classes/MusicSideAlignedItem.js';
+ import NavigationEndpoint from '../classes/NavigationEndpoint.js';
+@@ -8,6 +9,17 @@ import ChipCloud from '../classes/ChipCloud.js';
+ import MusicMultiSelectMenuItem from '../classes/menus/MusicMultiSelectMenuItem.js';
+ import MusicSortFilterButton from '../classes/MusicSortFilterButton.js';
+ import { InnertubeError } from '../../utils/Utils.js';
++import { observe } from '../helpers.js';
++/**
++ * Extracts the shelf sections (Grid | MusicShelf) from a list of sections,
++ * unwrapping `ItemSection`s that nest shelves and silently ignoring any
++ * other (unknown) section types, instead of throwing a `ParsingError`.
++ */
++function getShelves(sections) {
++    const shelves = sections.filterType(Grid, MusicShelf);
++    const unwrapped = sections.filterType(ItemSection).flatMap((section) => section.contents.filterType(Grid, MusicShelf));
++    return observe([...shelves, ...unwrapped]);
++}
+ export default class Library {
+     #page;
+     #actions;
+@@ -19,7 +31,7 @@ export default class Library {
+         this.#actions = actions;
+         const section_list = this.#page.contents_memo?.getType(SectionList)[0];
+         this.header = section_list?.header?.as(MusicSideAlignedItem);
+-        this.contents = section_list?.contents?.as(Grid, MusicShelf);
++        this.contents = section_list?.contents ? getShelves(section_list.contents) : undefined;
+         this.#continuation = this.contents?.find((list) => list.continuation)?.continuation;
+     }
+     /**
+@@ -54,7 +66,8 @@ export default class Library {
+         if (previously_selected_item)
+             previously_selected_item.selected = false;
+         target_item.selected = true;
+-        this.contents = response.continuation_contents?.as(SectionListContinuation).contents?.as(Grid, MusicShelf);
++        const continuation_section_list = response.continuation_contents?.as(SectionListContinuation);
++        this.contents = continuation_section_list?.contents ? getShelves(continuation_section_list.contents) : undefined;
+         return this;
+     }
+     /**
+diff --git a/dist/src/utils/HTTPClient.js b/dist/src/utils/HTTPClient.js
+index fe664da..36a9d25 100644
+--- a/dist/src/utils/HTTPClient.js
++++ b/dist/src/utils/HTTPClient.js
+@@ -76,7 +76,13 @@ export default class HTTPClient {
+             }
+             const cookie = this.#cookie;
+             if (cookie) {
+-                const sapisid = getCookie(cookie, 'SAPISID');
++                // YouTube sets the SAPISID under different names depending on the
++                // cookie policy of the browser used to log in (e.g. when third-party
++                // cookies are partitioned, only the "__Secure-3PAPISID" variant is
++                // issued). Any of these variants can be used to generate the auth token.
++                const sapisid = getCookie(cookie, 'SAPISID')
++                    ?? getCookie(cookie, '__Secure-1PAPISID')
++                    ?? getCookie(cookie, '__Secure-3PAPISID');
+                 if (sapisid) {
+                     request_headers.set('Authorization', await generateSidAuth(sapisid));
+                     request_headers.set('X-Goog-Authuser', session.account_index.toString());

@@ -20,19 +20,23 @@ export { MAX_VOLUME };
  * Keeps re-renders local to the calling component (no context churn at 4Hz).
  * `resetKey` (e.g. the song id) zeroes both values immediately when it
  * changes, so the UI shows 00:00 while the next track is still loading.
+ * `knownDuration` (seconds from YouTube metadata, when available) takes
+ * precedence over the media element's duration so the total matches the
+ * length shown in listings.
  */
 export function useMediaTime(
 	videoElementRef: React.RefObject<HTMLVideoElement | null> | null,
 	resetKey?: string,
+	knownDuration?: number,
 ) {
 	const [currentTime, setCurrentTime] = useState(0);
-	const [duration, setDuration] = useState(0);
+	const [mediaDuration, setMediaDuration] = useState(0);
 
 	useEffect(() => {
 		// Skip only when no track has played yet (state is already zero)
 		if (resetKey === undefined) return;
 		setCurrentTime(0);
-		setDuration(0);
+		setMediaDuration(0);
 	}, [resetKey]);
 
 	useEffect(() => {
@@ -40,18 +44,18 @@ export function useMediaTime(
 		if (!videoEl) return;
 
 		const handleLoadedMetadata = () => {
-			if (Number.isFinite(videoEl.duration)) setDuration(videoEl.duration);
+			if (Number.isFinite(videoEl.duration)) setMediaDuration(videoEl.duration);
 		};
 		const handleTimeUpdate = () => {
 			setCurrentTime(videoEl.currentTime);
 			if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-				setDuration(videoEl.duration);
+				setMediaDuration(videoEl.duration);
 			}
 		};
 
 		handleLoadedMetadata();
 		if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-			setDuration(videoEl.duration);
+			setMediaDuration(videoEl.duration);
 		}
 
 		videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -61,6 +65,9 @@ export function useMediaTime(
 			videoEl.removeEventListener("timeupdate", handleTimeUpdate);
 		};
 	}, [videoElementRef]);
+
+	const duration =
+		knownDuration && knownDuration > 0 ? knownDuration : mediaDuration;
 
 	return { currentTime, duration };
 }

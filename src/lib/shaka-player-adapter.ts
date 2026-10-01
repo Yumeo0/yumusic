@@ -9,8 +9,8 @@ import {
 import type { SabrFormat } from "googlevideo/shared-types";
 import {
 	type CacheManager,
-	FormatKeyUtils,
-	isGoogleVideoURL,
+	createSegmentCacheKeyFromMetadata,
+	getUniqueFormatId,
 	type RequestMetadataManager,
 } from "googlevideo/utils";
 import shaka from "shaka-player/dist/shaka-player.ui";
@@ -29,6 +29,32 @@ interface ShakaResponseArgs {
 	requestType: shaka.net.NetworkingEngine.RequestType;
 	response: Response;
 	arrayBuffer?: Uint8Array | ArrayBuffer;
+}
+
+/**
+ * Ported from googlevideo's removed `isGoogleVideoURL` util (v4.1.1).
+ */
+function isGoogleVideoURL(url: string): boolean {
+	if (url.startsWith("sabr://")) return true;
+
+	const [urlPart, queryPart = ""] = url.split("?");
+
+	if (urlPart.endsWith("/videoplayback")) {
+		const params = new URLSearchParams(queryPart);
+		return (
+			params.get("source") === "youtube" ||
+			params.has("sabr") ||
+			params.has("lsig") ||
+			params.has("expire")
+		);
+	}
+	if (urlPart.includes("/videoplayback/")) {
+		const pathParts = urlPart.split("/");
+		return ["videoplayback", "sabr", "lsig", "expire"].some((part) =>
+			pathParts.includes(part),
+		);
+	}
+	return false;
 }
 
 export class ShakaPlayerAdapter implements SabrPlayerAdapter {
@@ -154,8 +180,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 			return null;
 		}
 
-		const segmentKey =
-			FormatKeyUtils.createSegmentCacheKeyFromMetadata(requestMetadata);
+		const segmentKey = createSegmentCacheKeyFromMetadata(requestMetadata);
 
 		let arrayBuffer = (
 			requestMetadata.isInit
@@ -316,7 +341,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 
 				if (segmentInfo) {
 					if (!contentLength) {
-						contentLength = segmentInfo.mediaHeader.contentLength;
+						contentLength = segmentInfo.mediaHeader.segmentLengthBytes;
 					}
 
 					loaded += segmentInfo.lastChunkSize || 0;
@@ -499,7 +524,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 			.getVariantTracks()
 			.find(
 				(track) =>
-					FormatKeyUtils.getUniqueFormatId(activeFormat) ===
+					getUniqueFormatId(activeFormat) ===
 					(activeFormat.width ? track.originalVideoId : track.originalAudioId),
 			);
 
@@ -508,10 +533,7 @@ export class ShakaPlayerAdapter implements SabrPlayerAdapter {
 		}
 
 		const formatMap = new Map(
-			sabrFormats.map((format) => [
-				FormatKeyUtils.getUniqueFormatId(format),
-				format,
-			]),
+			sabrFormats.map((format) => [getUniqueFormatId(format), format]),
 		);
 
 		return {

@@ -379,7 +379,7 @@ export function PlaylistDetails() {
 
 					return (
 						<SwipeToQueue
-							key={song.id || `playlist-item-${index}`}
+							key={`${song.id ?? "playlist-item"}-${index}`}
 							onQueue={() => addToQueue([song])}
 						>
 							<button

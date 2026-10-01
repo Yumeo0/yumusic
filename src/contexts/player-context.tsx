@@ -13,7 +13,7 @@ import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
-import { biggestThumb, hiResThumb } from "@/lib/utils";
+import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils";
 import { fetchFunction, getSongStream } from "@/lib/youtube-client";
 
 export interface Song {
@@ -52,6 +52,13 @@ interface PlayerContextType {
 	setQueueOpen: (open: boolean) => void;
 	videoContainerRef: RefObject<HTMLDivElement | null> | null;
 	videoElementRef: RefObject<HTMLVideoElement | null> | null;
+	/**
+	 * Authoritative track length in seconds from YouTube metadata (0 when
+	 * unknown). Preferred over the media element's duration, whose exact
+	 * value is a fraction shorter than the length YouTube reports in
+	 * listings — using it made the player show e.g. 2:54 vs the playlist's 2:55.
+	 */
+	duration: number;
 	volume: number;
 	setVolume: (volume: number) => void;
 }
@@ -155,22 +162,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		 */
 		const loadVideo = async () => {
 			const stream = new SabrStream({
-				fetch: fetchFunction as unknown as typeof fetch,
+				videoId,
+				fetchFunction: fetchFunction as unknown as typeof fetch,
+				serverAbrStreamingUrl: await decipher(
+					streamingData.server_abr_streaming_url,
+				),
+				videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
+				clientInfo,
+				poToken: await botguardService.mintToken(videoId),
+				formats: sabrFormats,
 			});
 			sabrStreamRef.current = stream;
-			stream.setClientInfo(clientInfo);
-			stream.setPoToken(await botguardService.mintToken(videoId));
-			stream.setStreamingURL(
-				await decipher(streamingData.server_abr_streaming_url),
-			);
-			stream.setUstreamerConfig(ustreamerConfig ?? "");
-			stream.setServerAbrFormats(sabrFormats);
-			if (videoInfo.basic_info.duration) {
-				stream.setDurationMs(videoInfo.basic_info.duration * 1000);
-			}
 
-			const { audioStream, selectedFormats } = await stream.start({
+			const { audioStream, selectedFormats } = stream.start({
 				enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
+				audioPreferences: {},
+				isPostLiveDvr: false,
 			});
 			if (cancelled) {
 				stream.abort();
@@ -195,7 +202,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				mediaSource.duration = videoInfo.basic_info.duration;
 			}
 
-			reader = audioStream.getReader();
+			reader =
+				audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
 			let started = false;
 			while (!cancelled) {
 				const { value, done } = await reader.read();
@@ -452,6 +460,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setQueueOpen,
 				videoContainerRef,
 				videoElementRef,
+				// Prefer the listing's duration label (the exact string the player
+				// list shows) over lengthSeconds; fall back to YouTube metadata.
+				duration:
+					parseDuration(currentSong?.duration) ||
+					videoInfo?.basic_info.duration ||
+					0,
 				volume,
 				setVolume,
 			}}

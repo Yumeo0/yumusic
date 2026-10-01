@@ -13,6 +13,27 @@ export function formatTime(seconds: number): string {
 }
 
 /**
+ * Formats a track's total length. Rounds to the nearest second so it agrees
+ * with the duration YouTube reports in listings (e.g. the playlist row): the
+ * media element's exact duration (224.9s) would otherwise floor to `3:44`
+ * while YouTube's rounded length text shows `3:45`.
+ */
+export function formatDuration(seconds: number): string {
+	return formatTime(Number.isFinite(seconds) ? Math.round(seconds) : seconds);
+}
+
+/**
+ * Parses a YouTube duration label ("2:55", "1:02:03") into seconds.
+ * Returns 0 for missing/invalid input.
+ */
+export function parseDuration(text: string | undefined | null): number {
+	if (!text) return 0;
+	const parts = text.split(":").map((part) => Number.parseInt(part, 10));
+	if (parts.some((part) => !Number.isFinite(part))) return 0;
+	return parts.reduce((total, part) => total * 60 + part, 0);
+}
+
+/**
  * Rewrites a YouTube thumbnail URL to a larger variant. YT Music returns
  * tiny 60-120px sources; googleusercontent URLs accept any size parameter
  * (deterministic — no probing needed). i.ytimg.com URLs are returned as-is:

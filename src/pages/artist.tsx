@@ -299,7 +299,8 @@ export default function ArtistPage() {
 							const isCurrent = currentSong?.id === song.id;
 							return (
 								<SwipeToQueue
-									key={song.id || `artist-song-${index}`}
+									// biome-ignore lint/suspicious/noArrayIndexKey: song list may contain duplicate video ids
+									key={`${song.id ?? "artist-song"}-${index}`}
 									onQueue={() => addToQueue([song])}
 								>
 									<button
