@@ -1,3 +1,5 @@
+import { cleanSearchTitle } from "./title";
+
 export interface LrcLine {
 	/** Start time in seconds */
 	time: number;
@@ -40,15 +42,6 @@ export function parseLrc(lrc: string): LrcLine[] {
 		.sort((a, b) => a.time - b.time);
 }
 
-/** Removes noise YouTube appends to titles ("(Official Video)", "feat. …"). */
-function cleanTitle(title: string): string {
-	return title
-		.replace(/[([{][^)\]}]*[)\]}]/g, "")
-		.replace(/\s*feat\..*$/i, "")
-		.replace(/\s+covered\s+by\s+.*$/i, "")
-		.trim();
-}
-
 /** Takes the primary artist and strips the " - Topic" channel suffix. */
 function cleanArtist(artist: string): string {
 	return artist
@@ -62,18 +55,22 @@ const DURATION_TOLERANCE_SEC = 2;
 
 /**
  * Fetches time-synced lyrics from LRCLIB (free, no key, CORS enabled).
- * Tries an exact artist+track+duration match first, then search. Records
- * whose duration is not within ±DURATION_TOLERANCE_SEC of the song are
- * rejected — prevents wrong-version lyrics (live/extended) desyncing the
- * panel. Returns null when nothing usable is found; callers re-fetch once
- * the duration becomes known.
+ * Uses the app's cleaned title (the same normalization scrobbles use, which
+ * strips covers/credits and resolves "Original - Translation" titles), tries an
+ * exact artist+track+duration match, then searches by title+artist. When
+ * `allowLooseMatch` is set it additionally searches by title alone — more
+ * forgiving but can return the wrong version. Records whose duration is not
+ * within ±DURATION_TOLERANCE_SEC of the song are rejected — prevents
+ * wrong-version lyrics (live/extended) desyncing the panel. Returns null when
+ * nothing usable is found; callers re-fetch once the duration becomes known.
  */
 export async function fetchSyncedLyrics(
 	title: string,
 	artist: string,
 	durationSec: number,
+	allowLooseMatch = true,
 ): Promise<LrcLine[] | null> {
-	const track = cleanTitle(title);
+	const track = cleanSearchTitle(title, artist).trim();
 	const name = cleanArtist(artist);
 	if (!track || durationSec <= 0) return null;
 
@@ -93,14 +90,20 @@ export async function fetchSyncedLyrics(
 			}
 		}
 
-		const queries = name
-			? [
-					`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(name)}`,
-					`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}`,
-				]
-			: [
-					`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}`,
-				];
+		// Search by title+artist; the title-only pass tolerates a wrong/missing
+		// artist (matching on title + duration) but is only used when loose
+		// matching is enabled.
+		const queries: string[] = [];
+		if (name) {
+			queries.push(
+				`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(name)}`,
+			);
+		}
+		if (allowLooseMatch || !name) {
+			queries.push(
+				`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}`,
+			);
+		}
 
 		for (const url of queries) {
 			const res = await fetch(url);
@@ -115,8 +118,11 @@ export async function fetchSyncedLyrics(
 					Math.abs(r.duration - durationSec) <= DURATION_TOLERANCE_SEC,
 			);
 			if (candidates.length === 0) continue;
+			// Closest duration wins; on a tie keep LRCLIB's own (relevance)
+			// order — e.g. the original-language entry ranked above a translated
+			// one of the same length.
 			const best = candidates.reduce((a, b) =>
-				Math.abs(a.duration - durationSec) < Math.abs(b.duration - durationSec)
+				Math.abs(a.duration - durationSec) <= Math.abs(b.duration - durationSec)
 					? a
 					: b,
 			);

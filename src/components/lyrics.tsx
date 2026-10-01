@@ -73,7 +73,7 @@ export function LyricsPanel({
 
 		const load = async () => {
 			const [lrclib, musixmatch, youtube] = await Promise.all([
-				fetchSyncedLyrics(title, artist, duration),
+				fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
 				fetchMusixmatchSynced(title, artist, duration),
 				getSongLyrics(songId),
 			]);
@@ -90,7 +90,7 @@ export function LyricsPanel({
 		return () => {
 			cancelled = true;
 		};
-	}, [songId, title, artist, duration]);
+	}, [songId, title, artist, duration, settings.lrclibLooseMatch]);
 
 	// Provider order is user-configurable, so selection re-runs when it changes.
 	const order = settings.lyricsProviderOrder;

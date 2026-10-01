@@ -18,6 +18,8 @@ export interface Settings {
 	lyricsProviderOrder: LyricsProviderId[];
 	/** Prefer a provider that has synced (time-aligned) lyrics. */
 	preferSyncedLyrics: boolean;
+	/** LRCLIB: also search by title alone when artist+title finds nothing. */
+	lrclibLooseMatch: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -31,6 +33,7 @@ const DEFAULTS: Settings = {
 	listenbrainzToken: "",
 	lyricsProviderOrder: [...DEFAULT_LYRICS_PROVIDER_ORDER],
 	preferSyncedLyrics: true,
+	lrclibLooseMatch: true,
 };
 
 export function getSettings(): Settings {
