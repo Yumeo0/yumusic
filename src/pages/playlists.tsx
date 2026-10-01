@@ -201,7 +201,9 @@ export function PlaylistDetails() {
 		setSearch("");
 	}, [id]);
 
-	const onBack = () => navigate("/playlists");
+	// Return to wherever the user came from (home, search, an artist, another
+	// playlist…), not a fixed destination.
+	const onBack = () => navigate(-1);
 
 	if (loading) {
 		return (
@@ -672,7 +674,7 @@ function BackButton({ onClick }: { onClick: () => void }) {
 			<span className="grid size-8 place-items-center rounded-full border border-foreground/10 transition-colors group-hover:border-primary/40">
 				<ArrowLeftIcon className="size-4" />
 			</span>
-			Library
+			Back
 		</button>
 	);
 }

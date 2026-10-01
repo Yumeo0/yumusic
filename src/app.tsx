@@ -517,7 +517,7 @@ function AppShell({
 							/>
 							<SidebarItem
 								icon={<LibraryIcon className="size-4.5" strokeWidth={2.2} />}
-								isActive={location.pathname.startsWith("/playlists")}
+								isActive={location.pathname === "/playlists"}
 								label="Playlists"
 								onClick={() => navigate("/playlists")}
 							/>
