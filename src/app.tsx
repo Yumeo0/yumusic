@@ -4,6 +4,7 @@ import {
 	LibraryIcon,
 	LogInIcon,
 	Music2,
+	Pin,
 	SettingsIcon,
 	X,
 } from "lucide-react";
@@ -21,10 +22,17 @@ import { Player } from "./components/player";
 import { QueuePanel } from "./components/queue-panel";
 import { Titlebar } from "./components/titlebar";
 import { UserMenu } from "./components/user-menu";
-import { PlayerProvider, usePlayer } from "./contexts/player-context";
+import { PlayerProvider, usePlayer, usePlayerControls } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
 import { usePinnedPlaylists } from "./lib/pinned";
+import {
+	setQueueOpen,
+	toggleNowPlaying,
+	toggleQueue,
+	useNowPlayingOpen,
+	useQueueOpen,
+} from "./lib/player-ui";
 import { useSettings } from "./lib/settings";
 import { proxiedImageUrl } from "./lib/tauri";
 import {
@@ -52,7 +60,8 @@ import SettingsPage from "./pages/settings";
  * plus playback timestamps that freeze while paused.
  */
 function DiscordPresenceSync() {
-	const { currentSong, isPlaying, videoElementRef } = usePlayer();
+	const { currentSong, videoElementRef } = usePlayer();
+	const { isPlaying } = usePlayerControls();
 	const [settings] = useSettings();
 	const [meta, setMeta] = useState<TrackMeta | null>(null);
 	const [mediaDuration, setMediaDuration] = useState(0);
@@ -159,7 +168,8 @@ function DiscordPresenceSync() {
  * has actually been listened to.
  */
 function ListenBrainzSync() {
-	const { currentSong, isPlaying, videoElementRef } = usePlayer();
+	const { currentSong, videoElementRef } = usePlayer();
+	const { isPlaying } = usePlayerControls();
 	const [settings] = useSettings();
 	const [meta, setMeta] = useState<TrackMeta | null>(null);
 
@@ -355,8 +365,8 @@ function AmbientSync() {
 }
 
 function NowPlayingOverlay() {
-	const { isNowPlayingOpen, isQueueOpen, setQueueOpen, toggleNowPlaying } =
-		usePlayer();
+	const isNowPlayingOpen = useNowPlayingOpen();
+	const isQueueOpen = useQueueOpen();
 
 	// Escape closes the queue first, then the fullscreen view
 	useEffect(() => {
@@ -371,18 +381,27 @@ function NowPlayingOverlay() {
 		};
 		window.addEventListener("keydown", handler);
 		return () => window.removeEventListener("keydown", handler);
-	}, [isNowPlayingOpen, isQueueOpen, setQueueOpen, toggleNowPlaying]);
+	}, [isNowPlayingOpen, isQueueOpen]);
 
 	return (
 		<div
 			className={cn(
-				"fixed inset-0 z-50 transition-[opacity,transform] duration-300 ease-out",
+				// Tailwind v4 uses the `translate` property (not `transform`) for
+				// translate-* utilities, so it must be listed explicitly here or
+				// the slide never animates. will-change promotes the full-screen
+				// blurred backdrop to its own layer, keeping the fade off the
+				// main thread so open/close stays responsive.
+				"fixed inset-0 z-50 transition-[opacity,translate] duration-300 ease-out will-change-[opacity,translate]",
 				isNowPlayingOpen
 					? "translate-y-0 opacity-100"
 					: "pointer-events-none translate-y-6 opacity-0",
 			)}
 		>
-			<NowPlayingPage onClose={toggleNowPlaying} />
+			<NowPlayingPage
+				isQueueOpen={isQueueOpen}
+				onClose={toggleNowPlaying}
+				onToggleQueue={toggleQueue}
+			/>
 		</div>
 	);
 }
@@ -454,8 +473,7 @@ function AppShell({
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { pinned, unpin } = usePinnedPlaylists();
-	const { currentSong, isNowPlayingOpen, isQueueOpen, toggleQueue } =
-		usePlayer();
+	const { currentSong } = usePlayer();
 
 	return (
 		<>
@@ -466,7 +484,28 @@ function AppShell({
 			<div className="flex max-md:h-app bg-background text-foreground md:h-[calc(100vh-2.25rem)] overflow-hidden">
 				{/* ── Sidebar (desktop) ───────────────────────── */}
 				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
-					<div className="flex min-h-0 flex-1 flex-col px-4 pt-8">
+					<div
+						className={cn(
+							"flex min-h-0 flex-1 flex-col px-4 pt-6",
+							currentSong && "pb-26",
+						)}
+					>
+						{/* Account — kept at the top of the sidebar */}
+						<div className="pb-3">
+							{isLoggedIn ? (
+								<UserMenu onLogout={handleLogout} user={userProfile || {}} />
+							) : (
+								<button
+									className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/5 hover:text-foreground"
+									onClick={handleLogin}
+									type="button"
+								>
+									<LogInIcon className="size-5" />
+									<span>Log In</span>
+								</button>
+							)}
+						</div>
+
 						<nav className="space-y-1">
 							<SidebarItem
 								icon={<HouseIcon className="size-4.5" strokeWidth={2.2} />}
@@ -492,67 +531,55 @@ function AppShell({
 							/>
 						</nav>
 
-						{/* Pinned playlists */}
+						{/* Pinned playlists — separated from the nav above */}
 						{pinned.length > 0 && (
-							<div className="mt-6 min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
-								{pinned.map((playlist) => {
-									const isActive =
-										location.pathname === `/playlists/${playlist.id}`;
-									return (
-										<div className="group/pin relative" key={playlist.id}>
-											<button
-												className={cn(
-													"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
-													isActive
-														? "bg-primary/12 text-primary"
-														: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-												)}
-												onClick={() => navigate(`/playlists/${playlist.id}`)}
-												type="button"
-											>
-												{playlist.thumbnail ? (
-													<img
-														alt=""
-														className="size-5 shrink-0 rounded object-cover"
-														src={proxiedImageUrl(playlist.thumbnail)}
-													/>
-												) : (
-													<Music2 className="size-4 shrink-0" />
-												)}
-												<span className="truncate">{playlist.title}</span>
-											</button>
-											<button
-												aria-label={`Unpin ${playlist.title}`}
-												className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
-												onClick={() => unpin(playlist.id)}
-												type="button"
-											>
-												<X className="size-3.5" />
-											</button>
-										</div>
-									);
-								})}
+							<div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-foreground/6 pt-3">
+								<div className="flex items-center gap-2 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+									<Pin className="size-3" />
+									<span>Pinned</span>
+								</div>
+								<div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
+									{pinned.map((playlist) => {
+										const isActive =
+											location.pathname === `/playlists/${playlist.id}`;
+										return (
+											<div className="group/pin relative" key={playlist.id}>
+												<button
+													className={cn(
+														"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
+														isActive
+															? "bg-primary/12 text-primary"
+															: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+													)}
+													onClick={() =>
+														navigate(`/playlists/${playlist.id}`)
+													}
+													type="button"
+												>
+													{playlist.thumbnail ? (
+														<img
+															alt=""
+															className="size-5 shrink-0 rounded object-cover"
+															src={proxiedImageUrl(playlist.thumbnail)}
+														/>
+													) : (
+														<Music2 className="size-4 shrink-0" />
+													)}
+													<span className="truncate">{playlist.title}</span>
+												</button>
+												<button
+													aria-label={`Unpin ${playlist.title}`}
+													className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
+													onClick={() => unpin(playlist.id)}
+													type="button"
+												>
+													<X className="size-3.5" />
+												</button>
+											</div>
+										);
+									})}
+								</div>
 							</div>
-						)}
-					</div>
-
-					<div
-						className={cn(
-							"border-t border-foreground/6 p-4",
-							currentSong && "pb-26",
-						)}
-					>
-						{isLoggedIn ? (
-							<UserMenu onLogout={handleLogout} user={userProfile || {}} />
-						) : (
-							<button
-								className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/5 hover:text-foreground"
-								onClick={handleLogin}
-								type="button"
-							>
-								<LogInIcon className="size-5" />
-								<span>Log In</span>
-							</button>
 						)}
 					</div>
 				</aside>
@@ -588,11 +615,7 @@ function AppShell({
 				</main>
 
 				<NowPlayingOverlay />
-				<QueuePanel
-					fullscreen={isNowPlayingOpen}
-					onClose={() => toggleQueue()}
-					open={isQueueOpen}
-				/>
+				<QueuePanel />
 				<Player />
 			</div>
 			<MobileNav />

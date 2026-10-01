@@ -1,5 +1,6 @@
 import { Volume1, Volume2, VolumeX } from "lucide-react";
-import { usePlayer } from "@/contexts/player-context";
+import { useEffect, useRef } from "react";
+import { usePlayerVolume } from "@/contexts/player-context";
 import { linearToVolume, MAX_VOLUME, volumeToLinear } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
 
@@ -16,10 +17,17 @@ export function VolumeControl({
 	sliderClassName,
 	reverse = false,
 }: VolumeControlProps) {
-	const { volume, setVolume } = usePlayer();
+	const { volume, setVolume } = usePlayerVolume();
+
+	// Remember the last audible level so unmuting restores it instead of
+	// jumping to full volume.
+	const lastAudible = useRef(volume > 0 ? volume : MAX_VOLUME);
+	useEffect(() => {
+		if (volume > 0) lastAudible.current = volume;
+	}, [volume]);
 
 	const linear = volumeToLinear(volume);
-	const toggleMute = () => setVolume(volume > 0 ? 0 : MAX_VOLUME);
+	const toggleMute = () => setVolume(volume > 0 ? 0 : lastAudible.current);
 
 	const Icon =
 		volume === 0 ? VolumeX : volume < MAX_VOLUME * 0.45 ? Volume1 : Volume2;

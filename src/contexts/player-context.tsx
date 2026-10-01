@@ -4,8 +4,10 @@ import {
 	createContext,
 	type ReactNode,
 	type RefObject,
+	useCallback,
 	useContext,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
@@ -28,13 +30,16 @@ export interface Song {
 	duration?: string;
 }
 
+/**
+ * Playback state/actions. Deliberately does NOT contain the rapidly-changing
+ * `isPlaying` or `volume`: those live in their own contexts below so that a
+ * play/pause toggle or a volume drag doesn't recreate this value and
+ * re-render every consumer (which used to re-render the whole app shell and
+ * current page — the source of the input lag on those controls).
+ */
 interface PlayerContextType {
 	currentSong: Song | null;
-	isPlaying: boolean;
 	play: (song: Song, queue?: Song[]) => void;
-	pause: () => void;
-	resume: () => void;
-	toggle: () => void;
 	videoInfo: YT.VideoInfo | null;
 	innertube: Innertube | null;
 	queue: Song[];
@@ -45,11 +50,6 @@ interface PlayerContextType {
 	previous: () => void;
 	hasNext: boolean;
 	hasPrevious: boolean;
-	isNowPlayingOpen: boolean;
-	toggleNowPlaying: () => void;
-	isQueueOpen: boolean;
-	toggleQueue: () => void;
-	setQueueOpen: (open: boolean) => void;
 	videoContainerRef: RefObject<HTMLDivElement | null> | null;
 	videoElementRef: RefObject<HTMLVideoElement | null> | null;
 	/**
@@ -59,11 +59,27 @@ interface PlayerContextType {
 	 * listings — using it made the player show e.g. 2:54 vs the playlist's 2:55.
 	 */
 	duration: number;
+}
+
+interface PlayerControlsContextType {
+	isPlaying: boolean;
+	pause: () => void;
+	resume: () => void;
+	toggle: () => void;
+}
+
+interface PlayerVolumeContextType {
 	volume: number;
 	setVolume: (volume: number) => void;
 }
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
+const PlayerControlsContext = createContext<
+	PlayerControlsContextType | undefined
+>(undefined);
+const PlayerVolumeContext = createContext<PlayerVolumeContextType | undefined>(
+	undefined,
+);
 
 /** Appends one media chunk and resolves once the SourceBuffer is ready again. */
 function appendToSourceBuffer(
@@ -102,8 +118,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [queue, setQueueState] = useState<Song[]>([]);
 	const [currentIndex, setCurrentIndex] = useState(-1);
 	const [history, setHistory] = useState<Song[]>([]);
-	const [isNowPlayingOpen, setIsNowPlayingOpen] = useState(false);
-	const [isQueueOpen, setIsQueueOpen] = useState(false);
 	const queueSheetRef = useRef<HTMLElement | null>(null);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
@@ -289,11 +303,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		localStorage.setItem("yumusic-volume", volume.toString());
 	}, [volume]);
 
-	const setVolume = (next: number) => {
+	const setVolume = useCallback((next: number) => {
 		_setVolume(Math.min(MAX_VOLUME, Math.max(0, next)));
-	};
+	}, []);
 
-	const playSong = async (song: Song) => {
+	const playSong = useCallback(async (song: Song) => {
 		setIsPlaying(false);
 		setCurrentSong(song);
 		setVideoInfo(null);
@@ -338,39 +352,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				error instanceof Error ? error.stack : undefined,
 			);
 		}
-	};
+	}, []);
 
-	const play = async (song: Song, newQueue?: Song[]) => {
-		if (currentSong?.id === song.id) {
-			setIsPlaying(true);
-			return;
-		}
-
-		// Add current song to history if it exists
-		if (currentSong) {
-			setHistory((prev) => [...prev, currentSong]);
-		}
-
-		// If a new queue is provided, add the current song to the front and set it
-		if (newQueue) {
-			setQueueState([song, ...newQueue]);
-			setCurrentIndex(0);
-		} else {
-			// Find the song in the existing queue
-			const index = queue.findIndex((s) => s.id === song.id);
-			if (index !== -1) {
-				setCurrentIndex(index);
-			} else {
-				// Song not in queue, add it to the front
-				setQueueState([song, ...queue]);
-				setCurrentIndex(0);
+	const play = useCallback(
+		async (song: Song, newQueue?: Song[]) => {
+			if (currentSong?.id === song.id) {
+				setIsPlaying(true);
+				return;
 			}
-		}
 
-		await playSong(song);
-	};
+			// Add current song to history if it exists
+			if (currentSong) {
+				setHistory((prev) => [...prev, currentSong]);
+			}
 
-	const next = async () => {
+			// If a new queue is provided, add the current song to the front and set it
+			if (newQueue) {
+				setQueueState([song, ...newQueue]);
+				setCurrentIndex(0);
+			} else {
+				// Find the song in the existing queue
+				const index = queue.findIndex((s) => s.id === song.id);
+				if (index !== -1) {
+					setCurrentIndex(index);
+				} else {
+					// Song not in queue, add it to the front
+					setQueueState([song, ...queue]);
+					setCurrentIndex(0);
+				}
+			}
+
+			await playSong(song);
+		},
+		[currentSong, queue, playSong],
+	);
+
+	const next = useCallback(async () => {
 		if (currentIndex >= queue.length - 1) return;
 
 		const nextIndex = currentIndex + 1;
@@ -383,9 +400,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		setCurrentIndex(nextIndex);
 		await playSong(nextSong);
-	};
+	}, [currentIndex, queue, currentSong, playSong]);
 
-	const previous = async () => {
+	const previous = useCallback(async () => {
 		// Try to go back in queue first
 		if (currentIndex > 0) {
 			const prevIndex = currentIndex - 1;
@@ -415,73 +432,89 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		setHistory(newHistory);
 		await playSong(previousSong);
-	};
+	}, [currentIndex, queue, history, currentSong, playSong]);
 
-	const addToQueue = (songs: Song[]) => {
+	const addToQueue = useCallback((songs: Song[]) => {
 		setQueueState((prev) => [...prev, ...songs]);
-	};
+	}, []);
 
-	const setQueue = (songs: Song[]) => {
+	const setQueue = useCallback((songs: Song[]) => {
 		setQueueState(songs);
-	};
+	}, []);
 
-	const pause = () => setIsPlaying(false);
-	const resume = () => setIsPlaying(true);
-	const toggle = () => setIsPlaying(!isPlaying);
-	const toggleNowPlaying = () => setIsNowPlayingOpen(!isNowPlayingOpen);
-	const toggleQueue = () => setIsQueueOpen(!isQueueOpen);
-	const setQueueOpen = (open: boolean) => setIsQueueOpen(open);
+	const pause = useCallback(() => setIsPlaying(false), []);
+	const resume = useCallback(() => setIsPlaying(true), []);
+	const toggle = useCallback(() => setIsPlaying((playing) => !playing), []);
+
 	const hasNext = currentIndex < queue.length - 1;
 	const hasPrevious = currentIndex > 0 || history.length > 0;
+	const duration =
+		parseDuration(currentSong?.duration) || videoInfo?.basic_info.duration || 0;
+
+	const playerValue = useMemo<PlayerContextType>(
+		() => ({
+			currentSong,
+			play,
+			videoInfo,
+			innertube,
+			queue,
+			currentIndex,
+			addToQueue,
+			setQueue,
+			next,
+			previous,
+			hasNext,
+			hasPrevious,
+			videoContainerRef,
+			videoElementRef,
+			duration,
+		}),
+		[
+			currentSong,
+			play,
+			videoInfo,
+			innertube,
+			queue,
+			currentIndex,
+			addToQueue,
+			setQueue,
+			next,
+			previous,
+			hasNext,
+			hasPrevious,
+			videoContainerRef,
+			duration,
+		],
+	);
+
+	const controlsValue = useMemo<PlayerControlsContextType>(
+		() => ({ isPlaying, pause, resume, toggle }),
+		[isPlaying, pause, resume, toggle],
+	);
+
+	const volumeValue = useMemo<PlayerVolumeContextType>(
+		() => ({ volume, setVolume }),
+		[volume, setVolume],
+	);
 
 	return (
-		<PlayerContext.Provider
-			value={{
-				currentSong,
-				isPlaying,
-				play,
-				pause,
-				resume,
-				toggle,
-				videoInfo,
-				innertube,
-				queue,
-				currentIndex,
-				addToQueue,
-				setQueue,
-				next,
-				previous,
-				hasNext,
-				hasPrevious,
-				isNowPlayingOpen,
-				toggleNowPlaying,
-				isQueueOpen,
-				toggleQueue,
-				setQueueOpen,
-				videoContainerRef,
-				videoElementRef,
-				// Prefer the listing's duration label (the exact string the player
-				// list shows) over lengthSeconds; fall back to YouTube metadata.
-				duration:
-					parseDuration(currentSong?.duration) ||
-					videoInfo?.basic_info.duration ||
-					0,
-				volume,
-				setVolume,
-			}}
-		>
-			<QueueSheetContext.Provider value={queueSheetRef}>
-				{children}
-				{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
-				<video
-					className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
-					onEnded={() => {
-						if (hasNext) next();
-					}}
-					playsInline
-					ref={videoElementRef}
-				/>
-			</QueueSheetContext.Provider>
+		<PlayerContext.Provider value={playerValue}>
+			<PlayerControlsContext.Provider value={controlsValue}>
+				<PlayerVolumeContext.Provider value={volumeValue}>
+					<QueueSheetContext.Provider value={queueSheetRef}>
+						{children}
+						{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
+						<video
+							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+							onEnded={() => {
+								if (hasNext) next();
+							}}
+							playsInline
+							ref={videoElementRef}
+						/>
+					</QueueSheetContext.Provider>
+				</PlayerVolumeContext.Provider>
+			</PlayerControlsContext.Provider>
 		</PlayerContext.Provider>
 	);
 }
@@ -490,6 +523,24 @@ export function usePlayer() {
 	const context = useContext(PlayerContext);
 	if (context === undefined) {
 		throw new Error("usePlayer must be used within a PlayerProvider");
+	}
+	return context;
+}
+
+/** Play/pause state + controls. Separate so toggling doesn't re-render the app. */
+export function usePlayerControls() {
+	const context = useContext(PlayerControlsContext);
+	if (context === undefined) {
+		throw new Error("usePlayerControls must be used within a PlayerProvider");
+	}
+	return context;
+}
+
+/** Volume state + setter. Separate so dragging the slider doesn't re-render the app. */
+export function usePlayerVolume() {
+	const context = useContext(PlayerVolumeContext);
+	if (context === undefined) {
+		throw new Error("usePlayerVolume must be used within a PlayerProvider");
 	}
 	return context;
 }

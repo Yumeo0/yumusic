@@ -8,8 +8,9 @@ import {
 } from "lucide-react";
 import { useRef, type RefObject } from "react";
 import { SongTitle } from "@/components/song-title";
-import { usePlayer } from "@/contexts/player-context";
+import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { toggleNowPlaying, toggleQueue, useQueueOpen } from "@/lib/player-ui";
 import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils";
@@ -20,19 +21,15 @@ import { ProgressBar } from "./waveform";
 export function Player() {
 	const {
 		currentSong,
-		isPlaying,
-		toggle,
 		next,
 		previous,
 		hasNext,
 		hasPrevious,
-		toggleNowPlaying,
-		toggleQueue,
-		isQueueOpen,
 		videoElementRef,
 		duration: knownDuration,
 	} = usePlayer();
-
+	const { isPlaying, toggle } = usePlayerControls();
+	const isQueueOpen = useQueueOpen();
 	// Swipe up on the mini player reveals the queue sheet progressively.
 	// The bar sits above Android's bottom gesture zone, so the touch
 	// reliably reaches the webview — unlike swipes starting at the very
@@ -48,7 +45,7 @@ export function Player() {
 
 	return (
 		<footer
-			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] cursor-pointer border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
+			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			onClick={toggleNowPlaying}
 			{...swipeHandlers}
 		>
@@ -61,13 +58,18 @@ export function Player() {
 				/>
 			</div>
 
+			{/* Track identity — click to open fullscreen. The row owns the
+			    `group` so the hover feedback (title highlight, artwork chevron)
+			    also fires on the empty parts of the bar. Controls are marked
+			    `.player-ctl`, and the `group-has-…` classes below cancel the
+			    feedback while one of them is hovered — matching the fact that
+			    clicking a control doesn't open the fullscreen. */}
 			<div
-				className="grid h-17 grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
+				className="group grid h-17 grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
 				ref={swipeRowRef}
 			>
-				{/* Track identity — click to open fullscreen */}
 				<button
-					className="group flex min-w-0 items-center gap-3 text-left"
+					className="flex min-w-0 items-center gap-3 text-left"
 					onClick={(e) => {
 						e.stopPropagation();
 						toggleNowPlaying();
@@ -86,13 +88,13 @@ export function Player() {
 						) : (
 							<div className="size-11 rounded-md bg-muted" />
 						)}
-						<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+						<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[.player-ctl:hover]:opacity-0">
 							<ChevronUp className="size-4 text-white" />
 						</span>
 					</div>
 					<div className="min-w-0">
 						<h3
-							className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary"
+							className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
 							key={`t-${currentSong.id}`}
 						>
 							<SongTitle
@@ -114,7 +116,7 @@ export function Player() {
 				<div className="flex items-center gap-1 sm:gap-2">
 					<button
 						aria-label="Previous"
-						className="grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						disabled={!hasPrevious}
 						onClick={(e) => {
 							e.stopPropagation();
@@ -127,7 +129,7 @@ export function Player() {
 					<button
 						aria-label={isPlaying ? "Pause" : "Play"}
 						className={cn(
-							"grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90",
+							"player-ctl grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90",
 						)}
 						onClick={(e) => {
 							e.stopPropagation();
@@ -143,7 +145,7 @@ export function Player() {
 					</button>
 					<button
 						aria-label="Next"
-						className="grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						disabled={!hasNext}
 						onClick={(e) => {
 							e.stopPropagation();
@@ -166,7 +168,7 @@ export function Player() {
 					<button
 						aria-label="Toggle queue"
 						className={cn(
-							"grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-90",
+							"player-ctl grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-90",
 							isQueueOpen
 								? "bg-primary/12 text-primary"
 								: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -181,7 +183,7 @@ export function Player() {
 						<ListMusic className="size-4.5" />
 					</button>
 					{/* Volume interactions must not open the fullscreen */}
-					<div onClick={(e) => e.stopPropagation()}>
+					<div className="player-ctl" onClick={(e) => e.stopPropagation()}>
 						<VolumeControl />
 					</div>
 				</div>

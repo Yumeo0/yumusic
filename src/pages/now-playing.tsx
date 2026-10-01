@@ -9,14 +9,14 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useRef, useState, type RefObject } from "react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
 import { SongTitle } from "@/components/song-title";
 import { VolumeControl } from "@/components/volume-control";
 import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
-import { usePlayer } from "@/contexts/player-context";
+import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
 import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
@@ -24,18 +24,26 @@ import { cn, formatDuration, formatTime } from "@/lib/utils";
 
 interface NowPlayingPageProps {
 	onClose: () => void;
+	isQueueOpen: boolean;
+	onToggleQueue: () => void;
 }
 
 /**
  * Fullscreen "Now Playing" experience.
  * Left: lyrics. Right: artwork, transport, seek. Tinted with the accent
  * color derived from the current song's thumbnail.
+ *
+ * Memoized: the overlay re-renders on every open/close (it owns the
+ * animation classes), but this page's props stay stable, so it doesn't
+ * re-render — and neither does the lyrics tree — just to run the animation.
  */
-export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
+export const NowPlayingPage = memo(function NowPlayingPage({
+	onClose,
+	isQueueOpen,
+	onToggleQueue,
+}: NowPlayingPageProps) {
 	const {
 		currentSong,
-		isPlaying,
-		toggle,
 		queue,
 		currentIndex,
 		next,
@@ -43,11 +51,10 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 		hasNext,
 		hasPrevious,
 		play,
-		isQueueOpen,
-		toggleQueue,
 		videoElementRef,
 		duration: knownDuration,
 	} = usePlayer();
+	const { isPlaying, toggle } = usePlayerControls();
 
 	// Mobile: lyrics are opt-in via the transport toggle. Desktop always
 	// shows the lyrics column — the state only affects max-md classes.
@@ -99,7 +106,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 							? "bg-primary/15 text-primary"
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
 					)}
-					onClick={toggleQueue}
+					onClick={onToggleQueue}
 					title="Queue"
 					type="button"
 				>
@@ -295,7 +302,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 					<button
 						aria-label="Open queue"
 						className="mx-auto flex items-center gap-1.5 rounded-full bg-foreground/6 px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-foreground/10 hover:text-foreground active:scale-95 md:hidden"
-						onClick={() => toggleQueue()}
+						onClick={() => onToggleQueue()}
 						type="button"
 					>
 						<ChevronsUp className="size-3.5" />
@@ -355,7 +362,7 @@ export function NowPlayingPage({ onClose }: NowPlayingPageProps) {
 			</main>
 		</div>
 	);
-}
+});
 
 type VideoRef = RefObject<HTMLVideoElement | null> | null;
 

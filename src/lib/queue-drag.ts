@@ -1,5 +1,6 @@
 import { useRef } from "react";
-import { usePlayer, useQueueSheetRef } from "@/contexts/player-context";
+import { useQueueSheetRef } from "@/contexts/player-context";
+import { getQueueOpen, setQueueOpen } from "@/lib/player-ui";
 
 /** Release opens the sheet once more than this fraction is revealed. */
 const SNAP_OPEN_RATIO = 0.25;
@@ -18,7 +19,6 @@ const SNAP_DURATION_MS = 300;
  * starting in a certain screen region (e.g. below the progress bar).
  */
 export function useQueueDragGesture(isEligible?: (clientY: number) => boolean) {
-	const { isQueueOpen, setQueueOpen } = usePlayer();
 	const sheetRef = useQueueSheetRef();
 	const startY = useRef<number | null>(null);
 	const following = useRef(false);
@@ -52,7 +52,7 @@ export function useQueueDragGesture(isEligible?: (clientY: number) => boolean) {
 
 	const onTouchStart = (event: React.TouchEvent) => {
 		const touch = event.touches[0];
-		if (!touch || isQueueOpen) return;
+		if (!touch || getQueueOpen()) return;
 		if (!window.matchMedia(MOBILE_QUERY).matches) return;
 		startY.current = touch.clientY;
 		following.current = false;

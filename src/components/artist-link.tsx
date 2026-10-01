@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
-import { usePlayer } from "@/contexts/player-context";
 import { useArtistName } from "@/lib/artist-names";
+import { closeNowPlaying } from "@/lib/player-ui";
 import { cn } from "@/lib/utils";
 
 interface ArtistLinkProps {
@@ -18,7 +18,6 @@ interface ArtistLinkProps {
  */
 export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 	const navigate = useNavigate();
-	const { isNowPlayingOpen, toggleNowPlaying } = usePlayer();
 
 	if (!id) {
 		return <span className={className}>{name}</span>;
@@ -34,9 +33,7 @@ export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 			onClick={(e) => {
 				e.preventDefault();
 				e.stopPropagation();
-				if (isNowPlayingOpen) {
-					toggleNowPlaying();
-				}
+				closeNowPlaying();
 				navigate(`/artist/${id}`);
 			}}
 		>

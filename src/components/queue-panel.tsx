@@ -2,31 +2,28 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, X } from "lucide-react";
 import { useRef } from "react";
 import { SongTitle } from "@/components/song-title";
-import { usePlayer, useQueueSheetRef } from "@/contexts/player-context";
+import { usePlayer, usePlayerControls, useQueueSheetRef } from "@/contexts/player-context";
+import { setQueueOpen, useNowPlayingOpen, useQueueOpen } from "@/lib/player-ui";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
 import { EqualizerBars } from "./waveform";
 
-interface QueuePanelProps {
-	open: boolean;
-	onClose: () => void;
-	/** In fullscreen the panel spans the full height */
-	fullscreen?: boolean;
-}
-
 /**
  * Queue drawer. Desktop: slides in from the right. Mobile: a bottom sheet
  * that slides up — matching the swipe-up gesture, whose reveal progress is
  * driven through the shared sheet ref while the finger is down.
+ *
+ * Reads its open/fullscreen state from the player UI store rather than props
+ * so opening the fullscreen player doesn't re-render the app layout.
  */
-export function QueuePanel({
-	open,
-	onClose,
-	fullscreen = false,
-}: QueuePanelProps) {
-	const { queue, currentIndex, isPlaying, play } = usePlayer();
+export function QueuePanel() {
+	const { queue, currentIndex, play } = usePlayer();
+	const { isPlaying } = usePlayerControls();
 	const sheetRef = useQueueSheetRef();
+	const open = useQueueOpen();
+	const fullscreen = useNowPlayingOpen();
+	const onClose = () => setQueueOpen(false);
 
 	// The queue can hold thousands of tracks; only render the visible rows.
 	// The panel stays mounted even when closed (for the drag-follow reveal),

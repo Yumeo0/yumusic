@@ -18,7 +18,7 @@ import { SwipeToQueue } from "@/components/swipe-to-queue";
 import { Input } from "@/components/ui/input";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
-import { usePlayer } from "@/contexts/player-context";
+import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { usePinnedPlaylists } from "@/lib/pinned";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
@@ -117,7 +117,8 @@ function cleanSubtitle(text: string): string {
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const { play, addToQueue, currentSong, isPlaying } = usePlayer();
+	const { play, addToQueue, currentSong } = usePlayer();
+	const { isPlaying } = usePlayerControls();
 	const [playlist, setPlaylist] = useState<PlaylistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [loadingMore, setLoadingMore] = useState(false);

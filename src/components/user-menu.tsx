@@ -55,7 +55,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
 			</button>
 
 			{isOpen && (
-				<div className="animate-pop-in absolute bottom-full left-0 z-50 mb-2 w-full origin-bottom-left overflow-hidden rounded-xl border border-foreground/10 bg-popover/95 shadow-[0_20px_50px_-12px_oklch(0_0_0/0.6)] backdrop-blur-xl">
+				<div className="animate-pop-in absolute top-full left-0 z-50 mt-2 w-full origin-top-left overflow-hidden rounded-xl border border-foreground/10 bg-popover/95 shadow-[0_20px_50px_-12px_oklch(0_0_0/0.6)] backdrop-blur-xl">
 					<div className="p-1.5">
 						<button
 							className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm text-destructive transition-colors duration-150 hover:bg-destructive/10"

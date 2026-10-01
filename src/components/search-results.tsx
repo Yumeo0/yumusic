@@ -5,7 +5,7 @@ import { SongTitle } from "@/components/song-title";
 import { SwipeToQueue } from "@/components/swipe-to-queue";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
-import { usePlayer } from "@/contexts/player-context";
+import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
@@ -16,7 +16,8 @@ interface SearchResultsPageProps {
 }
 
 export default function SearchResults({ query }: SearchResultsPageProps) {
-	const { play, addToQueue, currentSong, isPlaying } = usePlayer();
+	const { play, addToQueue, currentSong } = usePlayer();
+	const { isPlaying } = usePlayerControls();
 	const [results, setResults] = useState<YTNodes.MusicResponsiveListItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
