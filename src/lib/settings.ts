@@ -14,8 +14,6 @@ export interface Settings {
 	cleanTitles: boolean;
 	listenbrainz: boolean;
 	listenbrainzToken: string;
-	/** Original-language artist names (fetched per artist, cached). */
-	originalArtists: boolean;
 	/** Lyrics providers in priority order (highest first). */
 	lyricsProviderOrder: LyricsProviderId[];
 	/** Prefer a provider that has synced (time-aligned) lyrics. */
@@ -31,7 +29,6 @@ const DEFAULTS: Settings = {
 	cleanTitles: true,
 	listenbrainz: false,
 	listenbrainzToken: "",
-	originalArtists: false,
 	lyricsProviderOrder: [...DEFAULT_LYRICS_PROVIDER_ORDER],
 	preferSyncedLyrics: true,
 };

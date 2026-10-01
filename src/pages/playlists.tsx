@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
-import { usePinnedPlaylists } from "@/lib/pinned";
+import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/pinned";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
@@ -33,9 +33,10 @@ import {
 // Auto-sync policy: fetch on first use, persist to localStorage, then only
 // re-sync after 24h — or when the user hits the refresh button.
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
-// v3: cache entries carry the per-artist links (v2 entries predate them)
-const LIBRARY_CACHE_KEY = "yumusic:library:v3";
-const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v3:";
+// v6: the library is fetched in English; v5 and earlier could hold a locally
+// localized (e.g. Japanese) auto-playlist name.
+const LIBRARY_CACHE_KEY = "yumusic:library:v6";
+const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v6:";
 
 interface LibraryPlaylist {
 	id: string;
@@ -530,6 +531,7 @@ export default function PlaylistsPage() {
 				}
 			}
 			setPlaylists(list);
+			reconcilePinnedTitles(list);
 			if (list.length > 0) writeCache(LIBRARY_CACHE_KEY, list);
 		} catch (err) {
 			console.error("Error fetching playlists:", err);

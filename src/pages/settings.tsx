@@ -301,35 +301,6 @@ export default function SettingsPage({
 					</div>
 					<div className="flex items-center justify-between gap-6 p-4">
 						<div className="min-w-0">
-							<p className="text-sm font-medium">Original artist names</p>
-							<p className="mt-0.5 text-xs text-muted-foreground">
-								Show artists under their original-language name, e.g.
-								"猫又おかゆ" instead of "Nekomata Okayu". Each artist name is
-								looked up once and cached.
-							</p>
-						</div>
-						<button
-							aria-label="Toggle original artist names"
-							aria-pressed={settings.originalArtists}
-							className={cn(
-								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
-								settings.originalArtists ? "bg-primary" : "bg-foreground/15",
-							)}
-							onClick={() =>
-								update({ originalArtists: !settings.originalArtists })
-							}
-							type="button"
-						>
-							<span
-								className={cn(
-									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
-									settings.originalArtists && "translate-x-5",
-								)}
-							/>
-						</button>
-					</div>
-					<div className="flex items-center justify-between gap-6 p-4">
-						<div className="min-w-0">
 							<p className="text-sm font-medium">Clean up titles</p>
 							<p className="mt-0.5 text-xs text-muted-foreground">
 								Strip noise from the end of titles, e.g. "美人局 covered by

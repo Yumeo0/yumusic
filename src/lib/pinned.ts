@@ -29,6 +29,28 @@ function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 	window.dispatchEvent(new Event(PINNED_EVENT));
 }
 
+/**
+ * Updates the stored title of any pinned playlist that appears (with a
+ * different title) in the given library list — e.g. a system playlist whose
+ * name was previously captured in another locale.
+ */
+export function reconcilePinnedTitles(
+	items: Array<{ id: string; title: string }>,
+) {
+	const titles = new Map(items.map((item) => [item.id, item.title]));
+	const current = getPinnedPlaylists();
+	let changed = false;
+	const next = current.map((pinned) => {
+		const title = titles.get(pinned.id);
+		if (title && title !== pinned.title) {
+			changed = true;
+			return { ...pinned, title };
+		}
+		return pinned;
+	});
+	if (changed) savePinnedPlaylists(next);
+}
+
 /** Shared reactive state for sidebar-pinned playlists. */
 export function usePinnedPlaylists() {
 	const [pinned, setPinned] = useState<PinnedPlaylist[]>(getPinnedPlaylists);

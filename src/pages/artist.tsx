@@ -15,7 +15,6 @@ import { SwipeToQueue } from "@/components/swipe-to-queue";
 import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
-import { useArtistName } from "@/lib/artist-names";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistListOf, artistNames } from "@/lib/youtube.utils";
@@ -164,7 +163,7 @@ export default function ArtistPage() {
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const artistName = useArtistName(artist?.name, id ?? undefined);
+	const artistName = artist?.name;
 
 	const fetchArtist = async (force = false) => {
 		if (!id) return;

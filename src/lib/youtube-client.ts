@@ -9,6 +9,7 @@ import {
 } from "youtubei.js/web";
 import { botguardService } from "./botguard-service";
 import type { LrcLine } from "./lrclib";
+import { getOembedMetadata } from "./oembed";
 import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "./tauri";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
@@ -35,12 +36,22 @@ async function bodyToBase64(body: BodyInit): Promise<string | null> {
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
 
-let youtube: Innertube | null = null;
-/** Cookie the cached client was built with (`null` = signed out). */
-let youtubeCookie: string | null = null;
-/** In-flight creation, shared by callers asking for the same auth state. */
-let youtubePending: Promise<Innertube> | null = null;
-let youtubePendingCookie: string | null = null;
+interface ClientSlot {
+	instance: Innertube | null;
+	/** Cookie the cached client was built with (`null` = signed out). */
+	cookie: string | null;
+	/** In-flight creation, shared by callers asking for the same auth state. */
+	pending: Promise<Innertube> | null;
+	pendingCookie: string | null;
+}
+
+function createSlot(): ClientSlot {
+	return { instance: null, cookie: null, pending: null, pendingCookie: null };
+}
+
+// The app always fetches in English (matching the UI). A single client suffices
+// because `hl` lives on the shared session.
+const enClientSlot = createSlot();
 
 // Set up JavaScript evaluator for deciphering URLs
 Platform.shim.eval = async (
@@ -173,34 +184,39 @@ export async function fetchFunction(
 Object.assign(fetchFunction, { preconnect: () => undefined });
 
 /**
- * Returns the shared Innertube client, creating it at most once per auth
- * state. Concurrent callers share the in-flight creation, and a signed-out
- * creation can never replace an already-authenticated client — without these
- * guarantees, data fetches that start before the login cookie is available
- * (the home feed mounts before the layout's login check) could clobber the
- * session and silently drop the account: wrong recommendations, an empty
- * library and a nameless "User" in the sidebar.
+ * Returns a cached Innertube client for the given language slot, creating it at
+ * most once per auth state. Concurrent callers share the in-flight creation,
+ * and a signed-out creation can never replace an already-authenticated client —
+ * without these guarantees, data fetches that start before the login cookie is
+ * available (the home feed mounts before the layout's login check) could
+ * clobber the session and silently drop the account: wrong recommendations, an
+ * empty library and a nameless "User" in the sidebar.
  */
-export async function getYoutubeClient(cookie?: string) {
+async function getClientFromSlot(
+	slot: ClientSlot,
+	lang: string,
+	cookie?: string,
+): Promise<Innertube> {
 	const desired = cookie || (await window.electron.getCookie()) || null;
 
 	// Reuse the current client when it already matches; never downgrade an
 	// authenticated client just because no cookie was available this call.
-	if (youtube && (desired === youtubeCookie || !desired)) {
-		return youtube;
+	if (slot.instance && (desired === slot.cookie || !desired)) {
+		return slot.instance;
 	}
 
 	// Share an in-flight creation for the same auth state.
-	if (youtubePending && youtubePendingCookie === desired) {
-		return youtubePending;
+	if (slot.pending && slot.pendingCookie === desired) {
+		return slot.pending;
 	}
 
-	youtubePendingCookie = desired;
+	slot.pendingCookie = desired;
 	let pending: Promise<Innertube>;
 	pending = Innertube.create({
 		cache: new UniversalCache(false),
 		generate_session_locally: true,
 		cookie: desired || undefined,
+		lang,
 		// Bun's `fetch` type carries a required `preconnect` member that the
 		// DOM-flavored custom fetch lacks; the runtime object satisfies it
 		// via the Object.assign above.
@@ -209,21 +225,26 @@ export async function getYoutubeClient(cookie?: string) {
 		.then((client) => {
 			// Only adopt this client if no newer auth state was requested while
 			// this creation was in flight.
-			if (youtubePendingCookie === desired) {
-				youtube = client;
-				youtubeCookie = desired;
+			if (slot.pendingCookie === desired) {
+				slot.instance = client;
+				slot.cookie = desired;
 			}
 			return client;
 		})
 		.finally(() => {
-			if (youtubePending === pending) {
-				youtubePending = null;
-				youtubePendingCookie = null;
+			if (slot.pending === pending) {
+				slot.pending = null;
+				slot.pendingCookie = null;
 			}
 		});
-	youtubePending = pending;
+	slot.pending = pending;
 
 	return pending;
+}
+
+/** The app's Innertube client, pinned to English to match the UI. */
+export function getYoutubeClient(cookie?: string) {
+	return getClientFromSlot(enClientSlot, "en", cookie);
 }
 
 export async function getUserProfile() {
@@ -449,34 +470,23 @@ export async function getSongStream(videoId: string) {
 export interface TrackMeta {
 	album?: { name: string; id?: string };
 	artists: { name: string; id?: string }[];
-	/** Track title in the original language (queue fetched with hl=ja). */
+	/** Uploader's original title, from the public oEmbed endpoint. */
 	originalTitle?: string;
-	/** Primary artist credit in the original language. */
+	/** Primary artist credit, in the session's fetch language. */
 	originalArtist?: string;
 }
 
 /**
- * Album and artist metadata for a track, taken from the selected entry of
- * the "Up next" queue. The queue is additionally fetched localized to
- * Japanese so scrobbles can carry the untranslated title and artist credit;
- * failures resolve to null so callers keep working without it.
+ * Album and artist metadata for a track, taken from the selected entry of the
+ * "Up next" queue (fetched in the app's current language). The original title
+ * comes from oEmbed, which is locale-independent; failures resolve to null so
+ * callers keep working without it.
  */
 export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	try {
 		const client = await getYoutubeClient();
-		// Temporarily switch the session locale: the ja queue carries the
-		// original-language title and artist credits.
-		const clientContext = client.session.context.client as { hl?: string };
-		const previousHl = clientContext.hl;
-		const queue = await (async () => {
-			try {
-				clientContext.hl = "ja";
-				const info = await client.music.getInfo(videoId);
-				return await info.getUpNext(false);
-			} finally {
-				clientContext.hl = previousHl;
-			}
-		})();
+		const info = await client.music.getInfo(videoId);
+		const queue = await info.getUpNext(false);
 		const videos: YTNodes.PlaylistPanelVideo[] = [];
 		for (const item of queue.contents) {
 			if (item.is(YTNodes.PlaylistPanelVideo)) {
@@ -489,6 +499,9 @@ export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 			videos.find((video) => video.selected) ??
 			videos.find((video) => video.video_id === videoId);
 		if (!current) return null;
+		const oembed = await getOembedMetadata(videoId, (input, init) =>
+			fetchFunction(input, init),
+		);
 		return {
 			album: current.album
 				? { name: current.album.name, id: current.album.id }
@@ -501,7 +514,7 @@ export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 						? artist.channel_id
 						: undefined,
 				})),
-			originalTitle: current.title?.toString() || undefined,
+			originalTitle: oembed?.title ?? undefined,
 			originalArtist: current.artists?.[0]?.name || undefined,
 		};
 	} catch (error) {
