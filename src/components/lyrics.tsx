@@ -69,7 +69,7 @@ export function LyricsPanel({
 		const load = async () => {
 			const [lrclib, musixmatch, youtube] = await Promise.all([
 				fetchSyncedLyrics(title, artist, duration),
-				fetchMusixmatchSynced(title, artist),
+				fetchMusixmatchSynced(title, artist, duration),
 				getSongLyrics(songId),
 			]);
 			if (cancelled) return;
