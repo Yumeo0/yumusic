@@ -302,6 +302,7 @@ function SyncedLines({
 	return (
 		<div
 			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
+			data-swipe-dismiss-ignore
 			onTouchMove={hold}
 			onWheel={hold}
 			ref={containerRef}
@@ -428,7 +429,10 @@ function LyricsLines({
 	const romanized = useRomanizedLines(lines, romanize);
 
 	return (
-		<div className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2">
+		<div
+			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
+			data-swipe-dismiss-ignore
+		>
 			<div className="pb-24 pt-10">
 				{lines.map((line, i) =>
 					line.trim() === "" ? (

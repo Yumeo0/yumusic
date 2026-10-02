@@ -31,6 +31,10 @@ import {
 import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
 import { listeningSession } from "./lib/listening";
+import {
+	useNowPlayingMotion,
+	useNowPlayingSwipe,
+} from "./lib/now-playing-motion";
 import { usePinnedPlaylists } from "./lib/pinned";
 import {
 	setQueueOpen,
@@ -334,6 +338,12 @@ function AmbientSync() {
 function NowPlayingOverlay() {
 	const isNowPlayingOpen = useNowPlayingOpen();
 	const isQueueOpen = useQueueOpen();
+	const overlayRef = useRef<HTMLDivElement>(null);
+	useNowPlayingMotion(overlayRef, isNowPlayingOpen);
+	// Dragging down on the fullscreen player minimizes it — but only while the
+	// queue is closed: with the sheet open, the same swipe drags the queue.
+	// The scrollable lyrics column opts out so it keeps scrolling normally.
+	const dismissGesture = useNowPlayingSwipe(false);
 
 	// Escape closes the queue first, then the fullscreen view
 	useEffect(() => {
@@ -352,17 +362,12 @@ function NowPlayingOverlay() {
 
 	return (
 		<div
-			className={cn(
-				// Tailwind v4 uses the `translate` property (not `transform`) for
-				// translate-* utilities, so it must be listed explicitly here or
-				// the slide never animates. will-change promotes the full-screen
-				// blurred backdrop to its own layer, keeping the fade off the
-				// main thread so open/close stays responsive.
-				"fixed inset-0 z-50 transition-[opacity,translate] duration-300 ease-out will-change-[opacity,translate]",
-				isNowPlayingOpen
-					? "translate-y-0 opacity-100"
-					: "pointer-events-none translate-y-6 opacity-0",
-			)}
+			aria-hidden={!isNowPlayingOpen}
+			className="np-overlay invisible fixed inset-0 z-50 will-change-transform"
+			inert={!isNowPlayingOpen}
+			ref={overlayRef}
+			style={{ transform: "translateY(var(--np-slide, 0px))" }}
+			{...dismissGesture}
 		>
 			<NowPlayingPage
 				isQueueOpen={isQueueOpen}

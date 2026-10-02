@@ -11,8 +11,8 @@ import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { useNowPlayingSwipe } from "@/lib/now-playing-motion";
 import { toggleNowPlaying, toggleQueue, useQueueOpen } from "@/lib/player-ui";
-import { useQueueDragGesture } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
@@ -31,15 +31,18 @@ export function Player() {
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
 	const isQueueOpen = useQueueOpen();
-	// Swipe up on the mini player reveals the queue sheet progressively.
+	// Swipe up on the mini player expands the fullscreen player progressively.
 	// The bar sits above Android's bottom gesture zone, so the touch
 	// reliably reaches the webview — unlike swipes starting at the very
 	// bottom edge, which the system claims for the Home gesture. Only
 	// touches on the main row count; the progress strip above is seeking.
 	const swipeRowRef = useRef<HTMLDivElement>(null);
-	const swipeHandlers = useQueueDragGesture((clientY) => {
+	const swipeHandlers = useNowPlayingSwipe(true, (event) => {
+		const touch = event.touches[0];
 		const rowTop = swipeRowRef.current?.getBoundingClientRect().top;
-		return rowTop !== undefined && clientY >= rowTop;
+		return (
+			touch !== undefined && rowTop !== undefined && touch.clientY >= rowTop
+		);
 	});
 
 	if (!currentSong) return null;
@@ -47,16 +50,19 @@ export function Player() {
 	return (
 		<footer
 			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
+			data-mini-player
 			onClick={toggleNowPlaying}
 			{...swipeHandlers}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
 			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
-				<MiniProgress
-					knownDuration={knownDuration}
-					songId={currentSong.id}
-					videoElementRef={videoElementRef}
-				/>
+				<div data-mini-progress>
+					<MiniProgress
+						knownDuration={knownDuration}
+						songId={currentSong.id}
+						videoElementRef={videoElementRef}
+					/>
+				</div>
 			</div>
 
 			{/* Track identity — click to open fullscreen. The row owns the
@@ -66,7 +72,7 @@ export function Player() {
 			    feedback while one of them is hovered — matching the fact that
 			    clicking a control doesn't open the fullscreen. */}
 			<div
-				className="group grid h-17 grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
+				className="group grid h-17 touch-none grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
 				ref={swipeRowRef}
 			>
 				<SongContextMenu song={currentSong}>
@@ -79,7 +85,7 @@ export function Player() {
 						title="Open Now Playing"
 						type="button"
 					>
-						<div className="relative shrink-0">
+						<div className="relative shrink-0" data-mini-thumb>
 							{currentSong.thumbnail ? (
 								<img
 									alt={currentSong.title}
@@ -94,9 +100,10 @@ export function Player() {
 								<ChevronUp className="size-4 text-white" />
 							</span>
 						</div>
-						<div className="min-w-0">
+						<div className="min-w-0" data-mini-title>
 							<h3
 								className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
+								data-mini-title-line
 								key={`t-${currentSong.id}`}
 							>
 								<SongTitle
@@ -106,6 +113,7 @@ export function Player() {
 							</h3>
 							<p
 								className="animate-track-in truncate text-xs text-muted-foreground"
+								data-mini-artist
 								key={`a-${currentSong.id}`}
 								style={{ animationDelay: "60ms" }}
 							>
@@ -116,10 +124,11 @@ export function Player() {
 				</SongContextMenu>
 
 				{/* Transport */}
-				<div className="flex items-center gap-1 sm:gap-2">
+				<div className="flex items-center gap-1 sm:gap-2" data-mini-controls>
 					<button
 						aria-label="Previous"
 						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						data-mini-prev
 						disabled={!hasPrevious}
 						onClick={(e) => {
 							e.stopPropagation();
@@ -134,6 +143,7 @@ export function Player() {
 						className={cn(
 							"player-ctl grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90",
 						)}
+						data-mini-play
 						onClick={(e) => {
 							e.stopPropagation();
 							toggle();
@@ -149,6 +159,7 @@ export function Player() {
 					<button
 						aria-label="Next"
 						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						data-mini-next
 						disabled={!hasNext}
 						onClick={(e) => {
 							e.stopPropagation();

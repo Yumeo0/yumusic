@@ -451,7 +451,11 @@ export default function ArtistPage() {
 										<SongTitle artist={item.song?.artist} title={item.title} />
 									</h3>
 									<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-										{item.subtitle}
+										{item.song ? (
+											<ArtistLinks song={item.song} />
+										) : (
+											item.subtitle
+										)}
 									</p>
 								</button>
 							</SongContextMenu>

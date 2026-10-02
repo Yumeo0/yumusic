@@ -284,3 +284,41 @@
 	overflow: hidden;
 	visibility: hidden;
 }
+
+/* While the queue sheet is dragged, the now-playing
+   morph tracks the finger exactly. Once the drag ends (attribute removed), the
+   same elements ease over 300ms so the snap matches the sheet's release
+   animation. */
+html[data-morph-dragging] .np-morph {
+	transition-duration: 0s;
+}
+
+/* Dismiss-morph blend factors. Registered so the overlay can transition the
+   values themselves: every style that reads them (the page slide, the items
+   moving onto the mini player) follows the one interpolated value exactly,
+   instead of relying on separate transitions staying in sync. */
+@property --np-slide {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+@property --np-dismiss {
+	syntax: "<number>";
+	inherits: true;
+	initial-value: 0;
+}
+
+/* One driver moves the live elements in either direction. Disable nested
+   easing so artwork/text/controls all follow exactly the same progress. */
+.np-overlay[data-player-motion] .np-morph {
+	transition: none;
+}
+
+/* The fullscreen elements temporarily own these pixels. Keep the footer's
+   layout and touch target intact, but never paint duplicate controls. */
+html[data-player-morphing] [data-mini-player] [data-mini-thumb],
+html[data-player-morphing] [data-mini-player] [data-mini-title],
+html[data-player-morphing] [data-mini-player] [data-mini-controls],
+html[data-player-morphing] [data-mini-player] [data-mini-progress] {
+	visibility: hidden;
+}

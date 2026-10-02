@@ -8,7 +8,12 @@ import {
 	usePlayerControls,
 	useQueueSheetRef,
 } from "@/contexts/player-context";
-import { setQueueOpen, useNowPlayingOpen, useQueueOpen } from "@/lib/player-ui";
+import {
+	setQueueOpen,
+	useNowPlayingOpen,
+	useQueueState,
+} from "@/lib/player-ui";
+import { useQueueSheetGesture } from "@/lib/queue-drag";
 import { useSettings } from "@/lib/settings";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -29,7 +34,9 @@ export function QueuePanel() {
 	const { isPlaying } = usePlayerControls();
 	const [settings] = useSettings();
 	const sheetRef = useQueueSheetRef();
-	const open = useQueueOpen();
+	const sheetGesture = useQueueSheetGesture();
+	const queueState = useQueueState();
+	const open = queueState !== "closed";
 	const fullscreen = useNowPlayingOpen();
 	const onClose = () => setQueueOpen(false);
 
@@ -60,15 +67,29 @@ export function QueuePanel() {
 				// sheet follows the finger every frame while dragging, and
 				// re-filtering a backdrop blur per frame tanks the framerate —
 				// so the blur is desktop-only and the sheet sits opaque.
-				"fixed top-9 right-0 z-60 flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0 max-md:pt-(--safe-area-top) max-md:bg-background max-md:backdrop-blur-none",
+				"fixed top-9 right-0 z-60 flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:backdrop-blur-none",
 				fullscreen ? "bottom-0" : "bottom-22.5",
-				open
-					? "translate-x-0 max-md:translate-y-0"
-					: "pointer-events-none translate-x-full max-md:translate-x-0 max-md:translate-y-full",
+				open ? "translate-x-0" : "pointer-events-none translate-x-full",
+				"max-md:translate-x-0",
+				// The top safe-area inset only matters once the sheet reaches
+				// the top of the screen; otherwise a hairline of padding keeps
+				// the handle off the edge without reading as dead space.
+				queueState === "full"
+					? "max-md:translate-y-0 max-md:pt-(--safe-area-top)"
+					: queueState === "half"
+						? "max-md:translate-y-1/2 max-md:pt-4"
+						: "max-md:translate-y-full max-md:pt-4",
 			)}
 			ref={sheetRef}
 		>
-			<div className="flex items-center justify-between border-b border-foreground/8 px-4 py-3.5">
+			<div
+				className="relative flex items-center justify-between border-b border-foreground/8 px-4 py-3.5 max-md:pt-2 max-md:pb-3 max-md:touch-none"
+				{...sheetGesture}
+			>
+				<span
+					aria-hidden
+					className="pointer-events-none absolute top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-full bg-foreground/15 md:hidden"
+				/>
 				<div className="flex items-center gap-2.5">
 					<ListMusic className="size-4 text-muted-foreground" />
 					<span className="text-sm font-semibold">Queue</span>
