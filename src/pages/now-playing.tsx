@@ -27,6 +27,7 @@ import { ProgressBar } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
+import { useLyricsMorph } from "@/lib/lyrics-motion";
 import { setQueueRevealTarget } from "@/lib/player-ui";
 import {
 	mergeTouchHandlers,
@@ -119,6 +120,15 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		title: stageTitleRef,
 	});
 
+	// Glide between the two mobile layouts when lyrics are toggled. Declared
+	// after useMorphMetrics so the stage is measured before it is animated.
+	const pageRef = useRef<HTMLDivElement>(null);
+	const prepareLyricsMorph = useLyricsMorph(pageRef, showLyrics);
+	const toggleLyrics = useCallback(() => {
+		prepareLyricsMorph();
+		setShowLyrics((value) => !value);
+	}, [prepareLyricsMorph]);
+
 	// Route the drag blend at the stage element (not the document root) so a
 	// per-frame write only invalidates the stage's own subtree styles.
 	const attachStage = useCallback((element: HTMLDivElement | null) => {
@@ -154,6 +164,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		<button
 			aria-label="Open queue"
 			className="mx-auto flex items-center gap-1.5 rounded-full bg-foreground/6 px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-foreground/10 hover:text-foreground active:scale-95 md:hidden"
+			data-np-queue-pill
 			onClick={() => onToggleQueue()}
 			type="button"
 		>
@@ -166,6 +177,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		<div
 			className="relative flex h-full touch-none flex-col overflow-hidden"
 			data-np-page
+			ref={pageRef}
 			{...touchHandlers}
 		>
 			{/* Page background + blurred cover. The dismiss gesture slides the
@@ -245,6 +257,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							? "order-1 max-md:h-auto max-md:flex-1"
 							: "order-2 h-36 shrink-0 max-md:hidden",
 					)}
+					data-np-lyrics-section
 					data-swipe-dismiss-ignore
 				>
 					{/* Shrinks as the up-next stack below expands on hover */}
@@ -352,6 +365,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							<div
 								aria-hidden
 								className="np-morph pointer-events-none absolute transition-[opacity,transform] duration-300 ease-out"
+								data-np-cover-glow
 								style={{
 									borderRadius: "16px",
 									height: "var(--np-cover-size)",
@@ -460,7 +474,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									onNext={next}
 									onPrevious={previous}
 									onToggle={toggle}
-									onToggleLyrics={() => setShowLyrics((value) => !value)}
+									onToggleLyrics={toggleLyrics}
 									showLyrics={showLyrics}
 								/>
 							</div>
@@ -563,7 +577,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							onNext={next}
 							onPrevious={previous}
 							onToggle={toggle}
-							onToggleLyrics={() => setShowLyrics((value) => !value)}
+							onToggleLyrics={toggleLyrics}
 							showLyrics={showLyrics}
 						/>
 					</div>

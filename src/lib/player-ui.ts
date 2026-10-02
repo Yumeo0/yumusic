@@ -84,9 +84,16 @@ export function setQueueReveal(reveal: number) {
 	applyQueueReveal();
 }
 
+/**
+ * Writes the blend onto the registered target. With no target (mobile lyrics
+ * mode replaces the stage) nothing in the tree reads the variable, so the
+ * write is skipped entirely: falling back to the document root would
+ * invalidate the computed style of every element — lyrics and queue list
+ * included — on every frame of the drag.
+ */
 function applyQueueReveal() {
-	if (typeof document === "undefined") return;
-	const target = queueRevealTarget ?? document.documentElement;
+	const target = queueRevealTarget;
+	if (!target) return;
 	target.style.setProperty("--queue-reveal", String(queueReveal));
 }
 

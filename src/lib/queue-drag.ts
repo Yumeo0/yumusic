@@ -316,7 +316,7 @@ export interface DismissGeometry {
 }
 
 /** Tight box of an element's text, falling back to its border box. */
-function textRect(element: Element): DOMRect {
+export function textRect(element: Element): DOMRect {
 	const range = document.createRange();
 	range.selectNodeContents(element);
 	const rect = range.getBoundingClientRect();

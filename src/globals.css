@@ -314,6 +314,12 @@ html[data-morph-dragging] .np-morph {
 	transition: none;
 }
 
+/* Lyrics toggle: the freshly mounted layout snaps to its measured geometry
+   (the FLIP animation in lyrics-motion.ts glides it there instead). */
+div[data-np-page][data-np-lyrics-morph] .np-morph {
+	transition: none;
+}
+
 /* The fullscreen elements temporarily own these pixels. Keep the footer's
    layout and touch target intact, but never paint duplicate controls. */
 html[data-player-morphing] [data-mini-player] [data-mini-thumb],
