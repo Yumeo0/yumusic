@@ -22,6 +22,8 @@ export interface Settings {
 	lrclibLooseMatch: boolean;
 	/** Hide the "Today's biggest hits" row from the home feed. */
 	hideTodaysBiggestHits: boolean;
+	/** Keep playing similar songs when the queue ends. */
+	autoplay: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -37,6 +39,7 @@ const DEFAULTS: Settings = {
 	preferSyncedLyrics: true,
 	lrclibLooseMatch: true,
 	hideTodaysBiggestHits: true,
+	autoplay: true,
 };
 
 export function getSettings(): Settings {

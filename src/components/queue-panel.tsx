@@ -9,6 +9,7 @@ import {
 	useQueueSheetRef,
 } from "@/contexts/player-context";
 import { setQueueOpen, useNowPlayingOpen, useQueueOpen } from "@/lib/player-ui";
+import { useSettings } from "@/lib/settings";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { ArtistLinks } from "./artist-link";
@@ -23,8 +24,10 @@ import { EqualizerBars } from "./waveform";
  * so opening the fullscreen player doesn't re-render the app layout.
  */
 export function QueuePanel() {
-	const { queue, currentIndex, play } = usePlayer();
+	const { queue, currentIndex, autoplayTracks, play, playAutoplayAt } =
+		usePlayer();
 	const { isPlaying } = usePlayerControls();
+	const [settings] = useSettings();
 	const sheetRef = useQueueSheetRef();
 	const open = useQueueOpen();
 	const fullscreen = useNowPlayingOpen();
@@ -33,11 +36,20 @@ export function QueuePanel() {
 	// The queue can hold thousands of tracks; only render the visible rows.
 	// The panel stays mounted even when closed (for the drag-follow reveal),
 	// so this keeps its DOM and re-render cost tiny in every state.
+	// The "Autoplay" separator is an extra virtual row between the user queue
+	// and the upcoming radio tracks, shown even while those are still loading
+	// so the queue visibly continues instead of ending at the last item.
+	const separatorIndex = queue.length;
+	const showSeparator =
+		settings.autoplay && (queue.length > 0 || autoplayTracks.length > 0);
+	const autoplayOffset = showSeparator ? 1 : 0;
+	const rowCount = queue.length + autoplayTracks.length + autoplayOffset;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const rowVirtualizer = useVirtualizer({
-		count: queue.length,
+		count: rowCount,
 		getScrollElement: () => scrollRef.current,
-		estimateSize: () => 58,
+		estimateSize: (index) =>
+			showSeparator && index === separatorIndex ? 34 : 58,
 		overscan: 8,
 	});
 
@@ -80,7 +92,7 @@ export function QueuePanel() {
 				className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]"
 				ref={scrollRef}
 			>
-				{queue.length === 0 ? (
+				{queue.length === 0 && autoplayTracks.length === 0 ? (
 					<p className="p-4 text-sm text-muted-foreground/70">
 						Queue is empty — play something to fill it up.
 					</p>
@@ -90,13 +102,34 @@ export function QueuePanel() {
 						style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
 					>
 						{rowVirtualizer.getVirtualItems().map((virtualRow) => {
-							const i = virtualRow.index;
-							const song = queue[i];
-							const isCurrent = i === currentIndex;
+							if (showSeparator && virtualRow.index === separatorIndex) {
+								return (
+									<div
+										className="absolute inset-x-0 flex items-center gap-2 px-2"
+										key="autoplay-separator"
+										style={{
+											height: `${virtualRow.size}px`,
+											transform: `translateY(${virtualRow.start}px)`,
+										}}
+									>
+										<span className="text-[10px] font-semibold tracking-wider text-muted-foreground/70 uppercase">
+											Autoplay
+										</span>
+										<span className="h-px flex-1 bg-foreground/10" />
+									</div>
+								);
+							}
+							const isAutoplayRow =
+								virtualRow.index >= separatorIndex + autoplayOffset;
+							const i = isAutoplayRow
+								? virtualRow.index - separatorIndex - autoplayOffset
+								: virtualRow.index;
+							const song = isAutoplayRow ? autoplayTracks[i] : queue[i];
+							const isCurrent = !isAutoplayRow && i === currentIndex;
 							return (
 								<SongContextMenu
-									key={`queue-${song.id}-${i}`}
-									queueIndex={i}
+									key={`${isAutoplayRow ? "auto" : "queue"}-${song.id}-${i}`}
+									queueIndex={isAutoplayRow ? undefined : i}
 									song={song}
 								>
 									<button
@@ -105,7 +138,13 @@ export function QueuePanel() {
 											isCurrent ? "bg-primary/9" : "hover:bg-foreground/5",
 										)}
 										data-index={virtualRow.index}
-										onClick={() => play(song)}
+										onClick={() => {
+											if (isAutoplayRow) {
+												playAutoplayAt(i);
+											} else {
+												play(song);
+											}
+										}}
 										ref={rowVirtualizer.measureElement}
 										style={{
 											transform: `translateY(${virtualRow.start}px)`,
@@ -120,7 +159,7 @@ export function QueuePanel() {
 												/>
 											) : (
 												<span className="font-mono text-[10px] text-muted-foreground/50 transition-opacity duration-150 group-hover:opacity-0">
-													{i + 1}
+													{isAutoplayRow ? queue.length + i + 1 : i + 1}
 												</span>
 											)}
 										</span>

@@ -15,9 +15,14 @@ import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
+import { useSettings } from "@/lib/settings";
 import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils";
 import { isVideoId } from "@/lib/youtube.utils";
-import { fetchFunction, getSongStream } from "@/lib/youtube-client";
+import {
+	fetchFunction,
+	getAutoplaySongs,
+	getSongStream,
+} from "@/lib/youtube-client";
 
 export interface Song {
 	id: string;
@@ -45,6 +50,10 @@ interface PlayerContextType {
 	innertube: Innertube | null;
 	queue: Song[];
 	currentIndex: number;
+	/** Upcoming radio tracks shown below the queue's "Autoplay" separator. */
+	autoplayTracks: Song[];
+	/** Plays an autoplay track, promoting it and its predecessors to the queue. */
+	playAutoplayAt: (index: number) => void;
 	addToQueue: (songs: Song[]) => void;
 	setQueue: (songs: Song[]) => void;
 	/** Insert a song directly after the current one without starting it. */
@@ -116,17 +125,22 @@ function appendToSourceBuffer(
 }
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+	const [settings] = useSettings();
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
 	const [isPlaying, setIsPlaying] = useState(false);
 	const [videoInfo, setVideoInfo] = useState<YT.VideoInfo | null>(null);
 	const [innertube, setInnertube] = useState<Innertube | null>(null);
 	const [queue, setQueueState] = useState<Song[]>([]);
 	const [currentIndex, setCurrentIndex] = useState(-1);
+	const [autoplayTracks, setAutoplayTracks] = useState<Song[]>([]);
 	const [history, setHistory] = useState<Song[]>([]);
 	const queueSheetRef = useRef<HTMLElement | null>(null);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const videoElementRef = useRef<HTMLVideoElement>(null);
 	const sabrStreamRef = useRef<SabrStream | null>(null);
+	const autoplayLoadingRef = useRef(false);
+	/** Video id the current autoplay suggestions were fetched for. */
+	const autoplayForRef = useRef<string | null>(null);
 	const [volume, _setVolume] = useState(() => {
 		const savedVolume = localStorage.getItem("yumusic-volume");
 		const parsed = savedVolume ? Number.parseFloat(savedVolume) : NaN;
@@ -237,6 +251,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 							console.error("[PlayerContext] Auto-playback failed:", error);
 						}
 					});
+				}
+			}
+
+			// Without an explicit endOfStream() the MediaSource never reports
+			// the end of the track, so the element never fires `ended` and
+			// playback just stalls at the last sample.
+			if (!cancelled && mediaSource?.readyState === "open") {
+				try {
+					mediaSource.endOfStream();
+				} catch (error) {
+					console.warn("[PlayerContext] endOfStream failed:", error);
 				}
 			}
 		};
@@ -364,6 +389,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}
 	}, []);
 
+	// Keep the queue's autoplay section stocked: whenever the current track
+	// changes and no suggestions are pending, fetch the radio mix for it. The
+	// list refills once its tracks have been consumed, giving endless radio.
+	useEffect(() => {
+		if (!settings.autoplay || !currentSong) {
+			setAutoplayTracks([]);
+			autoplayForRef.current = null;
+			return;
+		}
+		if (autoplayTracks.length > 0 || autoplayLoadingRef.current) return;
+		if (autoplayForRef.current === currentSong.id) return;
+		autoplayForRef.current = currentSong.id;
+		let cancelled = false;
+		autoplayLoadingRef.current = true;
+		getAutoplaySongs(currentSong.id)
+			.then((tracks) => {
+				if (!cancelled) setAutoplayTracks(tracks);
+			})
+			.finally(() => {
+				if (!cancelled) autoplayLoadingRef.current = false;
+			});
+		return () => {
+			cancelled = true;
+			autoplayLoadingRef.current = false;
+		};
+	}, [settings.autoplay, currentSong, autoplayTracks.length]);
+
 	const play = useCallback(
 		async (song: Song, newQueue?: Song[]) => {
 			if (currentSong?.id === song.id) {
@@ -375,6 +427,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (currentSong) {
 				setHistory((prev) => [...prev, currentSong]);
 			}
+
+			// A fresh start gets a fresh radio: drop the old track's suggestions
+			// so the effect below refetches for the new current song.
+			setAutoplayTracks([]);
+			autoplayForRef.current = null;
 
 			// If a new queue is provided, add the current song to the front and set it
 			if (newQueue) {
@@ -398,7 +455,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const next = useCallback(async () => {
-		if (currentIndex >= queue.length - 1) return;
+		if (currentIndex >= queue.length - 1) {
+			// Queue finished: move into the autoplay section. Use the visible
+			// suggestions when present, otherwise fetch a mix now.
+			if (!currentSong) return;
+			let upcoming = autoplayTracks;
+			if (upcoming.length === 0) {
+				if (!settings.autoplay || autoplayLoadingRef.current) return;
+				autoplayLoadingRef.current = true;
+				try {
+					upcoming = await getAutoplaySongs(currentSong.id);
+				} finally {
+					autoplayLoadingRef.current = false;
+				}
+				if (upcoming.length === 0) return;
+			}
+			const [upNext, ...rest] = upcoming;
+			setAutoplayTracks(rest);
+			const extended = [...queue, upNext];
+			setQueueState(extended);
+			setHistory((prev) => [...prev, currentSong]);
+			const nextIndex = currentIndex + 1;
+			setCurrentIndex(nextIndex);
+			await playSong(upNext);
+			return;
+		}
 
 		const nextIndex = currentIndex + 1;
 		const nextSong = queue[nextIndex];
@@ -410,7 +491,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		setCurrentIndex(nextIndex);
 		await playSong(nextSong);
-	}, [currentIndex, queue, currentSong, playSong]);
+	}, [
+		currentIndex,
+		queue,
+		currentSong,
+		settings.autoplay,
+		playSong,
+		autoplayTracks,
+	]);
 
 	const previous = useCallback(async () => {
 		// Try to go back in queue first
@@ -444,15 +532,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		await playSong(previousSong);
 	}, [currentIndex, queue, history, currentSong, playSong]);
 
+	const playAutoplayAt = useCallback(
+		(index: number) => {
+			const picked = autoplayTracks[index];
+			if (!picked) return;
+			// Everything up to the picked track joins the user queue above the
+			// separator; the rest stays in the autoplay section.
+			const promoted = autoplayTracks.slice(0, index + 1);
+			setAutoplayTracks(autoplayTracks.slice(index + 1));
+			setQueueState((prev) => [...prev, ...promoted]);
+			if (currentSong) {
+				setHistory((prev) => [...prev, currentSong]);
+			}
+			setCurrentIndex(queue.length + index);
+			void playSong(picked);
+		},
+		[autoplayTracks, queue.length, currentSong, playSong],
+	);
+
 	const addToQueue = useCallback((songs: Song[]) => {
 		setQueueState((prev) => [...prev, ...songs]);
 	}, []);
 
 	const playNext = useCallback(
 		(song: Song) => {
+			const insertAt = currentIndex < 0 ? 0 : currentIndex + 1;
 			setQueueState((prev) => {
 				const next = [...prev];
-				next.splice(currentIndex < 0 ? 0 : currentIndex + 1, 0, song);
+				next.splice(insertAt, 0, song);
 				return next;
 			});
 		},
@@ -488,7 +595,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const resume = useCallback(() => setIsPlaying(true), []);
 	const toggle = useCallback(() => setIsPlaying((playing) => !playing), []);
 
-	const hasNext = currentIndex < queue.length - 1;
+	const hasNext =
+		currentIndex < queue.length - 1 || (settings.autoplay && !!currentSong);
 	const hasPrevious = currentIndex > 0 || history.length > 0;
 	const duration =
 		parseDuration(currentSong?.duration) || videoInfo?.basic_info.duration || 0;
@@ -501,6 +609,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			innertube,
 			queue,
 			currentIndex,
+			autoplayTracks,
+			playAutoplayAt,
 			addToQueue,
 			setQueue,
 			playNext,
@@ -520,6 +630,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			innertube,
 			queue,
 			currentIndex,
+			autoplayTracks,
+			playAutoplayAt,
 			addToQueue,
 			setQueue,
 			playNext,
@@ -553,7 +665,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						<video
 							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
 							onEnded={() => {
-								if (hasNext) next();
+								void next();
 							}}
 							playsInline
 							ref={videoElementRef}

@@ -47,11 +47,13 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		currentSong,
 		queue,
 		currentIndex,
+		autoplayTracks,
 		next,
 		previous,
 		hasNext,
 		hasPrevious,
 		play,
+		playAutoplayAt,
 		videoElementRef,
 		duration: knownDuration,
 	} = usePlayer();
@@ -59,8 +61,15 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 
 	// The up-next stack tucks up to three upcoming tracks under the next card
 	// and slides them out on hover. It reserves no height: the stack grows to
-	// fit its cards when revealed, pushing the content below it.
-	const upNextTucked = queue.slice(currentIndex + 2, currentIndex + 5);
+	// fit its cards when revealed, pushing the content below it. When the queue
+	// has nothing left, the section falls back to the autoplay radio so it
+	// shows what will actually play next.
+	const hasQueuedNext = queue.length > currentIndex + 1;
+	const upNext = hasQueuedNext
+		? queue.slice(currentIndex + 1, currentIndex + 4)
+		: autoplayTracks.slice(0, 4);
+	const upNextTucked = upNext.slice(1);
+	const upNextIsAutoplay = !hasQueuedNext && upNext.length > 0;
 
 	// Mobile: lyrics are opt-in via the transport toggle. Desktop always
 	// shows the lyrics column — the state only affects max-md classes.
@@ -161,19 +170,23 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							<p className="text-xs font-medium text-muted-foreground">
 								Up next
 							</p>
-							{queue.length > currentIndex + 1 && (
+							{hasQueuedNext ? (
 								<p className="text-[11px] text-muted-foreground/60">
 									{queue.length - currentIndex - 1} in queue
 								</p>
-							)}
+							) : upNextIsAutoplay ? (
+								<p className="text-[11px] text-muted-foreground/60">Autoplay</p>
+							) : null}
 						</div>
-						{queue.length > currentIndex + 1 ? (
+						{upNext.length > 0 ? (
 							<div className="group/upn">
 								<div className="relative z-20">
 									<QueueRow
-										onPlay={() => play(queue[currentIndex + 1])}
-										queueIndex={currentIndex + 1}
-										song={queue[currentIndex + 1]}
+										onPlay={() =>
+											hasQueuedNext ? play(upNext[0]) : playAutoplayAt(0)
+										}
+										queueIndex={hasQueuedNext ? currentIndex + 1 : undefined}
+										song={upNext[0]}
 									/>
 								</div>
 								<div>
@@ -182,16 +195,23 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 											className={cn(
 												"relative -mt-11.5 origin-top scale-[0.97] transition-all duration-300 ease-out group-hover/upn:mt-1.5 group-hover/upn:scale-100",
 											)}
-											// biome-ignore lint/suspicious/noArrayIndexKey: queue may contain duplicate video ids
-											key={`queue-${song.id}-${currentIndex + 2 + k}`}
+											key={
+												hasQueuedNext
+													? `queue-${song.id}-${currentIndex + 2 + k}`
+													: `auto-${song.id}-${k}`
+											}
 											style={{
 												transitionDelay: `${k * 60}ms`,
 												zIndex: 10 - k,
 											}}
 										>
 											<QueueRow
-												onPlay={() => play(song)}
-												queueIndex={currentIndex + 2 + k}
+												onPlay={() =>
+													hasQueuedNext ? play(song) : playAutoplayAt(k + 1)
+												}
+												queueIndex={
+													hasQueuedNext ? currentIndex + 2 + k : undefined
+												}
 												song={song}
 											/>
 										</div>
@@ -458,7 +478,8 @@ function QueueRow({
 }: {
 	song: Song;
 	onPlay: () => void;
-	queueIndex: number;
+	/** Queue position; omit for autoplay suggestions. */
+	queueIndex?: number;
 }) {
 	return (
 		<SongContextMenu queueIndex={queueIndex} song={song}>

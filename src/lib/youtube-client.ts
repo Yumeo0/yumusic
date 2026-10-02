@@ -11,6 +11,7 @@ import { botguardService } from "./botguard-service";
 import type { LrcLine } from "./lrclib";
 import { getOembedMetadata } from "./oembed";
 import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "./tauri";
+import { hiResThumb } from "./utils";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
 async function bodyToBase64(body: BodyInit): Promise<string | null> {
@@ -303,6 +304,69 @@ export async function getAlbum(id: string) {
 	} catch (error) {
 		console.error("Failed to get album:", error);
 		return null;
+	}
+}
+
+/** A playable track produced by the app (structurally the player's `Song`). */
+export interface AutoplayTrack {
+	id: string;
+	title: string;
+	artist: string;
+	artistId?: string;
+	artists?: Array<{ name: string; id?: string }>;
+	thumbnail: string;
+	duration?: string;
+}
+
+/**
+ * Similar tracks to keep playing once the queue ends — YouTube Music's "Up
+ * next" mix for the given video (automix fallback included). The current track
+ * itself is skipped; returns `[]` when there is nothing to extend with.
+ */
+export async function getAutoplaySongs(
+	videoId: string,
+): Promise<AutoplayTrack[]> {
+	try {
+		const client = await getYoutubeClient();
+		const panel = await client.music.getUpNext(videoId, true);
+		const tracks: AutoplayTrack[] = [];
+		for (const item of panel.contents) {
+			const video = item.is(YTNodes.PlaylistPanelVideo)
+				? item
+				: item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary
+					? item.primary
+					: null;
+			if (!video || video.video_id === videoId) continue;
+			const artists = (video.artists ?? [])
+				.filter((artist) => artist.name)
+				.map((artist) => ({
+					name: artist.name,
+					id: artist.channel_id?.startsWith("UC")
+						? artist.channel_id
+						: undefined,
+				}));
+			tracks.push({
+				id: video.video_id,
+				title: video.title.toString() || "Unknown Title",
+				artist:
+					artists
+						.map((artist) => artist.name)
+						.filter(Boolean)
+						.join(", ") ||
+					video.author ||
+					"",
+				artistId: artists.find((artist) => artist.id)?.id,
+				artists: artists.length > 0 ? artists : undefined,
+				thumbnail: hiResThumb(
+					video.thumbnail?.[video.thumbnail.length - 1]?.url,
+				),
+				duration: video.duration?.text,
+			});
+		}
+		return tracks;
+	} catch (error) {
+		console.warn("[YuMusic] failed to load autoplay tracks:", error);
+		return [];
 	}
 }
 
