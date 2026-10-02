@@ -31,18 +31,24 @@ interface ProviderLyrics {
 	confirmed: boolean;
 }
 
-interface LyricsSources {
-	lrclib: ProviderLyrics | null;
-	musixmatch: ProviderLyrics | null;
-	youtube: ProviderLyrics | null;
-	vocadb: ProviderLyrics | null;
-}
+/**
+ * Per-provider result: `undefined` while the fetch is still in flight, `null`
+ * once it settled without lyrics. Each provider fills in as it resolves, so
+ * fast sources show up without waiting for the slowest one.
+ */
+type LyricsSources = Record<
+	LyricsProviderId,
+	ProviderLyrics | null | undefined
+>;
 
 const PROVIDER_BY_ID = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p]));
 
-type LyricsState =
-	| { status: "loading" }
-	| { status: "done"; sources: LyricsSources };
+const PENDING_SOURCES: LyricsSources = {
+	lrclib: undefined,
+	musixmatch: undefined,
+	vocadb: undefined,
+	youtube: undefined,
+};
 
 /**
  * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch, and
@@ -60,7 +66,7 @@ export function LyricsPanel({
 	onSeekTime,
 	className,
 }: LyricsPanelProps) {
-	const [state, setState] = useState<LyricsState>({ status: "loading" });
+	const [sources, setSources] = useState<LyricsSources>(PENDING_SOURCES);
 	const [view, setView] = useState<LyricsProviderId>("lrclib");
 	const [settings] = useSettings();
 	// A manual provider pick sticks for the current track (until the next song).
@@ -68,34 +74,43 @@ export function LyricsPanel({
 
 	useEffect(() => {
 		let cancelled = false;
-		setState({ status: "loading" });
+		setSources(PENDING_SOURCES);
 		manualView.current = false;
 
-		const load = async () => {
-			const [lrclib, musixmatch, youtube, vocadb] = await Promise.all([
-				fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
-				fetchMusixmatchSynced(title, artist, duration),
-				getSongLyrics(songId),
-				fetchVocadbLyrics(title, artist, duration),
-			]);
-			if (cancelled) return;
-			const sources: LyricsSources = {
-				lrclib: lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null,
-				musixmatch:
-					musixmatch && musixmatch.length > 0
-						? { synced: musixmatch, plain: null, confirmed: true }
-						: null,
-				youtube:
-					youtube && (youtube.synced || youtube.plain)
-						? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
-						: null,
-				vocadb: vocadb
-					? { synced: null, plain: vocadb, confirmed: true }
-					: null,
-			};
-			setState({ status: "done", sources });
+		// Each provider lands on its own; a failing fetch counts as "none".
+		const settle = <T,>(
+			id: LyricsProviderId,
+			request: Promise<T>,
+			toLyrics: (result: T) => ProviderLyrics | null,
+		) => {
+			request
+				.then(toLyrics, () => null)
+				.then((lyrics) => {
+					if (!cancelled) setSources((prev) => ({ ...prev, [id]: lyrics }));
+				});
 		};
-		load();
+
+		settle(
+			"lrclib",
+			fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
+			(lrclib) => (lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null),
+		);
+		settle(
+			"musixmatch",
+			fetchMusixmatchSynced(title, artist, duration),
+			(musixmatch) =>
+				musixmatch && musixmatch.length > 0
+					? { synced: musixmatch, plain: null, confirmed: true }
+					: null,
+		);
+		settle("youtube", getSongLyrics(songId), (youtube) =>
+			youtube && (youtube.synced || youtube.plain)
+				? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
+				: null,
+		);
+		settle("vocadb", fetchVocadbLyrics(title, artist, duration), (vocadb) =>
+			vocadb ? { synced: null, plain: vocadb, confirmed: true } : null,
+		);
 
 		return () => {
 			cancelled = true;
@@ -106,13 +121,12 @@ export function LyricsPanel({
 	const order = settings.lyricsProviderOrder;
 	const preferSynced = settings.preferSyncedLyrics;
 
-	// Pick the initial provider (respecting manual picks) once sources arrive
-	// or when the provider settings change. A confirmed match beats a loose one
-	// even when the loose provider has higher priority.
+	// Pick the provider (respecting manual picks) among the sources that have
+	// arrived so far; re-runs as more land, so a better match that resolves
+	// later takes over. A confirmed match beats a loose one even when the
+	// loose provider has higher priority.
 	useEffect(() => {
-		if (state.status !== "done") return;
-		const sources = state.sources;
-		const availableIds = order.filter((id) => sources[id] !== null);
+		const availableIds = order.filter((id) => sources[id]);
 		if (availableIds.length === 0) return;
 		if (manualView.current && availableIds.includes(view)) return;
 		// A provider with a confirmed synced match always wins over a loose
@@ -127,18 +141,18 @@ export function LyricsPanel({
 				availableIds[0])
 			: (confirmedSynced ?? availableIds[0]);
 		setView(chosen);
-	}, [state, order, preferSynced, view]);
+	}, [sources, order, preferSynced, view]);
 
 	const romanize = settings.romanizeLyrics;
-	const sources = state.status === "done" ? state.sources : null;
-	const available = sources
-		? order.flatMap((id) => {
-				const provider = PROVIDER_BY_ID.get(id);
-				if (!provider || sources[id] === null) return [];
-				return [provider];
-			})
-		: [];
-	const active = sources ? sources[view] : null;
+	const available = order.flatMap((id) => {
+		const provider = PROVIDER_BY_ID.get(id);
+		if (!provider || !sources[id]) return [];
+		return [provider];
+	});
+	const pending = order.some((id) => sources[id] === undefined);
+	// The view can briefly point at a provider that hasn't arrived (or has
+	// none) until the selection effect catches up.
+	const active = sources[view] ?? null;
 	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
 
 	return (
@@ -154,7 +168,7 @@ export function LyricsPanel({
 						{available.map((provider) => (
 							<button
 								className={cn(
-									"rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
+									"animate-in fade-in rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
 									view === provider.id
 										? "bg-background text-foreground shadow-sm"
 										: "text-muted-foreground hover:text-foreground",
@@ -172,8 +186,8 @@ export function LyricsPanel({
 					</div>
 				)}
 			</div>
-			{state.status === "loading" && <LyricsSkeleton />}
-			{sources && active?.synced && (
+			{!active && pending && <LyricsSkeleton />}
+			{active?.synced && (
 				<SyncedLines
 					attribution={attribution}
 					currentTime={currentTime}
@@ -182,18 +196,14 @@ export function LyricsPanel({
 					romanize={romanize}
 				/>
 			)}
-			{sources && active && !active.synced && active.plain && (
+			{active && !active.synced && active.plain && (
 				<LyricsLines
 					attribution={attribution}
 					romanize={romanize}
 					text={active.plain}
 				/>
-			)}{" "}
-			{sources &&
-				!sources.lrclib &&
-				!sources.musixmatch &&
-				!sources.youtube &&
-				!sources.vocadb && <LyricsFallback />}
+			)}
+			{!pending && available.length === 0 && <LyricsFallback />}
 		</div>
 	);
 }
@@ -219,6 +229,9 @@ function SyncedLines({
 	const holdUntilRef = useRef(0);
 	const lineTexts = useMemo(() => lines.map((l) => l.text), [lines]);
 	const romanized = useRomanizedLines(lineTexts, romanize);
+	// Romaji spacing stays reserved while pending; dropped once there is
+	// nothing to show (Latin-script lyrics, or every reading matches).
+	const showRomaji = romanize && romanized?.size !== 0;
 
 	const activeIndex = useMemo(() => {
 		let idx = -1;
@@ -273,6 +286,17 @@ function SyncedLines({
 		return out;
 	}, [lines]);
 
+	// Auto-scroll is animated by hand rather than with `behavior: "smooth"`:
+	// Chromium on Windows (WebView2) drops smooth programmatic scrolling
+	// whenever the OS animation/smooth-scroll setting is off, so the lyrics
+	// jumped line to line on desktop while Android eased them.
+	const scrollFrameRef = useRef(0);
+	const stopScroll = useCallback(() => {
+		cancelAnimationFrame(scrollFrameRef.current);
+		scrollFrameRef.current = 0;
+	}, []);
+	useEffect(() => stopScroll, [stopScroll]);
+
 	useEffect(() => {
 		const container = containerRef.current;
 		if (!container) return;
@@ -281,13 +305,34 @@ function SyncedLines({
 		const el = anchorRefs.current[idx];
 		if (!el) return;
 		if (Date.now() < holdUntilRef.current) return;
-		container.scrollTo({
-			top: el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2,
-			behavior: "smooth",
-		});
-	}, [activeIndex]);
+		const max = container.scrollHeight - container.clientHeight;
+		const target = Math.min(
+			max,
+			Math.max(
+				0,
+				el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2,
+			),
+		);
+		stopScroll();
+		const from = container.scrollTop;
+		const distance = target - from;
+		if (Math.abs(distance) < 1) return;
+		// Long jumps (seeks, first load) get a bit more time, capped.
+		const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
+		const start = performance.now();
+		const tick = (now: number) => {
+			const t = Math.min((now - start) / duration, 1);
+			// easeInOutCubic: settles like the browser's smooth scroll
+			const eased = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+			container.scrollTop = from + distance * eased;
+			scrollFrameRef.current = t < 1 ? requestAnimationFrame(tick) : 0;
+		};
+		scrollFrameRef.current = requestAnimationFrame(tick);
+	}, [activeIndex, stopScroll]);
 
+	// Manual scrolling wins: stop any running glide and pause auto-scroll.
 	const hold = () => {
+		stopScroll();
 		holdUntilRef.current = Date.now() + 4000;
 	};
 
@@ -347,7 +392,7 @@ function SyncedLines({
 							key={`lrc-${seg.index}`}
 							onRef={setAnchor}
 							onSeekTime={onSeekTime}
-							romanize={romanize}
+							romanize={showRomaji}
 							romanizedText={romanized?.get(seg.index)}
 							text={line.text}
 							time={line.time}
@@ -386,8 +431,7 @@ const LyricLine = memo(function LyricLine({
 	return (
 		<p
 			className={cn(
-				"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
-				romanize ? "py-3" : "py-1.5",
+				"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500 py-3",
 				isActive
 					? "text-foreground [text-shadow:0_0_24px_color-mix(in_oklab,var(--primary)_35%,transparent)]"
 					: "text-foreground/25 hover:text-foreground/60",
@@ -427,6 +471,7 @@ function LyricsLines({
 }) {
 	const lines = useMemo(() => text.split("\n"), [text]);
 	const romanized = useRomanizedLines(lines, romanize);
+	const showRomaji = romanize && romanized?.size !== 0;
 
 	return (
 		<div
@@ -442,14 +487,14 @@ function LyricsLines({
 						<p
 							className={cn(
 								"cursor-default text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
-								romanize ? "py-3" : "py-1.5",
+								showRomaji ? "py-3" : "py-2.5",
 								i === 0 && "text-foreground/70",
 							)}
 							// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
 							key={`line-${i}`}
 						>
 							{line}
-							{romanize && romanized?.get(i) && (
+							{showRomaji && romanized?.get(i) && (
 								<span className="mt-1 block text-base leading-normal font-normal text-foreground/45">
 									{romanized.get(i)}
 								</span>

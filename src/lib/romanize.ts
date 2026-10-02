@@ -1,9 +1,38 @@
 import { createRomanizer } from "lyric-romanizer";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const romanizer = createRomanizer();
 
-/** Romanizes a batch of lines. Missing/failing lines are omitted. */
+/** Shared empty result: nothing worth showing under the lines. */
+const EMPTY: Map<number, string> = new Map();
+
+/**
+ * Comparison key for "does the reading say anything new": ignores case,
+ * width (NFKC folds full-width Latin), whitespace and punctuation, which
+ * romanizers tend to normalize on their own.
+ */
+function readingKey(text: string): string {
+	return text
+		.normalize("NFKC")
+		.toLowerCase()
+		.replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+/**
+ * Whether any line contains a script that romanization could change. Lyrics
+ * written entirely in Latin script (plus digits, punctuation, symbols) are
+ * skipped up front, so they never wait on the romanizer.
+ */
+function needsRomanization(lines: string[]): boolean {
+	const nonLatin = /[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u;
+	return lines.some((line) => nonLatin.test(line));
+}
+
+/**
+ * Romanizes a batch of lines. Missing/failing lines are omitted. When every
+ * reading matches its original line, the result is empty: showing the same
+ * text twice adds nothing.
+ */
 export async function romanizeLines(
 	lines: string[],
 ): Promise<Map<number, string>> {
@@ -18,30 +47,39 @@ export async function romanizeLines(
 	} catch {
 		// romanization is best-effort
 	}
-	return map;
+	for (const [i, reading] of map) {
+		if (readingKey(reading) !== readingKey(lines[i] ?? "")) return map;
+	}
+	return EMPTY;
 }
 
 export async function romanizeLine(text: string): Promise<string | null> {
 	try {
 		const result = await romanizer.romanizeLine(text);
-		return result?.trim() ? result.trim() : null;
+		const trimmed = result?.trim();
+		return trimmed && readingKey(trimmed) !== readingKey(text) ? trimmed : null;
 	} catch {
 		return null;
 	}
 }
 
 /**
- * Computes romanizations for a list of lines reactively. Returns
- * null while pending, then a line-index → reading map.
+ * Computes romanizations for a list of lines reactively. Returns null while
+ * pending, then a line-index → reading map (empty when there is nothing to
+ * show, e.g. lyrics already in Latin script).
  */
 export function useRomanizedLines(
 	lines: string[],
 	enabled: boolean,
 ): Map<number, string> | null {
+	const needed = useMemo(
+		() => enabled && lines.length > 0 && needsRomanization(lines),
+		[enabled, lines],
+	);
 	const [map, setMap] = useState<Map<number, string> | null>(null);
 
 	useEffect(() => {
-		if (!enabled || lines.length === 0) {
+		if (!needed) {
 			setMap(null);
 			return;
 		}
@@ -53,7 +91,9 @@ export function useRomanizedLines(
 		return () => {
 			cancelled = true;
 		};
-	}, [enabled, lines]);
+	}, [needed, lines]);
 
-	return map;
+	if (!enabled) return null;
+	// Nothing to romanize: settle immediately, no pending state to wait on.
+	return needed ? map : EMPTY;
 }
