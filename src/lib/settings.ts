@@ -24,6 +24,8 @@ export interface Settings {
 	hideTodaysBiggestHits: boolean;
 	/** Keep playing similar songs when the queue ends. */
 	autoplay: boolean;
+	/** Report played songs (with progress) to the YouTube watch history. */
+	watchHistory: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -40,6 +42,7 @@ const DEFAULTS: Settings = {
 	lrclibLooseMatch: true,
 	hideTodaysBiggestHits: true,
 	autoplay: true,
+	watchHistory: true,
 };
 
 export function getSettings(): Settings {

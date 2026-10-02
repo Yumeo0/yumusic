@@ -15,6 +15,7 @@ import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
+import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/listening";
 import { useSettings } from "@/lib/settings";
 import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils";
 import { isVideoId } from "@/lib/youtube.utils";
@@ -122,6 +123,68 @@ function appendToSourceBuffer(
 			reject(error as Error);
 		}
 	});
+}
+
+/** How often playback reports its watched range to YouTube's stats endpoint. */
+const WATCHTIME_PING_MS = 15_000;
+
+// The stats endpoints identify the client that played the song. Report as the
+// YouTube Music web player (WEB_REMIX), not plain YouTube, and post to the
+// music host — matching music.youtube.com's own playback pings.
+const STATS_CLIENT = {
+	client_name: Constants.CLIENTS.YTMUSIC.NAME,
+	client_version: Constants.CLIENTS.YTMUSIC.VERSION,
+};
+
+function musicStatsUrl(url: string): string {
+	return url.replace(/^https:\/\/s\.youtube\.com/, "https://music.youtube.com");
+}
+
+/**
+ * Registers the play with YouTube's playback stats — the same ping the web
+ * player sends — so the song lands in the account's watch history.
+ */
+function reportPlayback(videoInfo: YT.VideoInfo) {
+	const tracking = videoInfo.page[0]?.playback_tracking;
+	if (!tracking?.videostats_playback_url) return;
+	void videoInfo.actions
+		.stats(musicStatsUrl(tracking.videostats_playback_url), STATS_CLIENT, {
+			cpn: videoInfo.cpn,
+			c: STATS_CLIENT.client_name,
+			fmt: "251",
+			rtn: "0",
+			rt: "0",
+		})
+		.catch((error) => {
+			console.warn("[YuMusic] playback ping failed:", error);
+		});
+}
+
+/**
+ * Reports a watched media segment (`[start, end]`) to YouTube's watch-time
+ * endpoint — the periodic ping the web player sends so the history entry
+ * keeps its resume position. `final` closes the playback session.
+ */
+function reportWatchTime(
+	videoInfo: YT.VideoInfo,
+	start: number,
+	end: number,
+	final: boolean,
+) {
+	const tracking = videoInfo.page[0]?.playback_tracking;
+	if (!tracking?.videostats_watchtime_url) return;
+	void videoInfo.actions
+		.stats(musicStatsUrl(tracking.videostats_watchtime_url), STATS_CLIENT, {
+			cpn: videoInfo.cpn,
+			c: STATS_CLIENT.client_name,
+			st: start.toFixed(3),
+			et: end.toFixed(3),
+			cmt: end.toFixed(3),
+			final: final ? "1" : "0",
+		})
+		.catch((error) => {
+			console.warn("[YuMusic] watch-time ping failed:", error);
+		});
 }
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
@@ -286,6 +349,61 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		};
 	}, [videoInfo, innertube]);
 
+	// Watch-time pings: report the played ranges while listening so the entry
+	// in YouTube's watch history keeps its resume position. The media element
+	// is shared across tracks, so positions are tracked in a closure and the
+	// final segment is flushed when the track changes or the player unmounts.
+	useEffect(() => {
+		if (!settings.watchHistory || !videoInfo) return;
+		const videoEl = videoElementRef.current;
+		if (!videoEl) return;
+
+		let lastReported = videoEl.currentTime;
+		let lastKnownTime = lastReported;
+		let seeking = false;
+
+		const send = (final: boolean) => {
+			if (seeking) return;
+			const end = lastKnownTime;
+			if (end - lastReported < LISTEN_GRACE_SECONDS) {
+				if (final) lastReported = end;
+				return;
+			}
+			reportWatchTime(videoInfo, lastReported, end, final);
+			lastReported = end;
+		};
+
+		const onTimeUpdate = () => {
+			if (!videoEl.paused) lastKnownTime = videoEl.currentTime;
+		};
+		const onSeeking = () => {
+			seeking = true;
+		};
+		const onSeeked = () => {
+			lastReported = videoEl.currentTime;
+			lastKnownTime = lastReported;
+			seeking = false;
+		};
+		const onPause = () => send(false);
+
+		videoEl.addEventListener("timeupdate", onTimeUpdate);
+		videoEl.addEventListener("seeking", onSeeking);
+		videoEl.addEventListener("seeked", onSeeked);
+		videoEl.addEventListener("pause", onPause);
+		const timer = window.setInterval(() => {
+			if (!videoEl.paused) send(false);
+		}, WATCHTIME_PING_MS);
+
+		return () => {
+			window.clearInterval(timer);
+			videoEl.removeEventListener("timeupdate", onTimeUpdate);
+			videoEl.removeEventListener("seeking", onSeeking);
+			videoEl.removeEventListener("seeked", onSeeked);
+			videoEl.removeEventListener("pause", onPause);
+			send(true);
+		};
+	}, [settings.watchHistory, videoInfo]);
+
 	// Play/pause control
 	useEffect(() => {
 		const videoEl = videoElementRef.current;
@@ -388,6 +506,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			);
 		}
 	}, []);
+
+	// Feed the shared listening-session tracker: one tick per second while
+	// playing. It defines the grace period both the watch-history ping and
+	// ListenBrainz use, and the scrobble threshold.
+	useEffect(() => {
+		if (!currentSong || !isPlaying) return;
+		const videoEl = videoElementRef.current;
+		listeningSession.start(currentSong.id, videoEl?.duration ?? 0);
+		const timer = window.setInterval(() => {
+			if (videoEl && Number.isFinite(videoEl.duration)) {
+				listeningSession.setDuration(videoEl.duration);
+			}
+			listeningSession.tick(1);
+		}, 1000);
+		return () => window.clearInterval(timer);
+	}, [currentSong, isPlaying]);
+
+	// Register the play in YouTube's watch history — the same ping the web
+	// player sends — once the track has passed the shared grace period, so
+	// instant skips are never tracked.
+	useEffect(() => {
+		if (!settings.watchHistory || !videoInfo) return;
+		return listeningSession.subscribe((event, songId) => {
+			if (event !== "established") return;
+			if (songId !== videoInfo.basic_info.id) return;
+			reportPlayback(videoInfo);
+		});
+	}, [settings.watchHistory, videoInfo]);
 
 	// Keep the queue's autoplay section stocked: whenever the current track
 	// changes and no suggestions are pending, fetch the radio mix for it. The

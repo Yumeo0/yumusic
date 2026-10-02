@@ -67,7 +67,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 	const hasQueuedNext = queue.length > currentIndex + 1;
 	const upNext = hasQueuedNext
 		? queue.slice(currentIndex + 1, currentIndex + 4)
-		: autoplayTracks.slice(0, 4);
+		: autoplayTracks.slice(0, 3);
 	const upNextTucked = upNext.slice(1);
 	const upNextIsAutoplay = !hasQueuedNext && upNext.length > 0;
 

@@ -30,6 +30,7 @@ import {
 } from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
+import { listeningSession } from "./lib/listening";
 import { usePinnedPlaylists } from "./lib/pinned";
 import {
 	setQueueOpen,
@@ -182,12 +183,7 @@ function ListenBrainzSync() {
 	const token = settings.listenbrainzToken.trim();
 	const enabled = settings.listenbrainz && token.length > 0;
 
-	const elapsedRef = useRef(0);
-	const scrobbledRef = useRef<string | null>(null);
 	const startedAtRef = useRef<number | null>(null);
-	const playingNowSentRef = useRef(false);
-	const playingNowTimerRef = useRef<number | null>(null);
-	const isPlayingRef = useRef(isPlaying);
 
 	/**
 	 * Scrobble metadata in the track's original language: the title without
@@ -236,85 +232,61 @@ function ListenBrainzSync() {
 		};
 	}, [enabled, songId]);
 
-	// New track — reset the scrobble state and cancel any pending
-	// playing-now submission, so skipping songs doesn't spam MusicBrainz.
+	// New track — reset the listen-start timestamp so skipping songs doesn't
+	// submit a stale listenedAt.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: songId/enabled are intentional reset triggers
 	useEffect(() => {
-		elapsedRef.current = 0;
-		scrobbledRef.current = null;
 		startedAtRef.current = null;
-		playingNowSentRef.current = false;
-		if (playingNowTimerRef.current !== null) {
-			window.clearTimeout(playingNowTimerRef.current);
-			playingNowTimerRef.current = null;
-		}
 	}, [songId, enabled]);
 
+	// Remember when playback started; used as the scrobble's listenedAt.
 	useEffect(() => {
-		isPlayingRef.current = isPlaying;
-	}, [isPlaying]);
-
-	useEffect(() => {
-		if (!enabled || !songId || !isPlaying || !currentSong) return;
+		if (!enabled || !songId || !isPlaying) return;
 		if (startedAtRef.current === null) {
 			startedAtRef.current = Math.floor(Date.now() / 1000);
 		}
-		if (playingNowSentRef.current) return;
-		if (playingNowTimerRef.current !== null) return;
-		// Grace period: skipping songs within it cancels the submission.
-		playingNowTimerRef.current = window.setTimeout(() => {
-			playingNowTimerRef.current = null;
-			if (!isPlayingRef.current) return;
-			playingNowSentRef.current = true;
+	}, [enabled, songId, isPlaying]);
+
+	// The shared listening session drives both the "playing now" submission
+	// (grace period reached) and the scrobble (half the track listened), so
+	// the timing stays consistent with the YouTube watch-history pings.
+	useEffect(() => {
+		if (!enabled || !songId || !currentSong) return;
+		return listeningSession.subscribe((event, eventSongId) => {
+			if (eventSongId !== songId) return;
 			const names = scrobbleMetadataRef.current();
 			const videoEl = videoElementRef?.current ?? null;
 			const duration =
 				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
-			// Resolve the recording MBID for the playing_now listen as well — it
-			// links the card and gives it cover art, and pre-warms the cache for
-			// the scrobble. Submits without MBIDs if the lookup fails.
-			const submit = async () => {
-				const mbids = await findRecording(
-					cleanSearchTitle(
-						meta?.originalTitle ?? names.mainTitle,
-						names.artistName,
-					),
-					names.artistName,
-					duration,
-					names.feats,
-				).catch(() => null);
-				await submitListen({
-					token,
-					trackName: names.trackName,
-					artistName: names.artistName,
-					album: meta?.album?.name,
-					mbids,
-				});
-			};
-			submit().catch((error) => {
-				console.warn("[listenbrainz] playing_now failed:", error);
-			});
-		}, 5000);
-	}, [enabled, songId, isPlaying, currentSong, token, meta, videoElementRef]);
 
-	// Listening-time accumulation + scrobble submission.
-	useEffect(() => {
-		if (!enabled) return;
-		const timer = window.setInterval(() => {
-			if (!isPlaying || !currentSong || !songId) return;
-			if (scrobbledRef.current === songId) return;
-			elapsedRef.current += 1;
-			const videoEl = videoElementRef?.current ?? null;
-			const duration =
-				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
-			// Classic rule: half the track or 4 minutes, whichever first.
-			const threshold = Math.max(
-				30,
-				Math.min(duration > 0 ? duration * 0.5 : 240, 240),
-			);
-			if (elapsedRef.current < threshold) return;
-			scrobbledRef.current = songId;
-			const names = scrobbleMetadata();
+			if (event === "established") {
+				// Resolve the recording MBID for the playing_now listen as well —
+				// it links the card and gives it cover art, and pre-warms the
+				// cache for the scrobble. Submits without MBIDs if lookup fails.
+				const submit = async () => {
+					const mbids = await findRecording(
+						cleanSearchTitle(
+							meta?.originalTitle ?? names.mainTitle,
+							names.artistName,
+						),
+						names.artistName,
+						duration,
+						names.feats,
+					).catch(() => null);
+					await submitListen({
+						token,
+						trackName: names.trackName,
+						artistName: names.artistName,
+						album: meta?.album?.name,
+						mbids,
+					});
+				};
+				submit().catch((error) => {
+					console.warn("[listenbrainz] playing_now failed:", error);
+				});
+				return;
+			}
+
 			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
 			const submit = async () => {
 				const mbids = await findRecording(
@@ -338,18 +310,8 @@ function ListenBrainzSync() {
 			submit().catch((error) => {
 				console.warn("[listenbrainz] scrobble failed:", error);
 			});
-		}, 1000);
-		return () => window.clearInterval(timer);
-	}, [
-		enabled,
-		isPlaying,
-		currentSong,
-		songId,
-		token,
-		meta,
-		scrobbleMetadata,
-		videoElementRef,
-	]);
+		});
+	}, [enabled, songId, currentSong, token, meta, videoElementRef]);
 
 	return null;
 }
