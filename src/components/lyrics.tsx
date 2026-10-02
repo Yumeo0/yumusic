@@ -9,6 +9,7 @@ import { fetchMusixmatchSynced } from "@/lib/musixmatch";
 import { useRomanizedLines } from "@/lib/romanize";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { fetchVocadbLyrics } from "@/lib/vocadb";
 import { getSongLyrics } from "@/lib/youtube-client";
 
 interface LyricsPanelProps {
@@ -34,6 +35,7 @@ interface LyricsSources {
 	lrclib: ProviderLyrics | null;
 	musixmatch: ProviderLyrics | null;
 	youtube: ProviderLyrics | null;
+	vocadb: ProviderLyrics | null;
 }
 
 const PROVIDER_BY_ID = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p]));
@@ -44,10 +46,10 @@ type LyricsState =
 
 /**
  * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch, and
- * YouTube Music's timed lyrics) plus static YouTube Music lyrics in parallel,
- * lets the user switch between the providers, optionally shows romanization
- * under each line, and falls back to a quiet placeholder when nothing is
- * available.
+ * YouTube Music's timed lyrics) plus static YouTube Music and VocaDB lyrics in
+ * parallel, lets the user switch between the providers, optionally shows
+ * romanization under each line, and falls back to a quiet placeholder when
+ * nothing is available.
  */
 export function LyricsPanel({
 	songId,
@@ -70,10 +72,11 @@ export function LyricsPanel({
 		manualView.current = false;
 
 		const load = async () => {
-			const [lrclib, musixmatch, youtube] = await Promise.all([
+			const [lrclib, musixmatch, youtube, vocadb] = await Promise.all([
 				fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
 				fetchMusixmatchSynced(title, artist, duration),
 				getSongLyrics(songId),
+				fetchVocadbLyrics(title, artist, duration),
 			]);
 			if (cancelled) return;
 			const sources: LyricsSources = {
@@ -86,6 +89,9 @@ export function LyricsPanel({
 					youtube && (youtube.synced || youtube.plain)
 						? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
 						: null,
+				vocadb: vocadb
+					? { synced: null, plain: vocadb, confirmed: true }
+					: null,
 			};
 			setState({ status: "done", sources });
 		};
@@ -186,7 +192,8 @@ export function LyricsPanel({
 			{sources &&
 				!sources.lrclib &&
 				!sources.musixmatch &&
-				!sources.youtube && <LyricsFallback />}
+				!sources.youtube &&
+				!sources.vocadb && <LyricsFallback />}
 		</div>
 	);
 }

@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { validateListenbrainzToken } from "@/lib/listenbrainz";
 import {
+	LYRICS_KIND_LABELS,
 	LYRICS_PROVIDERS,
 	type LyricsProviderId,
 } from "@/lib/lyrics-providers";
@@ -18,6 +19,7 @@ import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
+const PROVIDER_KINDS = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.kinds]));
 
 interface SettingsPageProps {
 	isLoggedIn: boolean;
@@ -285,7 +287,7 @@ export default function SettingsPage({
 						<p className="text-sm font-medium">Preferred providers</p>
 						<p className="mt-0.5 text-xs text-muted-foreground">
 							Drag to reorder, or use the arrows. The highest available provider
-							is used first.
+							is used first; badges show the lyric detail each one can return.
 						</p>
 						<ul className="mt-3 space-y-1.5">
 							{settings.lyricsProviderOrder.map((id, index) => (
@@ -305,6 +307,21 @@ export default function SettingsPage({
 									<span className="flex-1 text-sm font-medium">
 										{PROVIDER_LABEL.get(id) ?? id}
 									</span>
+									<div className="flex shrink-0 items-center gap-1">
+										{PROVIDER_KINDS.get(id)?.map((kind) => (
+											<span
+												className={cn(
+													"rounded-full border px-1.5 py-px text-[10px] font-medium",
+													kind === "plain"
+														? "border-foreground/12 text-muted-foreground"
+														: "border-primary/30 text-primary",
+												)}
+												key={kind}
+											>
+												{LYRICS_KIND_LABELS[kind]}
+											</span>
+										))}
+									</div>
 									<button
 										aria-label={`Move ${PROVIDER_LABEL.get(id) ?? id} up`}
 										className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"

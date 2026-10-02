@@ -1,17 +1,47 @@
 /** Lyrics providers and their user-facing metadata. */
-export type LyricsProviderId = "lrclib" | "musixmatch" | "youtube";
+export type LyricsProviderId = "lrclib" | "musixmatch" | "youtube" | "vocadb";
+
+/**
+ * How detailed a provider's lyrics are, simplest first. "word" is reserved
+ * for word-by-word timing (karaoke-style) if a provider integration grows it.
+ */
+export type LyricsKind = "plain" | "synced" | "word";
+
+export const LYRICS_KIND_LABELS: Record<LyricsKind, string> = {
+	plain: "Plain",
+	synced: "Synced",
+	word: "Word sync",
+};
 
 export interface LyricsProvider {
 	id: LyricsProviderId;
 	label: string;
 	/** Shown as the source under the lyrics. */
 	attribution: string;
+	/** Lyric detail levels this provider's integration can return. */
+	kinds: readonly LyricsKind[];
 }
 
 export const LYRICS_PROVIDERS: readonly LyricsProvider[] = [
-	{ id: "lrclib", label: "LRCLIB", attribution: "LRCLIB" },
-	{ id: "musixmatch", label: "Musixmatch", attribution: "Musixmatch" },
-	{ id: "youtube", label: "YouTube", attribution: "YouTube Music" },
+	{
+		id: "lrclib",
+		label: "LRCLIB",
+		attribution: "LRCLIB",
+		kinds: ["synced", "plain"],
+	},
+	{
+		id: "musixmatch",
+		label: "Musixmatch",
+		attribution: "Musixmatch",
+		kinds: ["synced"],
+	},
+	{
+		id: "youtube",
+		label: "YouTube",
+		attribution: "YouTube Music",
+		kinds: ["synced", "plain"],
+	},
+	{ id: "vocadb", label: "VocaDB", attribution: "VocaDB", kinds: ["plain"] },
 ];
 
 export const DEFAULT_LYRICS_PROVIDER_ORDER: LyricsProviderId[] =
