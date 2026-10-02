@@ -445,15 +445,24 @@ export function measureDismissGeometry(
 	const seek = visible("[data-np-seek-bar]");
 	const miniProgress = document.querySelector("[data-mini-progress]");
 	if (seek && miniProgress) {
+		// Stretch horizontally only, without the clamp `pair` applies: the
+		// desktop mini strip spans the whole window (~3x the seek bar), and
+		// a clamped scale made the bar snap to full width at the very end.
+		// Both bars share a height, so the track keeps its thickness.
 		const source = seek.getBoundingClientRect();
 		const target = miniProgress.getBoundingClientRect();
-		pair(
-			seek,
-			source,
-			target,
-			"--np-seek",
-			target.width / Math.max(source.width, 1),
+		const sx = target.width / Math.max(source.width, 1);
+		// translate(t·d) scaleX(1 + (sx − 1)·d) about the bar's top-left
+		// lands its center on the strip's center at d = 1.
+		overlay.style.setProperty(
+			"--np-seek-tx",
+			`${target.x + target.width / 2 - source.x - (sx * source.width) / 2}px`,
 		);
+		overlay.style.setProperty(
+			"--np-seek-ty",
+			`${target.y + target.height / 2 - source.y - source.height / 2}px`,
+		);
+		overlay.style.setProperty("--np-seek-sx", String(sx));
 	}
 
 	const coverRect = cover.getBoundingClientRect();

@@ -814,7 +814,13 @@ function NowPlayingSeek({
 			<div
 				className="np-morph transition-transform duration-300 ease-out"
 				data-np-seek-bar
-				style={morphStyle("--np-seek")}
+				style={{
+					// Horizontal-only stretch onto the mini strip (see
+					// measureDismissGeometry): the track keeps its thickness.
+					transform:
+						"translate(calc(var(--np-seek-tx, 0px) * var(--np-dismiss, 0)), calc(var(--np-seek-ty, 0px) * var(--np-dismiss, 0) - var(--np-slide, 0px))) scaleX(calc(1 + (var(--np-seek-sx, 1) - 1) * var(--np-dismiss, 0)))",
+					transformOrigin: "0 0",
+				}}
 			>
 				<ProgressBar
 					onSeek={handleSeek}

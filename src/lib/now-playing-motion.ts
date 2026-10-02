@@ -90,6 +90,12 @@ export function useNowPlayingMotion(
 			active = false;
 			overlay.style.visibility = target === 1 ? "hidden" : "visible";
 			if (geometry?.page) geometry.page.style.overflow = "";
+			// Commit the resting values while nested easing is still off.
+			// Re-enabling transitions in the same style pass as the final
+			// value change would make every `.np-morph` element (whose
+			// transition-all also covers the registered --np-* blends) ease
+			// from its pre-change spot — controls flew in from off-screen.
+			if (overlay.dataset.playerMotion) void overlay.offsetHeight;
 			delete overlay.dataset.playerMotion;
 			delete document.documentElement.dataset.playerMorphing;
 		};
@@ -106,12 +112,15 @@ export function useNowPlayingMotion(
 			const from = progress;
 			const revealStart = revealFrom > 0 ? getQueueReveal() : 0;
 			const start = performance.now();
-			const duration = window.matchMedia("(prefers-reduced-motion: reduce)")
-				.matches
-				? 0
-				: 300;
+			// Deliberately not gated on prefers-reduced-motion: Windows reports
+			// "reduce" whenever its animation effects are off, which made the
+			// player snap shut on desktop. The motion is a short spatial
+			// transition tied to a deliberate tap, not ambient animation.
+			const duration = 300;
 			const tick = (now: number) => {
-				const time = duration ? Math.min((now - start) / duration, 1) : 1;
+				// rAF timestamps can predate `start`; clamp so the blend
+				// never overshoots past either end.
+				const time = Math.min(Math.max((now - start) / duration, 0), 1);
 				const eased = 1 - (1 - time) ** 3;
 				apply(from + (target - from) * eased);
 				if (revealStart > 0) setQueueReveal(revealStart * (1 - eased));
