@@ -149,6 +149,7 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
 	tauri::Builder::default()
+		.plugin(tauri_plugin_opener::init())
 		.register_asynchronous_uri_scheme_protocol("proxy", proxy::handle)
 		.setup(|app| {
 			if cfg!(debug_assertions) {

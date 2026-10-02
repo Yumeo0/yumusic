@@ -1,12 +1,15 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
 	ChevronDown,
 	ChevronUp,
+	Eye,
+	EyeOff,
 	GripVertical,
 	LogIn,
 	LogOut,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type DragEvent, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { validateListenbrainzToken } from "@/lib/listenbrainz";
 import {
@@ -20,6 +23,7 @@ import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
 const PROVIDER_KINDS = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.kinds]));
+const LISTENBRAINZ_TOKEN_URL = "https://listenbrainz.org/settings/#auth-token";
 
 interface SettingsPageProps {
 	isLoggedIn: boolean;
@@ -36,9 +40,12 @@ export default function SettingsPage({
 }: SettingsPageProps) {
 	const [settings, update] = useSettings();
 	const [cleared, setCleared] = useState(false);
+	const [showToken, setShowToken] = useState(false);
 	const [dragProvider, setDragProvider] = useState<LyricsProviderId | null>(
 		null,
 	);
+	/** Provider order previewed live while dragging; committed on drop. */
+	const [dragOrder, setDragOrder] = useState<LyricsProviderId[] | null>(null);
 	const [tokenState, setTokenState] = useState<{
 		valid: boolean;
 		user?: string;
@@ -56,16 +63,47 @@ export default function SettingsPage({
 		reorderProviders(order);
 	};
 
-	const dropProvider = (targetId: LyricsProviderId) => {
+	// The order rendered while dragging: other rows move out of the way so the
+	// drop position is visible before releasing.
+	const providerOrder = dragOrder ?? settings.lyricsProviderOrder;
+
+	const startProviderDrag = (id: LyricsProviderId) => {
+		setDragProvider(id);
+		setDragOrder([...settings.lyricsProviderOrder]);
+	};
+
+	/**
+	 * Moves the dragged provider to the hovered row — before or after it
+	 * depending on which half of the row the pointer is in.
+	 */
+	const dragProviderOver = (
+		event: DragEvent<HTMLLIElement>,
+		targetId: LyricsProviderId,
+	) => {
+		event.preventDefault();
 		if (!dragProvider || dragProvider === targetId) return;
-		const order = [...settings.lyricsProviderOrder];
+		const order = dragOrder ?? settings.lyricsProviderOrder;
 		const from = order.indexOf(dragProvider);
-		const to = order.indexOf(targetId);
-		if (from < 0 || to < 0) return;
-		order.splice(from, 1);
-		order.splice(to, 0, dragProvider);
+		if (from < 0) return;
+		const next = order.filter((providerId) => providerId !== dragProvider);
+		let insertAt = next.indexOf(targetId);
+		if (insertAt < 0) return;
+		const rect = event.currentTarget.getBoundingClientRect();
+		if (event.clientY > rect.top + rect.height / 2) insertAt += 1;
+		if (insertAt === from) return;
+		next.splice(insertAt, 0, dragProvider);
+		setDragOrder(next);
+	};
+
+	const commitProviderDrag = () => {
+		if (dragOrder) reorderProviders(dragOrder);
 		setDragProvider(null);
-		reorderProviders(order);
+		setDragOrder(null);
+	};
+
+	const cancelProviderDrag = () => {
+		setDragProvider(null);
+		setDragOrder(null);
 	};
 
 	// Verify the ListenBrainz token whenever it changes (debounced).
@@ -289,19 +327,25 @@ export default function SettingsPage({
 							Drag to reorder, or use the arrows. The highest available provider
 							is used first; badges show the lyric detail each one can return.
 						</p>
-						<ul className="mt-3 space-y-1.5">
-							{settings.lyricsProviderOrder.map((id, index) => (
+						<ul
+							className="mt-3 space-y-1.5"
+							onDragOver={(event) => event.preventDefault()}
+							onDrop={(event) => {
+								event.preventDefault();
+								commitProviderDrag();
+							}}
+						>
+							{providerOrder.map((id, index) => (
 								<li
 									className={cn(
 										"flex items-center gap-2 rounded-lg border border-foreground/8 bg-background/40 px-2.5 py-1.5 transition-opacity",
-										dragProvider === id && "opacity-40",
+										dragProvider === id && "border-primary/30 opacity-40",
 									)}
 									draggable
 									key={id}
-									onDragEnd={() => setDragProvider(null)}
-									onDragOver={(event) => event.preventDefault()}
-									onDragStart={() => setDragProvider(id)}
-									onDrop={() => dropProvider(id)}
+									onDragEnd={cancelProviderDrag}
+									onDragOver={(event) => dragProviderOver(event, id)}
+									onDragStart={() => startProviderDrag(id)}
 								>
 									<GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground/50" />
 									<span className="flex-1 text-sm font-medium">
@@ -513,20 +557,46 @@ export default function SettingsPage({
 								User token
 							</label>
 							<p className="mt-0.5 text-xs text-muted-foreground">
-								Find your token under your avatar at listenbrainz.org → Settings
-								→ User identity.
+								Copy the token from your{" "}
+								<a
+									className="text-primary underline underline-offset-2 hover:brightness-110"
+									href={LISTENBRAINZ_TOKEN_URL}
+									onClick={(event) => {
+										event.preventDefault();
+										void openUrl(LISTENBRAINZ_TOKEN_URL);
+									}}
+								>
+									ListenBrainz settings
+								</a>{" "}
+								(it's listed under "User token").
 							</p>
-							<Input
-								autoComplete="off"
-								className="mt-2 max-w-sm font-mono"
-								id="lb-token"
-								onChange={(event) => {
-									setTokenState(null);
-									update({ listenbrainzToken: event.target.value.trim() });
-								}}
-								placeholder="Paste your ListenBrainz token"
-								value={settings.listenbrainzToken}
-							/>
+							<div className="relative mt-2 max-w-sm">
+								<Input
+									autoComplete="off"
+									className="pr-10 font-mono"
+									id="lb-token"
+									onChange={(event) => {
+										setTokenState(null);
+										update({ listenbrainzToken: event.target.value.trim() });
+									}}
+									placeholder="Paste your ListenBrainz token"
+									type={showToken ? "text" : "password"}
+									value={settings.listenbrainzToken}
+								/>
+								<button
+									aria-label={showToken ? "Hide token" : "Show token"}
+									className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
+									onClick={() => setShowToken((value) => !value)}
+									title={showToken ? "Hide token" : "Show token"}
+									type="button"
+								>
+									{showToken ? (
+										<EyeOff className="size-4" />
+									) : (
+										<Eye className="size-4" />
+									)}
+								</button>
+							</div>
 							<p
 								className={cn(
 									"mt-1.5 text-xs",
