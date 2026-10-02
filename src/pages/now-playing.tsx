@@ -484,7 +484,7 @@ function QueueRow({
 	return (
 		<SongContextMenu queueIndex={queueIndex} song={song}>
 			<button
-				className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-card p-1.5 text-left shadow-[0_2px_12px_-4px_oklch(0_0_0/0.4)] transition-colors duration-200 hover:border-primary/40"
+				className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-card/70 p-1.5 text-left shadow-[0_2px_12px_-4px_oklch(0_0_0/0.4)] backdrop-blur-sm transition-colors duration-200 hover:border-primary/40"
 				onClick={onPlay}
 				type="button"
 			>
