@@ -6,7 +6,8 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { useRef, type RefObject } from "react";
+import { type RefObject, useRef } from "react";
+import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useMediaTime } from "@/lib/hooks";
@@ -68,49 +69,51 @@ export function Player() {
 				className="group grid h-17 grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
 				ref={swipeRowRef}
 			>
-				<button
-					className="flex min-w-0 items-center gap-3 text-left"
-					onClick={(e) => {
-						e.stopPropagation();
-						toggleNowPlaying();
-					}}
-					title="Open Now Playing"
-					type="button"
-				>
-					<div className="relative shrink-0">
-						{currentSong.thumbnail ? (
-							<img
-								alt={currentSong.title}
-								className="size-11 rounded-md border border-foreground/10 object-cover"
-								key={currentSong.id}
-								src={proxiedImageUrl(currentSong.thumbnail)}
-							/>
-						) : (
-							<div className="size-11 rounded-md bg-muted" />
-						)}
-						<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[.player-ctl:hover]:opacity-0">
-							<ChevronUp className="size-4 text-white" />
-						</span>
-					</div>
-					<div className="min-w-0">
-						<h3
-							className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
-							key={`t-${currentSong.id}`}
-						>
-							<SongTitle
-								artist={currentSong.artist}
-								title={currentSong.title}
-							/>
-						</h3>
-						<p
-							className="animate-track-in truncate text-xs text-muted-foreground"
-							key={`a-${currentSong.id}`}
-							style={{ animationDelay: "60ms" }}
-						>
-							<ArtistLinks song={currentSong} />
-						</p>
-					</div>
-				</button>
+				<SongContextMenu song={currentSong}>
+					<button
+						className="flex min-w-0 items-center gap-3 text-left"
+						onClick={(e) => {
+							e.stopPropagation();
+							toggleNowPlaying();
+						}}
+						title="Open Now Playing"
+						type="button"
+					>
+						<div className="relative shrink-0">
+							{currentSong.thumbnail ? (
+								<img
+									alt={currentSong.title}
+									className="size-11 rounded-md border border-foreground/10 object-cover"
+									key={currentSong.id}
+									src={proxiedImageUrl(currentSong.thumbnail)}
+								/>
+							) : (
+								<div className="size-11 rounded-md bg-muted" />
+							)}
+							<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[.player-ctl:hover]:opacity-0">
+								<ChevronUp className="size-4 text-white" />
+							</span>
+						</div>
+						<div className="min-w-0">
+							<h3
+								className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
+								key={`t-${currentSong.id}`}
+							>
+								<SongTitle
+									artist={currentSong.artist}
+									title={currentSong.title}
+								/>
+							</h3>
+							<p
+								className="animate-track-in truncate text-xs text-muted-foreground"
+								key={`a-${currentSong.id}`}
+								style={{ animationDelay: "60ms" }}
+							>
+								<ArtistLinks song={currentSong} />
+							</p>
+						</div>
+					</button>
+				</SongContextMenu>
 
 				{/* Transport */}
 				<div className="flex items-center gap-1 sm:gap-2">

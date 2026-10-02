@@ -9,9 +9,10 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { memo, useCallback, useRef, useState, type RefObject } from "react";
+import { memo, type RefObject, useCallback, useRef, useState } from "react";
 import { ArtistLinks } from "@/components/artist-link";
 import { LyricsPanel } from "@/components/lyrics";
+import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import { VolumeControl } from "@/components/volume-control";
 import { ProgressBar } from "@/components/waveform";
@@ -171,6 +172,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 								<div className="relative z-20">
 									<QueueRow
 										onPlay={() => play(queue[currentIndex + 1])}
+										queueIndex={currentIndex + 1}
 										song={queue[currentIndex + 1]}
 									/>
 								</div>
@@ -187,7 +189,11 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 												zIndex: 10 - k,
 											}}
 										>
-											<QueueRow onPlay={() => play(song)} song={song} />
+											<QueueRow
+												onPlay={() => play(song)}
+												queueIndex={currentIndex + 2 + k}
+												song={song}
+											/>
 										</div>
 									))}
 								</div>
@@ -445,36 +451,46 @@ function NowPlayingLyrics({
 	);
 }
 
-function QueueRow({ song, onPlay }: { song: Song; onPlay: () => void }) {
+function QueueRow({
+	song,
+	onPlay,
+	queueIndex,
+}: {
+	song: Song;
+	onPlay: () => void;
+	queueIndex: number;
+}) {
 	return (
-		<button
-			className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-card p-1.5 text-left shadow-[0_2px_12px_-4px_oklch(0_0_0/0.4)] transition-colors duration-200 hover:border-primary/40"
-			onClick={onPlay}
-			type="button"
-		>
-			{song.thumbnail ? (
-				<img
-					alt={song.title}
-					className="size-9 shrink-0 rounded-md object-cover"
-					loading="lazy"
-					src={proxiedImageUrl(song.thumbnail)}
-				/>
-			) : (
-				<div className="size-9 shrink-0 rounded-md bg-muted" />
-			)}
-			<div className="min-w-0 flex-1">
-				<p className="truncate text-sm font-medium">
-					<SongTitle artist={song.artist} title={song.title} />
-				</p>
-				<p className="truncate text-xs text-muted-foreground">
-					<ArtistLinks song={song} />
-				</p>
-			</div>
-			{song.duration && (
-				<span className="pr-1 font-mono text-[10px] text-muted-foreground/70">
-					{song.duration}
-				</span>
-			)}
-		</button>
+		<SongContextMenu queueIndex={queueIndex} song={song}>
+			<button
+				className="flex w-full items-center gap-3 rounded-lg border border-white/10 bg-card p-1.5 text-left shadow-[0_2px_12px_-4px_oklch(0_0_0/0.4)] transition-colors duration-200 hover:border-primary/40"
+				onClick={onPlay}
+				type="button"
+			>
+				{song.thumbnail ? (
+					<img
+						alt={song.title}
+						className="size-9 shrink-0 rounded-md object-cover"
+						loading="lazy"
+						src={proxiedImageUrl(song.thumbnail)}
+					/>
+				) : (
+					<div className="size-9 shrink-0 rounded-md bg-muted" />
+				)}
+				<div className="min-w-0 flex-1">
+					<p className="truncate text-sm font-medium">
+						<SongTitle artist={song.artist} title={song.title} />
+					</p>
+					<p className="truncate text-xs text-muted-foreground">
+						<ArtistLinks song={song} />
+					</p>
+				</div>
+				{song.duration && (
+					<span className="pr-1 font-mono text-[10px] text-muted-foreground/70">
+						{song.duration}
+					</span>
+				)}
+			</button>
+		</SongContextMenu>
 	);
 }

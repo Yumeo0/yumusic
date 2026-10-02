@@ -1,8 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, X } from "lucide-react";
 import { useRef } from "react";
+import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
-import { usePlayer, usePlayerControls, useQueueSheetRef } from "@/contexts/player-context";
+import {
+	usePlayer,
+	usePlayerControls,
+	useQueueSheetRef,
+} from "@/contexts/player-context";
 import { setQueueOpen, useNowPlayingOpen, useQueueOpen } from "@/lib/player-ui";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -89,63 +94,66 @@ export function QueuePanel() {
 							const song = queue[i];
 							const isCurrent = i === currentIndex;
 							return (
-								<button
-									className={cn(
-										"group absolute inset-x-0 grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
-										isCurrent
-											? "bg-primary/9"
-											: "hover:bg-foreground/5",
-									)}
-									data-index={virtualRow.index}
+								<SongContextMenu
 									key={`queue-${song.id}-${i}`}
-									onClick={() => play(song)}
-									ref={rowVirtualizer.measureElement}
-									style={{
-										transform: `translateY(${virtualRow.start}px)`,
-									}}
-									type="button"
+									queueIndex={i}
+									song={song}
 								>
-									<span className="relative grid place-items-center">
-										{isCurrent ? (
-											<EqualizerBars
-												className="size-3.5 text-primary"
-												playing={isPlaying}
+									<button
+										className={cn(
+											"group absolute inset-x-0 grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
+											isCurrent ? "bg-primary/9" : "hover:bg-foreground/5",
+										)}
+										data-index={virtualRow.index}
+										onClick={() => play(song)}
+										ref={rowVirtualizer.measureElement}
+										style={{
+											transform: `translateY(${virtualRow.start}px)`,
+										}}
+										type="button"
+									>
+										<span className="relative grid place-items-center">
+											{isCurrent ? (
+												<EqualizerBars
+													className="size-3.5 text-primary"
+													playing={isPlaying}
+												/>
+											) : (
+												<span className="font-mono text-[10px] text-muted-foreground/50 transition-opacity duration-150 group-hover:opacity-0">
+													{i + 1}
+												</span>
+											)}
+										</span>
+										{song.thumbnail ? (
+											<img
+												alt=""
+												className="size-10 rounded-md border border-foreground/10 object-cover"
+												loading="lazy"
+												src={proxiedImageUrl(song.thumbnail)}
 											/>
 										) : (
-											<span className="font-mono text-[10px] text-muted-foreground/50 transition-opacity duration-150 group-hover:opacity-0">
-												{i + 1}
+											<div className="size-10 rounded-md bg-muted" />
+										)}
+										<div className="min-w-0">
+											<p
+												className={cn(
+													"truncate text-sm font-medium",
+													isCurrent && "text-primary",
+												)}
+											>
+												<SongTitle artist={song.artist} title={song.title} />
+											</p>
+											<p className="truncate text-xs text-muted-foreground">
+												<ArtistLinks song={song} />
+											</p>
+										</div>
+										{song.duration && (
+											<span className="pr-1 font-mono text-[10px] text-muted-foreground/60 tabular-nums">
+												{song.duration}
 											</span>
 										)}
-									</span>
-									{song.thumbnail ? (
-										<img
-											alt=""
-											className="size-10 rounded-md border border-foreground/10 object-cover"
-											loading="lazy"
-											src={proxiedImageUrl(song.thumbnail)}
-										/>
-									) : (
-										<div className="size-10 rounded-md bg-muted" />
-									)}
-									<div className="min-w-0">
-										<p
-											className={cn(
-												"truncate text-sm font-medium",
-												isCurrent && "text-primary",
-											)}
-										>
-											<SongTitle artist={song.artist} title={song.title} />
-										</p>
-										<p className="truncate text-xs text-muted-foreground">
-											<ArtistLinks song={song} />
-										</p>
-									</div>
-									{song.duration && (
-										<span className="pr-1 font-mono text-[10px] text-muted-foreground/60 tabular-nums">
-											{song.duration}
-										</span>
-									)}
-								</button>
+									</button>
+								</SongContextMenu>
 							);
 						})}
 					</div>

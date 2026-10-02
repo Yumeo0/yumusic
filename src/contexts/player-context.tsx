@@ -47,6 +47,10 @@ interface PlayerContextType {
 	currentIndex: number;
 	addToQueue: (songs: Song[]) => void;
 	setQueue: (songs: Song[]) => void;
+	/** Insert a song directly after the current one without starting it. */
+	playNext: (song: Song) => void;
+	/** Remove the entry at `index`; advances playback when it was current. */
+	removeFromQueueAt: (index: number) => void;
 	next: () => void;
 	previous: () => void;
 	hasNext: boolean;
@@ -444,6 +448,38 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		setQueueState((prev) => [...prev, ...songs]);
 	}, []);
 
+	const playNext = useCallback(
+		(song: Song) => {
+			setQueueState((prev) => {
+				const next = [...prev];
+				next.splice(currentIndex < 0 ? 0 : currentIndex + 1, 0, song);
+				return next;
+			});
+		},
+		[currentIndex],
+	);
+
+	const removeFromQueueAt = useCallback(
+		(index: number) => {
+			const nextQueue = queue.filter((_, i) => i !== index);
+			setQueueState(nextQueue);
+			if (index === currentIndex) {
+				// Removing the playing entry advances to what now occupies its
+				// slot, so audio and highlighted row stay in sync.
+				if (nextQueue.length === 0) {
+					setCurrentIndex(-1);
+				} else {
+					const nextIndex = Math.min(currentIndex, nextQueue.length - 1);
+					setCurrentIndex(nextIndex);
+					void playSong(nextQueue[nextIndex]);
+				}
+			} else if (index < currentIndex) {
+				setCurrentIndex(currentIndex - 1);
+			}
+		},
+		[queue, currentIndex, playSong],
+	);
+
 	const setQueue = useCallback((songs: Song[]) => {
 		setQueueState(songs);
 	}, []);
@@ -467,6 +503,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			currentIndex,
 			addToQueue,
 			setQueue,
+			playNext,
+			removeFromQueueAt,
 			next,
 			previous,
 			hasNext,
@@ -484,6 +522,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			currentIndex,
 			addToQueue,
 			setQueue,
+			playNext,
+			removeFromQueueAt,
 			next,
 			previous,
 			hasNext,

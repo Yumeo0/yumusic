@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -375,14 +376,15 @@ export function HomeFeed() {
 									: item.kind === "artist"
 										? () => navigate(`/artist/${item.id}`)
 										: () => navigate(`/playlists/${item.id}`);
-							return (
-								<FeedCard
-									item={item}
-									// biome-ignore lint/suspicious/noArrayIndexKey: feed may contain duplicate ids
-									key={`${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`}
-									onClick={onOpen}
-								/>
-							);
+							const key = `${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`;
+							if (item.kind === "song") {
+								return (
+									<SongContextMenu key={key} song={item.song}>
+										<FeedCard item={item} onClick={onOpen} />
+									</SongContextMenu>
+								);
+							}
+							return <FeedCard item={item} key={key} onClick={onOpen} />;
 						})}
 					</div>
 				</section>

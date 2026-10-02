@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
 import { ArtistLinks } from "@/components/artist-link";
+import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import { SwipeToQueue } from "@/components/swipe-to-queue";
 import { EqualizerBars } from "@/components/waveform";
@@ -113,52 +114,57 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 					const song = toSong(video);
 					const isCurrent = currentSong?.id === song.id;
 					return (
-						<SwipeToQueue
+						<SongContextMenu
 							// biome-ignore lint/suspicious/noArrayIndexKey: search results may repeat video ids across shelves
 							key={`${video.id}-${i}`}
-							onQueue={() => addToQueue([song])}
+							song={song}
 						>
-							<button
-								className={cn(
-									"group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
-									isCurrent && "bg-primary/8",
-								)}
-								onClick={() => play(song)}
-								style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}
-								type="button"
-							>
-								{song.thumbnail ? (
-									<img
-										alt={video.title}
-										className="size-10 rounded-md border border-foreground/10 object-cover"
-										loading="lazy"
-										src={proxiedImageUrl(song.thumbnail)}
-									/>
-								) : (
-									<div className="size-10 rounded-md bg-muted" />
-								)}
-								<div className="min-w-0">
-									<h3
-										className={cn(
-											"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-											isCurrent && "text-primary",
-										)}
-									>
-										<SongTitle artist={song.artist} title={video.title ?? ""} />
-									</h3>
-									<p className="truncate text-xs text-muted-foreground">
-										<ArtistLinks song={song} />
-									</p>
-								</div>
-								{isCurrent && isPlaying ? (
-									<EqualizerBars className="mr-1 size-3.5 text-primary" />
-								) : (
-									<span className="pr-1 font-mono text-xs text-muted-foreground/70 tabular-nums">
-										{video.duration?.text}
-									</span>
-								)}
-							</button>
-						</SwipeToQueue>
+							<SwipeToQueue onQueue={() => addToQueue([song])}>
+								<button
+									className={cn(
+										"group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
+										isCurrent && "bg-primary/8",
+									)}
+									onClick={() => play(song)}
+									style={{ animationDelay: `${Math.min(i * 25, 300)}ms` }}
+									type="button"
+								>
+									{song.thumbnail ? (
+										<img
+											alt={video.title}
+											className="size-10 rounded-md border border-foreground/10 object-cover"
+											loading="lazy"
+											src={proxiedImageUrl(song.thumbnail)}
+										/>
+									) : (
+										<div className="size-10 rounded-md bg-muted" />
+									)}
+									<div className="min-w-0">
+										<h3
+											className={cn(
+												"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+												isCurrent && "text-primary",
+											)}
+										>
+											<SongTitle
+												artist={song.artist}
+												title={video.title ?? ""}
+											/>
+										</h3>
+										<p className="truncate text-xs text-muted-foreground">
+											<ArtistLinks song={song} />
+										</p>
+									</div>
+									{isCurrent && isPlaying ? (
+										<EqualizerBars className="mr-1 size-3.5 text-primary" />
+									) : (
+										<span className="pr-1 font-mono text-xs text-muted-foreground/70 tabular-nums">
+											{video.duration?.text}
+										</span>
+									)}
+								</button>
+							</SwipeToQueue>
+						</SongContextMenu>
 					);
 				})}
 			</div>

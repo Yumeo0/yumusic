@@ -21,8 +21,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Player } from "./components/player";
 import { QueuePanel } from "./components/queue-panel";
 import { Titlebar } from "./components/titlebar";
+import { Toaster } from "./components/toaster";
 import { UserMenu } from "./components/user-menu";
-import { PlayerProvider, usePlayer, usePlayerControls } from "./contexts/player-context";
+import {
+	PlayerProvider,
+	usePlayer,
+	usePlayerControls,
+} from "./contexts/player-context";
 import { useAmbientColor } from "./lib/hooks";
 import { findRecording, submitListen } from "./lib/listenbrainz";
 import { usePinnedPlaylists } from "./lib/pinned";
@@ -522,9 +527,7 @@ function AppShell({
 								onClick={() => navigate("/playlists")}
 							/>
 							<SidebarItem
-								icon={
-									<SettingsIcon className="size-4.5" strokeWidth={2.2} />
-								}
+								icon={<SettingsIcon className="size-4.5" strokeWidth={2.2} />}
 								isActive={location.pathname.startsWith("/settings")}
 								label="Settings"
 								onClick={() => navigate("/settings")}
@@ -551,9 +554,7 @@ function AppShell({
 															? "bg-primary/12 text-primary"
 															: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
 													)}
-													onClick={() =>
-														navigate(`/playlists/${playlist.id}`)
-													}
+													onClick={() => navigate(`/playlists/${playlist.id}`)}
 													type="button"
 												>
 													{playlist.thumbnail ? (
@@ -617,6 +618,7 @@ function AppShell({
 				<NowPlayingOverlay />
 				<QueuePanel />
 				<Player />
+				<Toaster />
 			</div>
 			<MobileNav />
 		</>
