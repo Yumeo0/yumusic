@@ -149,6 +149,46 @@ export default function SettingsPage({
 				</div>
 			</section>
 
+			{/* Home feed */}
+			<section className="mt-8">
+				<h2 className="mb-3 text-sm font-semibold text-foreground">
+					Home feed
+				</h2>
+				<div className="divide-y divide-foreground/6 overflow-hidden rounded-xl border border-foreground/8 bg-card">
+					<div className="flex items-center justify-between gap-6 p-4">
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Hide "Today's biggest hits"</p>
+							<p className="mt-0.5 text-xs text-muted-foreground">
+								Remove the "Today's biggest hits" row from the home page.
+							</p>
+						</div>
+						<button
+							aria-label="Toggle Today's biggest hits row"
+							aria-pressed={settings.hideTodaysBiggestHits}
+							className={cn(
+								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
+								settings.hideTodaysBiggestHits
+									? "bg-primary"
+									: "bg-foreground/15",
+							)}
+							onClick={() =>
+								update({
+									hideTodaysBiggestHits: !settings.hideTodaysBiggestHits,
+								})
+							}
+							type="button"
+						>
+							<span
+								className={cn(
+									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
+									settings.hideTodaysBiggestHits && "translate-x-5",
+								)}
+							/>
+						</button>
+					</div>
+				</div>
+			</section>
+
 			{/* Lyrics */}
 			<section className="mt-8">
 				<h2 className="mb-3 text-sm font-semibold text-foreground">Lyrics</h2>

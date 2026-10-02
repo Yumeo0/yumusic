@@ -22,8 +22,16 @@ import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/pinned";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
-import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
 import {
+	artistIdOf,
+	artistListOf,
+	artistNames,
+	isAlbumId,
+	videoIdOf,
+} from "../lib/youtube.utils";
+import {
+	type Album,
+	getAlbum,
 	getPlaylist,
 	getUserPlaylists,
 	loadPlaylistContinuation,
@@ -82,7 +90,7 @@ function writeCache<T>(key: string, data: T) {
 
 function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 	return {
-		id: item.id ?? "",
+		id: videoIdOf(item),
 		title: item.title ?? "Unknown Title",
 		artist: artistNames(item),
 		artistId: artistIdOf(item.artists),
@@ -104,7 +112,8 @@ function collectSongs(
 	const songs: Song[] = [];
 	for (const item of items) {
 		if (item.is(YTNodes.MusicResponsiveListItem)) {
-			songs.push(toSong(item));
+			const song = toSong(item);
+			if (song.id) songs.push(song);
 		}
 	}
 	return songs;
@@ -113,6 +122,38 @@ function collectSongs(
 /** Removes the redundant "Playlist" prefix from YouTube subtitles. */
 function cleanSubtitle(text: string): string {
 	return text.replace(/^playlist\s*[•·|:-]?\s*/i, "").trim();
+}
+
+/**
+ * Title, subtitle and cover for a playlist or album header. Editable playlist
+ * pages wrap their real header one level deep, and albums use a different
+ * header class than playlists.
+ */
+function collectionHeader(raw: Playlist["header"] | Album["header"]): {
+	title: string;
+	subtitle: string;
+	thumbnail: string | null;
+} {
+	const header =
+		raw instanceof YTNodes.MusicEditablePlaylistDetailHeader ? raw.header : raw;
+	if (header instanceof YTNodes.MusicResponsiveHeader) {
+		const thumbs = header.thumbnail?.contents ?? [];
+		return {
+			title: header.title?.text || "Playlist",
+			subtitle: header.subtitle?.text || "",
+			thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+		};
+	}
+	if (header instanceof YTNodes.MusicDetailHeader) {
+		return {
+			title: header.title?.text || "Album",
+			subtitle: header.subtitle?.text || "",
+			thumbnail: hiResThumb(
+				header.thumbnails?.[header.thumbnails.length - 1]?.url || null,
+			),
+		};
+	}
+	return { title: "Playlist", subtitle: "", thumbnail: null };
 }
 
 export function PlaylistDetails() {
@@ -146,33 +187,32 @@ export function PlaylistDetails() {
 		try {
 			setLoading(true);
 			setError(null);
-			const data = await getPlaylist(id);
+			const albumMode = isAlbumId(id);
+			const data = albumMode ? await getAlbum(id) : await getPlaylist(id);
 
 			if (!data) {
-				setError("Failed to load playlist.");
+				setError(
+					albumMode ? "Failed to load album." : "Failed to load playlist.",
+				);
 				setLoading(false);
 				return;
 			}
 
-			const header =
-				data.header instanceof YTNodes.MusicResponsiveHeader
-					? data.header
-					: null;
+			const header = collectionHeader(data.header);
+			const items = "items" in data ? (data.items ?? []) : data.contents;
 			const view: PlaylistView = {
-				title: header?.title?.text || "Playlist",
-				subtitle: cleanSubtitle(header?.subtitle?.text || ""),
-				thumbnail: hiResThumb(
-					header?.thumbnail?.contents?.[header.thumbnail.contents.length - 1]
-						?.url || null,
-				),
-				songs: collectSongs(data.items ?? []),
-				complete: !data.has_continuation,
+				title: header.title,
+				subtitle: cleanSubtitle(header.subtitle),
+				thumbnail: header.thumbnail,
+				songs: collectSongs(items),
+				complete: !("has_continuation" in data && data.has_continuation),
 			};
 			setPlaylist(view);
 			setLoading(false);
 
-			// Load remaining pages, appending as they arrive
-			if (data.has_continuation) {
+			// Load remaining pages, appending as they arrive (playlists only —
+			// albums fit in a single response).
+			if ("has_continuation" in data && data.has_continuation) {
 				setLoadingMore(true);
 				let current: Playlist = data;
 				while (current.has_continuation) {

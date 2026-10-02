@@ -80,6 +80,50 @@ export function artistIdOf(
 	return artists?.find((a) => a.channel_id?.startsWith("UC"))?.channel_id;
 }
 
+const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+
+/** Whether `id` can be a YouTube video id (11 base64url chars). */
+export function isVideoId(id: string | undefined | null): id is string {
+	return !!id && VIDEO_ID_PATTERN.test(id);
+}
+
+/** Whether a browse id refers to an album rather than a playlist. */
+export function isAlbumId(id: string | undefined | null): id is string {
+	return (
+		!!id &&
+		(id.startsWith("MPR") ||
+			id.startsWith("FEmusic_library_privately_owned_release"))
+	);
+}
+
+/**
+ * Extracts the playable video id from a music list item.
+ *
+ * `MusicResponsiveListItem.id` is only populated when the response carries
+ * `playlistItemData` (playlists, search results), and youtubei.js' video
+ * parser does not fall back to the item's watch endpoint — so home shelves
+ * can yield items whose `id` is empty or a browse id. The watch endpoint with
+ * the real video id lives on the first flex column's runs.
+ */
+export function videoIdOf(
+	item: YTNodes.MusicResponsiveListItem | YTNodes.MusicTwoRowItem,
+): string {
+	const candidates: (string | undefined)[] = [
+		item.id,
+		item.endpoint?.payload?.videoId,
+	];
+	if ("flex_columns" in item) {
+		for (const column of item.flex_columns ?? []) {
+			for (const run of column.title?.runs ?? []) {
+				if ("endpoint" in run) {
+					candidates.push(run.endpoint?.payload?.videoId);
+				}
+			}
+		}
+	}
+	return candidates.find(isVideoId) ?? "";
+}
+
 /** All artists of an item as { name, id } pairs (id present when linked). */
 export function artistListOf(
 	item: YTNodes.MusicResponsiveListItem,

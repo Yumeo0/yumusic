@@ -8,7 +8,12 @@ import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
-import { artistIdOf, artistListOf, artistNames } from "../lib/youtube.utils";
+import {
+	artistIdOf,
+	artistListOf,
+	artistNames,
+	videoIdOf,
+} from "../lib/youtube.utils";
 import { getYoutubeClient } from "../lib/youtube-client";
 
 interface SearchResultsPageProps {
@@ -38,7 +43,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 				if (search.contents) {
 					for (const section of search.contents) {
 						if (section instanceof YTNodes.MusicShelf) {
-							songs.push(...section.contents);
+							songs.push(...section.contents.filter((item) => videoIdOf(item)));
 						}
 					}
 				}
@@ -58,7 +63,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 	}, [query]);
 
 	const toSong = (video: YTNodes.MusicResponsiveListItem): Song => ({
-		id: video.id ?? "",
+		id: videoIdOf(video),
 		title: video.title ?? "Unknown Title",
 		artist: artistNames(video),
 		artistId: artistIdOf(video.artists),

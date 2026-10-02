@@ -17,7 +17,7 @@ import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { cn, hiResThumb } from "@/lib/utils";
-import { artistListOf, artistNames } from "@/lib/youtube.utils";
+import { artistListOf, artistNames, videoIdOf } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
@@ -48,7 +48,7 @@ const artistCache = new Map<string, { timestamp: number; data: ArtistView }>();
 
 function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 	return {
-		id: item.id ?? "",
+		id: videoIdOf(item),
 		title: item.title ?? "Unknown Title",
 		artist: artistNames(item),
 		artists: artistListOf(item),
@@ -70,7 +70,7 @@ function toSongFromTwoRow(
 	artistId?: string,
 ): Song {
 	return {
-		id: item.id ?? "",
+		id: videoIdOf(item),
 		title: item.title?.text || "Unknown Title",
 		artist: artistName,
 		artistId,
@@ -120,7 +120,8 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			const shelfSongs: Song[] = [];
 			for (const item of section.contents ?? []) {
 				if (item.is(YTNodes.MusicResponsiveListItem)) {
-					shelfSongs.push(toSong(item));
+					const song = toSong(item);
+					if (song.id) shelfSongs.push(song);
 				}
 			}
 			if (/songs?/i.test(shelfTitle) && songs.length === 0) {
@@ -143,6 +144,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			for (const item of section.contents ?? []) {
 				if (item.is(YTNodes.MusicResponsiveListItem)) {
 					const song = toSong(item);
+					if (!song.id) continue;
 					items.push({
 						title: song.title,
 						subtitle: song.artist,
@@ -150,16 +152,17 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 						song,
 					});
 				} else if (item.is(YTNodes.MusicTwoRowItem)) {
+					const twoRowSong =
+						item.item_type === "video"
+							? toSongFromTwoRow(item, name, id)
+							: undefined;
 					items.push({
 						title: item.title?.text || "Unknown Title",
 						subtitle: item.subtitle?.text || "",
 						thumbnail: hiResThumb(
 							item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
 						),
-						song:
-							item.item_type === "video"
-								? toSongFromTwoRow(item, name, id)
-								: undefined,
+						song: twoRowSong?.id ? twoRowSong : undefined,
 					});
 				}
 			}

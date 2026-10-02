@@ -20,6 +20,8 @@ export interface Settings {
 	preferSyncedLyrics: boolean;
 	/** LRCLIB: also search by title alone when artist+title finds nothing. */
 	lrclibLooseMatch: boolean;
+	/** Hide the "Today's biggest hits" row from the home feed. */
+	hideTodaysBiggestHits: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -34,6 +36,7 @@ const DEFAULTS: Settings = {
 	lyricsProviderOrder: [...DEFAULT_LYRICS_PROVIDER_ORDER],
 	preferSyncedLyrics: true,
 	lrclibLooseMatch: true,
+	hideTodaysBiggestHits: true,
 };
 
 export function getSettings(): Settings {

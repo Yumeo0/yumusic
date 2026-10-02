@@ -16,6 +16,7 @@ import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "@/lib/botguard-service";
 import { MAX_VOLUME } from "@/lib/hooks";
 import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils";
+import { isVideoId } from "@/lib/youtube.utils";
 import { fetchFunction, getSongStream } from "@/lib/youtube-client";
 
 export interface Song {
@@ -314,6 +315,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		setInnertube(null);
 
 		try {
+			if (!isVideoId(song.id)) {
+				throw new Error(
+					`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
+				);
+			}
 			const result = await getSongStream(song.id);
 			if (result) {
 				// Debug: dump everything YouTube returned for this song

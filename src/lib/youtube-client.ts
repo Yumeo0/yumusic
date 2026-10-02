@@ -293,6 +293,19 @@ export async function getPlaylist(id: string) {
 	}
 }
 
+export type Album = Awaited<ReturnType<Innertube["music"]["getAlbum"]>>;
+
+export async function getAlbum(id: string) {
+	const client = await getYoutubeClient();
+	try {
+		const album = await client.music.getAlbum(id);
+		return album;
+	} catch (error) {
+		console.error("Failed to get album:", error);
+		return null;
+	}
+}
+
 export interface SongLyrics {
 	/** Synced lyrics with per-line start times in seconds. */
 	synced: LrcLine[] | null;
