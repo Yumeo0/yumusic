@@ -17,6 +17,7 @@ import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/tauri";
+import { formatArtistName } from "@/lib/title";
 import { cn, hiResThumb } from "@/lib/utils";
 import { artistListOf, artistNames, videoIdOf } from "@/lib/youtube.utils";
 import { getYoutubeClient } from "@/lib/youtube-client";
@@ -277,7 +278,7 @@ export default function ArtistPage() {
 				)}
 				<div className="min-w-0 pb-1">
 					<h1 className="truncate text-3xl font-bold tracking-tight sm:text-4xl">
-						{artistName || artist.name}
+						{formatArtistName(artistName || artist.name)}
 					</h1>
 					{artist.description && (
 						<p className="mt-2 line-clamp-2 max-w-xl text-sm text-muted-foreground">

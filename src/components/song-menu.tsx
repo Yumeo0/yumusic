@@ -1,5 +1,10 @@
 import { ContextMenu } from "@base-ui/react/context-menu";
 import {
+	Braces,
+	FileText,
+	Fingerprint,
+	Image as ImageIcon,
+	Languages,
 	ListPlus,
 	ListStart,
 	type LucideIcon,
@@ -11,6 +16,8 @@ import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { useSettings } from "@/lib/settings";
+import { displayTitle } from "@/lib/title";
 import { showToast } from "@/lib/toast";
 
 /** Copy the song's YouTube Music link, or open the native share sheet. */
@@ -34,6 +41,16 @@ async function shareSong(song: Song) {
 		showToast("Link copied to clipboard");
 	} catch {
 		showToast("Could not copy link");
+	}
+}
+
+/** Copies text to the clipboard and reports the result as a toast. */
+async function copyText(text: string, label: string) {
+	try {
+		await navigator.clipboard.writeText(text);
+		showToast(`${label} copied`);
+	} catch {
+		showToast(`Could not copy ${label.toLowerCase()}`);
 	}
 }
 
@@ -77,6 +94,7 @@ export function SongContextMenu({
 }) {
 	const { addToQueue, play, playNext, removeFromQueueAt, queue, currentSong } =
 		usePlayer();
+	const [settings] = useSettings();
 	const navigate = useNavigate();
 
 	if (!song) return <>{children}</>;
@@ -131,6 +149,55 @@ export function SongContextMenu({
 							label="Share song"
 							onClick={() => void shareSong(song)}
 						/>
+						{settings.developerMode && (
+							<>
+								<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
+								<ContextMenu.Group>
+									<ContextMenu.GroupLabel className="px-2.5 pt-1.5 pb-0.5 font-mono text-[10px] font-medium tracking-[0.18em] text-muted-foreground/70 uppercase select-none">
+										Developer
+									</ContextMenu.GroupLabel>
+									<MenuItem
+										icon={Languages}
+										label="Copy original title"
+										onClick={() =>
+											void copyText(
+												displayTitle(
+													song.title,
+													"original",
+													settings.cleanTitles,
+													song.artist,
+												),
+												"Original title",
+											)
+										}
+									/>
+									<MenuItem
+										icon={FileText}
+										label="Copy raw title"
+										onClick={() => void copyText(song.title, "Raw title")}
+									/>
+									<MenuItem
+										icon={Fingerprint}
+										label="Copy video ID"
+										onClick={() => void copyText(song.id, "Video ID")}
+									/>
+									<MenuItem
+										icon={ImageIcon}
+										label="Copy thumbnail URL"
+										onClick={() =>
+											void copyText(song.thumbnail, "Thumbnail URL")
+										}
+									/>
+									<MenuItem
+										icon={Braces}
+										label="Copy song data"
+										onClick={() =>
+											void copyText(JSON.stringify(song, null, 2), "Song data")
+										}
+									/>
+								</ContextMenu.Group>
+							</>
+						)}
 					</ContextMenu.Popup>
 				</ContextMenu.Positioner>
 			</ContextMenu.Portal>

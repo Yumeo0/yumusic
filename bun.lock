@@ -6,7 +6,7 @@
       "name": "yumusic",
       "dependencies": {
         "@base-ui/react": "^1.8.0",
-        "@bufbuild/protobuf": "^2.0.0",
+        "@bufbuild/protobuf": "^2.16.0",
         "@tanstack/react-virtual": "^3.14.13",
         "@tauri-apps/api": "^2.12.1",
         "@tauri-apps/plugin-opener": "^2.7.0",
@@ -14,7 +14,7 @@
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
         "googlevideo": "github:LuanRT/googlevideo#44e360aa1be47298d51535454f899501cf29ce0c",
-        "lucide-react": "^1.49.0",
+        "lucide-react": "^1.51.0",
         "lyric-romanizer": "^0.3.1",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
@@ -29,7 +29,7 @@
         "@tailwindcss/vite": "^4.3.3",
         "@tauri-apps/cli": "^2.12.1",
         "@types/bun": "^1.4.2",
-        "@types/node": "^26.6.3",
+        "@types/node": "^26.6.4",
         "@types/react": "^19.3.0",
         "@types/react-dom": "^19.3.0",
         "@vitejs/plugin-react": "^6.1.1",
@@ -202,7 +202,7 @@
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
-    "@types/node": ["@types/node@26.6.3", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-dsqMQQoeTLqu9wynDD00q573mNzso3IdQOAfHRJqLCcmCFPoGo9A1bDpUcv/9tnKpErQWv9uKeGfl37EIS02Yg=="],
+    "@types/node": ["@types/node@26.6.4", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg=="],
 
     "@types/react": ["@types/react@19.3.0", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg=="],
 
@@ -312,7 +312,7 @@
 
     "lodash.invert": ["lodash.invert@4.3.0", "", {}, "sha512-3CJmOxN5y47rd+g5XjdZNcq2SorJkvlSqBwPomT094p6LZ4p7b5bUoRzYYMjwsTGWTW77z/dFZlCzeVQxBrZVg=="],
 
-    "lucide-react": ["lucide-react@1.49.0", "", { "peerDependencies": { "@types/react": "*", "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-ApfaNM4/7jBrVopqLJ84Jz8TMQ1Q1JeZ1PmKh25aeS3E1FTVcMkSh1bEQB7dfzdIrwXRP8p3z4AJjTIHHb5IIA=="],
+    "lucide-react": ["lucide-react@1.51.0", "", { "peerDependencies": { "@types/react": "*", "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-9929jimol5y7VbXUlVKcgURMSeIxFJB7dtWCkRAaNnF7KiCRkSkhmqWPUmAmUFYPezNawFk6qvz3Mu0gEnfI4g=="],
 
     "lyric-romanizer": ["lyric-romanizer@0.3.1", "", { "dependencies": { "@dehoist/romanize-thai": "^1.0.0", "@indic-transliteration/sanscript": "^1.3.3", "@romanize/korean": "^0.1.3", "@sglkc/kuroshiro": "^1.0.1", "@sglkc/kuroshiro-analyzer-kuromoji": "^1.0.1", "cyrillic-to-translit-js": "^3.2.1", "pinyin-pro": "^3.28.2", "tamil-romanizer": "^1.0.2", "to-jyutping": "^3.1.1", "transliteration": "^2.6.1" } }, "sha512-nyqXJOPftwFZoQM1iCeEaidfEEp2gudsXvXMNIMzWzpa4zFumFHV2blPBPCwgJ8t6/1IUHHkXi/BEjduu5Ra2Q=="],
 

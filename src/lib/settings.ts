@@ -26,6 +26,8 @@ export interface Settings {
 	autoplay: boolean;
 	/** Report played songs (with progress) to the YouTube watch history. */
 	watchHistory: boolean;
+	/** Show extra debug/copy actions in song context menus. */
+	developerMode: boolean;
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
@@ -43,6 +45,7 @@ const DEFAULTS: Settings = {
 	hideTodaysBiggestHits: true,
 	autoplay: true,
 	watchHistory: true,
+	developerMode: false,
 };
 
 export function getSettings(): Settings {

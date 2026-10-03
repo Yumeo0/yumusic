@@ -48,6 +48,7 @@ import { proxiedImageUrl } from "./lib/tauri";
 import {
 	cleanSearchTitle,
 	displayTitle,
+	formatArtistName,
 	formatTitleParts,
 	joinArtists,
 } from "./lib/title";
@@ -131,7 +132,7 @@ function DiscordPresenceSync() {
 		invoke("set_discord_activity", {
 			track: {
 				title,
-				artist,
+				artist: formatArtistName(artist),
 				album: meta?.album?.name ?? null,
 				coverUrl: cover || null,
 				songUrl: `https://music.youtube.com/watch?v=${songId}`,

@@ -1,7 +1,12 @@
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { closeNowPlaying } from "@/lib/player-ui";
-import { joinArtists, useFormatTitle } from "@/lib/title";
+import {
+	formatArtistName,
+	joinArtists,
+	mergeArtistNames,
+	useFormatTitle,
+} from "@/lib/title";
 import { cn } from "@/lib/utils";
 
 interface ArtistLinkProps {
@@ -18,9 +23,10 @@ interface ArtistLinkProps {
  */
 export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 	const navigate = useNavigate();
+	const displayName = formatArtistName(name);
 
 	if (!id) {
-		return <span className={className}>{name}</span>;
+		return <span className={className}>{displayName}</span>;
 	}
 
 	return (
@@ -37,7 +43,7 @@ export function ArtistLink({ id, name, className }: ArtistLinkProps) {
 				navigate(`/artist/${id}`);
 			}}
 		>
-			{name}
+			{displayName}
 		</a>
 	);
 }
@@ -49,8 +55,9 @@ function foldName(name: string): string {
 
 /**
  * Renders every artist of a song as its own clickable link, followed by the
- * "feat. …" credit parsed from the title. Featured names already present in
- * the artist list are skipped so the row never repeats a name.
+ * "feat. …" credit parsed from the title and the cover performers parsed from
+ * a cover credit ("… /Cover A/B"). Featured names already present in the
+ * artist list are skipped so the row never repeats a name.
  */
 export function ArtistLinks({
 	song,
@@ -61,38 +68,43 @@ export function ArtistLinks({
 }) {
 	const formatTitle = useFormatTitle();
 	const list = (song.artists ?? []).filter((a) => a.name);
-	const { feats } = formatTitle(song.title, song.artist);
+	const { feats, coverArtists } = formatTitle(song.title, song.artist);
+	const primaries =
+		list.length > 0 ? list : [{ name: song.artist, id: song.artistId }];
+	// Cover performers lack channel ids, so they render as plain names after
+	// the song's own artists. Cross-script duplicates ("Minato Aqua" /
+	// "湊あくあ") merge to the original-script name; placeholder credits
+	// ("Unknown Artist") step aside when there are real names to show.
+	const covers = coverArtists.filter((name) => name.trim() !== "");
+	const isPlaceholder = (name: string) =>
+		name.trim() === "" || /^unknown artist$/i.test(name.trim());
+	const merged = mergeArtistNames(primaries, covers);
+	const hasRealPrimary = primaries.some((a) => !isPlaceholder(a.name));
+	const artists = hasRealPrimary
+		? merged
+		: merged.filter((a) => !isPlaceholder(a.name));
+	if (artists.length === 0) artists.push({ name: "Unknown Artist" });
 	const known = new Set<string>();
-	for (const name of list.length > 0
-		? list.map((a) => a.name)
-		: [song.artist]) {
-		known.add(foldName(name));
-		for (const part of name.split(/[,，&]/)) known.add(foldName(part));
+	for (const artist of artists) {
+		known.add(foldName(artist.name));
+		for (const part of artist.name.split(/[,，&]/)) known.add(foldName(part));
 	}
 	const extras = feats.filter((feat) => !known.has(foldName(feat)));
 
 	return (
 		<>
-			{list.length === 0 ? (
-				<ArtistLink
-					className={className}
-					id={song.artistId}
-					name={song.artist}
-				/>
-			) : (
-				list.map((a, i) => (
-					<span
-						// biome-ignore lint/suspicious/noArrayIndexKey: artists may repeat names
-						key={`${a.id ?? "na"}-${a.name}-${i}`}
-					>
-						<ArtistLink className={className} id={a.id} name={a.name} />
-						{i < list.length - 1 ? ", " : ""}
-					</span>
-				))
-			)}
+			{artists.map((a, i) => (
+				<span
+					// biome-ignore lint/suspicious/noArrayIndexKey: artists may repeat names
+					key={`${a.id ?? "na"}-${a.name}-${i}`}
+				>
+					<ArtistLink className={className} id={a.id} name={a.name} />
+					{i < artists.length - 1 ? ", " : ""}
+				</span>
+			))}
 			{extras.length > 0 && (
 				<span className="text-muted-foreground/70">
-					{list.length > 0 ? " " : ""}
+					{artists.length > 0 ? " " : ""}
 					feat. {joinArtists(extras)}
 				</span>
 			)}

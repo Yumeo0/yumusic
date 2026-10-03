@@ -34,6 +34,87 @@ function applyMode(main: string, mode: TitleMode): string {
 	return mode === "original" ? split.original : split.translation;
 }
 
+/**
+ * Channel-name form VTubers use, e.g. "Shion Ch. 紫咲シオン": a Latin name
+ * followed by "Ch."/"Channel" and the original-language name.
+ */
+const CHANNEL_NAME = /^(.+?)\s+Ch(?:annel)?(?:\.\s*|\s+)(.+)$/iu;
+
+/**
+ * Keeps only the original-language half of a dual artist name such as
+ * "眠雲ツクリ / NemukumoTsukuri" — YouTube Music appends the romaji reading
+ * after a slash. Also handles the reversed channel-name form
+ * ("Shion Ch. 紫咲シオン" → "紫咲シオン"). Names whose original half is
+ * already Latin, or that have no Latin counterpart, are returned unchanged.
+ */
+export function formatArtistName(name: string): string {
+	const split = splitDualTitle(name);
+	if (split) return split.original;
+	const channel = name.match(CHANNEL_NAME);
+	if (channel) {
+		const prefix = channel[1].trim();
+		const suffix = channel[2].trim();
+		if (LATIN_ONLY.test(prefix) && NON_LATIN.test(suffix)) return suffix;
+		if (NON_LATIN.test(prefix) && LATIN_ONLY.test(suffix)) return prefix;
+	}
+	return name;
+}
+
+/** Case-insensitive comparison key for artist credits. */
+function artistKey(name: string): string {
+	return name.trim().toLowerCase();
+}
+
+/** Whether a name is written entirely in Latin script ("Minato Aqua"). */
+function isLatinName(name: string): boolean {
+	return LATIN_ONLY.test(name) && !NON_LATIN.test(name);
+}
+
+/**
+ * Merges a song's artists with the cover performers parsed from the title.
+ * Names are normalized first ("Shion Ch. 紫咲シオン" → "紫咲シオン"). Entries
+ * at the same position are the same credit when they match case-insensitively
+ * or only differ in script ("Minato Aqua" / "湊あくあ") — the original-script
+ * name then wins and keeps the channel link when there is one. Remaining
+ * covers (e.g. an extra collaborator at another position) are appended unless
+ * an artist already carries that name.
+ */
+export function mergeArtistNames(
+	artists: Array<{ name: string; id?: string }>,
+	covers: string[],
+): Array<{ name: string; id?: string }> {
+	const names = covers.map(formatArtistName);
+	const consumed = names.map(() => false);
+	const merged: Array<{ name: string; id?: string }> = [];
+	for (let i = 0; i < artists.length; i++) {
+		const artist = artists[i];
+		const artistName = formatArtistName(artist.name);
+		const coverName = names[i];
+		if (coverName && artistKey(artistName) === artistKey(coverName)) {
+			consumed[i] = true;
+			merged.push({ name: artistName, id: artist.id });
+			continue;
+		}
+		if (coverName && isLatinName(artistName) !== isLatinName(coverName)) {
+			consumed[i] = true;
+			merged.push(
+				isLatinName(coverName)
+					? { name: artistName, id: artist.id }
+					: { name: coverName, id: artist.id },
+			);
+			continue;
+		}
+		merged.push({ name: artistName, id: artist.id });
+	}
+	const known = new Set(merged.map((a) => artistKey(a.name)));
+	for (let i = 0; i < names.length; i++) {
+		if (consumed[i] || known.has(artistKey(names[i]))) continue;
+		known.add(artistKey(names[i]));
+		merged.push({ name: names[i] });
+	}
+	return merged;
+}
+
 const FEAT_BRACKETED =
 	/\s*[（[(]\s*feat(?:uring)?\.?\s*([^）\])]+)[）\])]\s*$/iu;
 const FEAT_TAIL = /(?<!\p{L})feat(?:uring)?\.?\s*(.+)$/iu;
@@ -70,19 +151,87 @@ export function joinArtists(feats: string[]): string {
 	return `${feats.slice(0, -1).join(", ")} & ${feats[feats.length - 1]}`;
 }
 
+const BRACKET_OPEN = String.raw`[(（【\[]`;
+const BRACKET_CLOSE = String.raw`[)）】\]]`;
+const COVER_MARKER =
+	BRACKET_OPEN +
+	String.raw`\s*(?:\w+\s+)?cover(?:ed)?(?:\s+(?:by\s+.{1,60}?|version|ver\.?))?` +
+	BRACKET_CLOSE;
+
+/** Splits a cover-credit artist list on slashes, commas and ampersands. */
+function splitCoverArtists(raw: string): string[] {
+	return raw
+		.split(/\s*[，,、]\s*|\s*[/／]\s*|\s*＆\s*|\s+&\s+|\s*[×✕]\s*/u)
+		.map((name) => name.trim())
+		.filter((name) => name !== "" && name.length <= 60);
+}
+
+/** Patterns whose capture is the performer list of a cover credit. */
+const COVER_CREDIT_PATTERNS: RegExp[] = [
+	// "(covered by X)" / "【cover by X】"
+	/[(（【[]\s*cover(?:ed)?\s+by\s+([^)）】\]]{1,80}?)\s*[)）】\]]/iu,
+	// "covered by X" tail, up to a trailing tag bracket
+	/(?<![\p{L}(（【[])\s*cover(?:ed)?\s+by\s*([^【[]+).*$/iu,
+	// "… /Cover <artist list>" tail
+	/\s*[/／]\s*cover(?:ed)?\s+(?!by\b)([^【[]+).*$/iu,
+	// "<song> <A×B>(cover)" — performers before the cover marker
+	new RegExp(
+		String.raw`^\s*.+?\s+([^\s(（【[\]×✕]+(?:\s*[×✕]\s*[^\s(（【[\]×✕]+)+)\s*` +
+			COVER_MARKER +
+			String.raw`\s*$`,
+		"iu",
+	),
+];
+
+/**
+ * Trailing tag bracket holding a performer list, e.g. "【神楽めあ× 湊あくあ】"
+ * — cover videos credit the singers there after the title.
+ */
+const TRAILING_TAG_LIST =
+	/\s*[【『「《〈≪]\s*([^【『「《〈≪】』」》〉≫]+?)\s*[】』」》〉≫]\s*$/u;
+
+/**
+ * Pulls the performer names out of a cover credit — "covered by A & B",
+ * "(cover by A)", "… /Cover A/B", "…【A×B】" — so the artist row can list
+ * them. Requiring two names in a trailing bracket keeps single channel/group
+ * tags ("【FUWAMOCO】") out.
+ */
+function extractCoverArtists(title: string): string[] {
+	for (const pattern of COVER_CREDIT_PATTERNS) {
+		const match = title.match(pattern);
+		if (!match) continue;
+		const artists = splitCoverArtists(match[1]);
+		if (artists.length > 0) return artists;
+	}
+	const list = title.match(TRAILING_TAG_LIST);
+	if (list) {
+		const artists = splitCoverArtists(list[1]);
+		if (artists.length >= 2) return artists;
+	}
+	return [];
+}
+
 /**
  * Full title pipeline: credit extraction → noise cleanup → artist-prefix
  * strip → feat-tail extraction → dual-title mode. Returns the display main
- * title, featured artists (styled separately) and credit pills.
+ * title, featured artists (styled separately), credit pills and the cover
+ * performers parsed from the title.
  */
 export function formatTitleParts(
 	title: string,
 	mode: TitleMode,
 	clean = false,
 	artist?: string,
-): { main: string; feats: string[]; credits: TitleCredit[] } {
+): {
+	main: string;
+	feats: string[];
+	credits: TitleCredit[];
+	coverArtists: string[];
+} {
 	let credits: TitleCredit[] = [];
+	let coverArtists: string[] = [];
 	if (clean) {
+		coverArtists = extractCoverArtists(title);
 		const extracted = extractCredits(title);
 		credits = extracted.credits;
 		title = extracted.title;
@@ -91,7 +240,7 @@ export function formatTitleParts(
 		title = stripArtistSuffix(title, artist);
 	}
 	const { main, feats } = splitFeaturedTitle(title);
-	return { main: applyMode(main, mode), feats, credits };
+	return { main: applyMode(main, mode), feats, credits, coverArtists };
 }
 
 /** Single-string variant (e.g. Discord presence); feat tail stays inline. */
@@ -230,12 +379,9 @@ export function stripArtistSuffix(title: string, artist?: string): string {
  */
 type NoiseRule = RegExp | { pattern: RegExp; replacement: string };
 
-const BRACKET_OPEN = String.raw`[(（【\[]`;
-const BRACKET_CLOSE = String.raw`[)）】\]]`;
-const COVER_MARKER =
-	BRACKET_OPEN +
-	String.raw`\s*(?:\w+\s+)?cover(?:ed)?(?:\s+(?:by\s+.{1,60}?|version|ver\.?))?` +
-	BRACKET_CLOSE;
+/** Bare "歌ってみた" marker, optionally carrying a "Ver.<performer>" credit. */
+const BARE_COVER_MARKER =
+	/\s*[歌弾踊叩]ってみた(?:\s*ver(?:sion)?\.?\s*\S{1,60})?\s*$/iu;
 
 const TITLE_NOISE: NoiseRule[] = [
 	// "美人局 (covered by 藍月なくる)" → "美人局" (also full-width brackets)
@@ -252,6 +398,14 @@ const TITLE_NOISE: NoiseRule[] = [
 	// Opening brackets are left to the rule above; a preceding letter (e.g.
 	// "undercover") blocks the match.
 	/(?<![\p{L}(（【[])\s*cover(?:ed)?\s+by.*$/iu,
+	// "メンヘラじゃないもん！ /Cover 湊あくあ/紫咲シオン【ホロライブ】" →
+	// "メンヘラじゃないもん！" — a slash-attached "Cover <artist list>" tail
+	// (the "covered by …" form is owned by the rule above).
+	/\s*[/／]\s*cover(?:ed)?\s+(?!by\b).*$/iu,
+	// "「クノイチでも恋がしたい」歌ってみた" / "夜撫でるメノウ　歌ってみた
+	// Ver.湊あくあ" → song only; an optional "Ver.<performer>" credit goes
+	// with the marker.
+	BARE_COVER_MARKER,
 	// "Invincible Rainbow Arrow (English Cover) ／ver. …" →
 	// "Invincible Rainbow Arrow ／ver. …" — language-cover markers are noise
 	// wherever they appear, not just at the end.
@@ -288,6 +442,19 @@ const TITLE_NOISE: NoiseRule[] = [
 		),
 		replacement: "$1",
 	},
+	// "ダーリンダンス 湊あくあ×猫又おかゆ(cover)" → "ダーリンダンス" —
+	// a space-separated "A×B" performer list right before the cover marker.
+	{
+		pattern: new RegExp(
+			String.raw`^(.{1,80}?)\s+` +
+				String.raw`[^\s(（【[\]×✕]+(?:\s*[×✕]\s*[^\s(（【[\]×✕]+)+` +
+				String.raw`\s*` +
+				COVER_MARKER +
+				String.raw`\s*$`,
+			"iu",
+		),
+		replacement: "$1",
+	},
 	// "Night Dancer (cover)" → "Night Dancer"
 	new RegExp(
 		String.raw`\s*` +
@@ -312,11 +479,19 @@ const TITLE_NOISE: NoiseRule[] = [
 ];
 
 /**
+ * Cover-credit evidence ("歌ってみた", a cover word, "カバー") — when the
+ * video is a cover, leading flavor brackets like "【可愛く】" are video tags
+ * rather than part of the song title, so they can be stripped.
+ */
+const COVER_CONTEXT = /[歌弾踊叩]ってみた|\bcover(?:ed|s)?\b|カバー/iu;
+
+/**
  * Strips known noise from the end of a title; never empties it. The rules
  * are applied to a fixpoint so patterns revealed by an earlier peel (e.g.
  * "(Cover)" after a trailing 【channel】 bracket) are also removed.
  */
 export function cleanUpTitle(title: string): string {
+	const coverContext = COVER_CONTEXT.test(title);
 	let out = title;
 	for (;;) {
 		const before = out;
@@ -326,7 +501,7 @@ export function cleanUpTitle(title: string): string {
 					? out.replace(rule.pattern, rule.replacement)
 					: out.replace(rule, "");
 		}
-		out = stripDecorations(out);
+		out = stripDecorations(out, coverContext);
 		out = stripCreditTail(out);
 		if (out === before) break;
 	}
@@ -415,7 +590,7 @@ const SOLE_TAG_BRACKET = new RegExp(
 // "MV", "Music Video", … — only after a boundary so "ЯMV" survives.
 const VIDEO_MARKER_TAIL =
 	/(?<=[\s)）\]】』〉」\-–—/|｜·・]|^)\s*(?:M\/V|MV|Music\s+Video|Official\s+(?:Music\s+)?Video)\s*$/i;
-const SEPARATOR_TAIL = /\s*[-–—/|｜·・]\s*$/;
+const SEPARATOR_TAIL = /\s*[-–—/|｜·・／]\s*$/;
 
 /** Leading decorative tag brackets carrying video/cover keywords. */
 const LEADING_TAG_BRACKET =
@@ -444,24 +619,34 @@ function isQualifierRun(content: string): boolean {
  * "失楽園 - Paradise Lost -『 失楽園 』MV【 #VocaDuo2026 】" →
  * "失楽園 - Paradise Lost". Strips hashtags, video markers and decorative
  * bracket pairs, then dangling separators. Also drops leading tag brackets
- * ("【MV】怪物…" → "怪物…") and trailing qualifier groups
+ * ("【MV】怪物…" → "怪物…" and, for cover videos, flavor tags like
+ * "【可愛く】") and trailing qualifier groups
  * ("Idols (EDM Mashup) (Official Video)" → "Idols",
  * "G4L - English Cover" → "G4L").
  */
-function stripDecorations(title: string): string {
-	// A sole bracket pair wraps the song title ("【チューリングラブ// Turing
-	// Love】") rather than tagging it, so unwrap it instead of dropping it.
-	const sole = title.match(SOLE_TAG_BRACKET);
-	if (sole?.[1].trim() && !LEADING_TAG_KEYWORD.test(sole[1])) {
-		title = sole[1].trim();
-	}
+/** Unwraps "【song】"/"「song」" when the pair wraps the whole title. */
+function unwrapSoleBracket(text: string): string {
+	const sole = text.match(SOLE_TAG_BRACKET);
+	return sole?.[1].trim() && !LEADING_TAG_KEYWORD.test(sole[1])
+		? sole[1].trim()
+		: text;
+}
+
+function stripDecorations(title: string, coverContext = false): string {
 	let out = title.replace(HASHTAG_TAIL, "");
 	for (;;) {
-		const next = out
-			.replace(VIDEO_MARKER_TAIL, "")
-			.replace(TAG_TAIL, "")
+		out = unwrapSoleBracket(out);
+		const next = unwrapSoleBracket(
+			out
+				.replace(VIDEO_MARKER_TAIL, "")
+				.replace(TAG_TAIL, "")
+				// Peel a bare marker here too: it can hide behind a trailing
+				// bracket ("…「song」歌ってみた【cast】") and must be gone before
+				// the wrapping bracket is judged as decoration.
+				.replace(BARE_COVER_MARKER, ""),
+		)
 			.replace(LEADING_TAG_BRACKET, (match, _open, content: string) =>
-				LEADING_TAG_KEYWORD.test(content) ? "" : match,
+				LEADING_TAG_KEYWORD.test(content) || coverContext ? "" : match,
 			)
 			.replace(QUALIFIER_PAREN_TAIL, (match, content: string) =>
 				isQualifierRun(content) ? "" : match,
@@ -494,6 +679,7 @@ export function useFormatTitle(): (
 	main: string;
 	feats: string[];
 	credits: TitleCredit[];
+	coverArtists: string[];
 } {
 	const [settings] = useSettings();
 	return useCallback(

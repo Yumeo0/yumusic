@@ -9,6 +9,7 @@ import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { useSettings } from "@/lib/settings";
 import { proxiedImageUrl } from "@/lib/tauri";
+import { formatArtistName } from "@/lib/title";
 import { cn, hiResThumb } from "@/lib/utils";
 import {
 	artistIdOf,
@@ -187,7 +188,7 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 		item.kind === "song"
 			? item.song.title
 			: item.kind === "artist"
-				? item.name
+				? formatArtistName(item.name)
 				: item.title;
 	const subtitle = item.kind === "song" ? item.song.artist : item.subtitle;
 	const thumbnail = item.kind === "song" ? item.song.thumbnail : item.thumbnail;
