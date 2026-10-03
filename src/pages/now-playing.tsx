@@ -271,7 +271,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 
 					{/* Up next — the next card plus ~3 more tucked underneath it,
 					    slid out on hover. Desktop only (phones use the sheet). */}
-					<div className="mx-auto mt-4 w-full max-w-xl shrink-0 max-lg:hidden">
+					<div className="mx-auto mt-4 w-full max-w-xl shrink-0 max-md:hidden">
 						<div className="mb-1.5 flex items-baseline justify-between">
 							<p className="text-xs font-medium text-muted-foreground">
 								Up next
@@ -712,9 +712,31 @@ function TransportRow({
 	onToggleLyrics: () => void;
 	showLyrics: boolean;
 }) {
+	// Width the row needs before the volume slider may expand sideways: the
+	// transport (176px) plus the expanded volume control (124px) on both
+	// sides. Narrower rows get the vertical popover instead.
+	const rowRef = useRef<HTMLDivElement>(null);
+	const [narrow, setNarrow] = useState(false);
+	useLayoutEffect(() => {
+		const row = rowRef.current;
+		if (!row) return;
+		const update = () => setNarrow(row.clientWidth < 440);
+		update();
+		if (typeof ResizeObserver === "undefined") {
+			window.addEventListener("resize", update);
+			return () => window.removeEventListener("resize", update);
+		}
+		const observer = new ResizeObserver(update);
+		observer.observe(row);
+		return () => observer.disconnect();
+	}, []);
+
 	return (
-		<div className="relative flex w-full max-w-md items-center justify-center">
-			<div className="flex items-center gap-4">
+		<div
+			className="grid w-full max-w-md grid-cols-[1fr_auto_1fr] items-center"
+			ref={rowRef}
+		>
+			<div className="col-start-2 row-start-1 flex items-center gap-4">
 				<button
 					aria-label="Previous"
 					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
@@ -752,14 +774,14 @@ function TransportRow({
 					<SkipForward className="size-5.5 fill-current" />
 				</button>
 			</div>
-			{/* Lyrics toggle — mobile only, mirrors the desktop volume's
-			    anchored position so the transport stays centered. It shrinks
-			    out through the left edge (motion, no fade) while the player
-			    minimizes so it never lands on the mini player's controls. */}
+			{/* Lyrics toggle — mobile layout only, anchored to the row's left
+			    edge so the transport stays centered. It shrinks out through
+			    the left edge (motion, no fade) while the player minimizes so
+			    it never lands on the mini player's controls. */}
 			<button
 				aria-label="Toggle lyrics"
 				className={cn(
-					"np-morph absolute top-1/2 left-0 grid size-11 -translate-y-1/2 place-items-center rounded-full transition-colors duration-200 md:hidden",
+					"np-morph col-start-1 row-start-1 grid size-11 place-items-center justify-self-start rounded-full transition-colors duration-200 md:hidden",
 					showLyrics
 						? "bg-primary/15 text-primary"
 						: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -775,11 +797,16 @@ function TransportRow({
 			>
 				<MicVocal className="size-5" />
 			</button>
-			{/* Volume — expands leftward on hover, anchored to the right edge.
-			    Hidden on touch devices: the hardware volume keys apply. */}
+			{/* Volume — expands leftward on hover, anchored to the row's right
+			    edge. Its own grid track keeps the slider from ever clipping
+			    the transport; when the row is too narrow for that, it pops up
+			    vertically over a backdrop instead. Hidden on touch devices,
+			    where the hardware volume keys apply, but shown on narrow
+			    desktop windows too. */}
 			<VolumeControl
-				className="absolute top-1/2 right-0 -translate-y-1/2 max-md:hidden"
+				className="col-start-3 row-start-1 justify-self-end pointer-coarse:hidden"
 				reverse
+				vertical={narrow}
 			/>
 		</div>
 	);

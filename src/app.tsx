@@ -45,7 +45,7 @@ import {
 	useQueueOpen,
 } from "./lib/player-ui";
 import { useSettings } from "./lib/settings";
-import { proxiedImageUrl } from "./lib/tauri";
+import { IS_MOBILE, proxiedImageUrl } from "./lib/tauri";
 import {
 	cleanSearchTitle,
 	displayTitle,
@@ -456,7 +456,12 @@ function AppShell({
 			<ListenBrainzSync />
 			<UpdateNotifier />
 			<Titlebar />
-			<div className="flex max-md:h-app bg-background text-foreground md:h-[calc(100vh-2.25rem)] overflow-hidden">
+			<div
+				className={cn(
+					"flex overflow-hidden bg-background text-foreground",
+					IS_MOBILE ? "h-app" : "h-[calc(100vh-2.25rem)]",
+				)}
+			>
 				{/* ── Sidebar (desktop) ───────────────────────── */}
 				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div
@@ -606,7 +611,7 @@ function MobileNav() {
 
 	return (
 		<nav
-			className="fixed inset-x-0 bottom-0 z-45 flex min-h-13 items-stretch border-t pt-4 border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
+			className="fixed inset-x-0 bottom-0 z-45 flex min-h-[calc(3.75rem+var(--safe-area-bottom))] items-stretch border-t border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
 			data-mobile-nav
 		>
 			<MobileNavItem

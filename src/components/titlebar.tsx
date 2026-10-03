@@ -1,6 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { IS_MOBILE } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 
 const appWindow = getCurrentWindow();
@@ -30,9 +31,12 @@ export function Titlebar() {
 		};
 	}, []);
 
+	// Mobile platforms keep their system window chrome.
+	if (IS_MOBILE) return null;
+
 	return (
 		<div
-			className="relative z-[70] hidden h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none md:flex"
+			className="relative z-[70] flex h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none"
 			data-tauri-drag-region
 		>
 			<div className="pointer-events-none flex items-center gap-2 pl-1">

@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { platform } from "@tauri-apps/plugin-os";
 
 window.electron = {
 	login: () => invoke<string | null>("login"),
@@ -6,15 +7,20 @@ window.electron = {
 	logout: () => invoke<boolean>("logout"),
 };
 
-function proxyOrigin(): string {
-	const userAgent = navigator.userAgent;
-	if (userAgent.includes("Windows") || userAgent.includes("Android")) {
-		return "http://proxy.localhost";
-	}
-	return "proxy://localhost";
-}
+/** The running OS, or null outside a Tauri window (plain browser dev). */
+const OS = isTauri() ? platform() : null;
 
-export const PROXY_ORIGIN = proxyOrigin();
+export const PROXY_ORIGIN =
+	OS === "windows" || OS === "android"
+		? "http://proxy.localhost"
+		: "proxy://localhost";
+
+/**
+ * Mobile targets (Android/iOS) keep the system window chrome and have no
+ * draggable desktop window, so the custom titlebar and its window controls
+ * are omitted there.
+ */
+export const IS_MOBILE = OS === "android" || OS === "ios";
 
 /**
  * Android WebView's `shouldInterceptRequest` does not expose request bodies
@@ -22,7 +28,7 @@ export const PROXY_ORIGIN = proxyOrigin();
  * proxy on Android. The frontend compensates by base64-encoding the body
  * into the X-Proxy-Body header, which the proxy decodes server-side.
  */
-export const NEEDS_BODY_HEADER = navigator.userAgent.includes("Android");
+export const NEEDS_BODY_HEADER = OS === "android";
 
 /**
  * Rewrites a remote image URL to load through the app's Tauri proxy. The

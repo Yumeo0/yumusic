@@ -1,6 +1,7 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
+import { IS_MOBILE } from "./tauri";
 
 /**
  * Whether the in-app updater can run here. It is a desktop-only plugin: on
@@ -8,7 +9,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
  * store or the browser, so the UI is hidden there.
  */
 export function updaterSupported(): boolean {
-	return isTauri() && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+	return isTauri() && !IS_MOBILE;
 }
 
 /** Checks the configured endpoints for a release newer than this build. */

@@ -148,7 +148,9 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-	let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+	let builder = tauri::Builder::default()
+		.plugin(tauri_plugin_opener::init())
+		.plugin(tauri_plugin_os::init());
 
 	// Self-updating is desktop-only (the plugins don't target Android/iOS).
 	#[cfg(desktop)]

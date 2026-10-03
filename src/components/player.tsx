@@ -49,7 +49,7 @@ export function Player() {
 
 	return (
 		<footer
-			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.25rem+var(--safe-area-bottom))] max-md:pb-1.5 cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
+			className="fixed inset-x-0 bottom-0 z-40 max-md:bottom-[calc(3.75rem+var(--safe-area-bottom))] max-md:pb-1.5 cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			data-mini-player
 			onClick={toggleNowPlaying}
 			{...swipeHandlers}
