@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { type DragEvent, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { UpdatesSection } from "@/components/updates";
 import { validateListenbrainzToken } from "@/lib/listenbrainz";
 import {
 	LYRICS_KIND_LABELS,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/lyrics-providers";
 import { useSettings } from "@/lib/settings";
 import { proxiedImageUrl } from "@/lib/tauri";
+import { updaterSupported } from "@/lib/updater";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
@@ -682,6 +684,9 @@ export default function SettingsPage({
 					</div>
 				</div>
 			</section>
+
+			{/* Updates (desktop only — the plugin doesn't exist on mobile) */}
+			{updaterSupported() && <UpdatesSection />}
 
 			{/* Developer */}
 			<section className="mt-10">

@@ -8,6 +8,7 @@
 	"scripts": {
 		"dev": "vite",
 		"android": "bun scripts/android-dev.ts",
+		"release": "bun scripts/release.ts",
 		"build": "tsc --noEmit && vite build",
 		"preview": "vite preview",
 		"tauri": "tauri",
@@ -19,6 +20,8 @@
 		"@tanstack/react-virtual": "^3.14.13",
 		"@tauri-apps/api": "^2.12.1",
 		"@tauri-apps/plugin-opener": "^2.7.0",
+		"@tauri-apps/plugin-process": "^2.4.0",
+		"@tauri-apps/plugin-updater": "^2.13.1",
 		"bgutils-js": "^4.0.3",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",

@@ -1,0 +1,136 @@
+name: Build and Release
+
+# Tag a release with `git tag vX.Y.Z && git push origin vX.Y.Z` to build the
+# desktop bundles, sign them for the Tauri updater and publish them to a
+# Forgejo release. The rolling `latest` release carries the latest.json the
+# app polls for self-updates.
+#
+# Required repository secret:
+#   TAURI_SIGNING_PRIVATE_KEY  content of the private updater key
+# Generate a keypair with `bunx tauri signer generate -w ~/.tauri/yumusic.key`
+# and put its public key into `plugins.updater.pubkey` in tauri.conf.json.
+# The key used here has no password. If you regenerate it with one, add a
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret and pass it to the build step.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  FORGEJO: https://git.yumeo.dev
+  REPOSITORY: Yumeo/YuMusic
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+            bundles: deb,rpm,appimage
+          - os: windows-latest
+            target: windows-x86_64
+            bundles: nsis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential curl file libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
+            patchelf wget
+
+      - name: Set up Rust
+        shell: bash
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Stamp release version
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          export VERSION
+          bun -e "import { readFileSync, writeFileSync } from 'node:fs';
+            for (const file of ['package.json', 'src-tauri/tauri.conf.json']) {
+              const json = JSON.parse(readFileSync(file, 'utf8'));
+              json.version = process.env.VERSION;
+              writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+            }"
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          echo "Building YuMusic $VERSION"
+
+      - name: Build bundles
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: bunx tauri build --bundles ${{ matrix.bundles }}
+
+      - name: Publish release assets
+        shell: bash
+        env:
+          FORGEJO_URL: ${{ env.FORGEJO }}
+          FORGEJO_REPOSITORY: ${{ env.REPOSITORY }}
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE_DIR: src-tauri/target/release/bundle
+        run: |
+          export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          export RELEASE_VERSION="${RELEASE_TAG#v}"
+          bun scripts/forgejo-release.ts publish
+
+  # Merges every platform's updater entry into the rolling `latest` release.
+  # Runs after all builds so the manifest is complete.
+  manifest:
+    name: Publish updater manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Update latest.json
+        env:
+          FORGEJO_URL: ${{ env.FORGEJO }}
+          FORGEJO_REPOSITORY: ${{ env.REPOSITORY }}
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          export RELEASE_VERSION="${RELEASE_TAG#v}"
+          bun scripts/forgejo-release.ts latest

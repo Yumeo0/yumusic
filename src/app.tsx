@@ -22,6 +22,7 @@ import { Player } from "./components/player";
 import { QueuePanel } from "./components/queue-panel";
 import { Titlebar } from "./components/titlebar";
 import { Toaster } from "./components/toaster";
+import { UpdateNotifier } from "./components/updates";
 import { UserMenu } from "./components/user-menu";
 import {
 	PlayerProvider,
@@ -453,6 +454,7 @@ function AppShell({
 			<AmbientSync />
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
+			<UpdateNotifier />
 			<Titlebar />
 			<div className="flex max-md:h-app bg-background text-foreground md:h-[calc(100vh-2.25rem)] overflow-hidden">
 				{/* ── Sidebar (desktop) ───────────────────────── */}

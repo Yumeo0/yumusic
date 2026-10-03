@@ -28,6 +28,7 @@
 	"bundle": {
 		"active": true,
 		"targets": "all",
+		"createUpdaterArtifacts": true,
 		"icon": [
 			"icons/32x32.png",
 			"icons/128x128.png",
@@ -37,6 +38,14 @@
 		],
 		"android": {
 			"debugApplicationIdSuffix": ".debug"
+		}
+	},
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEVDODEwODgwRkI4NjM0MzEKUldReE5JYjdnQWlCN0FuRzcvemJMdWlDV2xxNXFWMUsrSjJoS0o0eXlkTFg1NnMwTjViZWVwUVYK",
+			"endpoints": [
+				"https://git.yumeo.dev/Yumeo/YuMusic/releases/download/latest/latest.json"
+			]
 		}
 	}
 }
