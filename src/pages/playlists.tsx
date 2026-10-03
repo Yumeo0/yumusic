@@ -38,13 +38,7 @@ import { proxiedImageUrl } from "@/lib/tauri";
 import { useDisplayTitle } from "@/lib/title";
 import { showToast } from "@/lib/toast";
 import { cn, hiResThumb, parseDuration } from "@/lib/utils";
-import {
-	artistIdOf,
-	artistListOf,
-	artistNames,
-	isAlbumId,
-	videoIdOf,
-} from "../lib/youtube.utils";
+import { artistListOf, isAlbumId, videoIdOf } from "../lib/youtube.utils";
 import {
 	type Album,
 	getAlbum,
@@ -56,16 +50,40 @@ import {
 	removeSongFromPlaylist,
 } from "../lib/youtube-client";
 
-function toSong(item: YTNodes.MusicResponsiveListItem): Song {
+/** Whether parsed credits name a real artist, not the unknown placeholder. */
+function hasArtistCredit(artists: Array<{ name: string }>): boolean {
+	return artists.some((artist) => {
+		const name = artist.name?.trim();
+		return !!name && !/^unknown artist$/i.test(name);
+	});
+}
+
+/** Header-level info used for rows that carry no per-track credit or art. */
+interface RowFallback {
+	artists?: Array<{ name: string; id?: string }>;
+	thumbnail?: string | null;
+}
+
+/**
+ * Album rows usually omit both the artist and the artwork (the header holds
+ * them), so album pages pass those down as a fallback for rows without them.
+ */
+function toSong(
+	item: YTNodes.MusicResponsiveListItem,
+	fallback?: RowFallback,
+): Song {
+	const artists = artistListOf(item);
+	const credit =
+		fallback?.artists && !hasArtistCredit(artists) ? fallback.artists : artists;
+	const rowThumb =
+		item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url;
 	return {
 		id: videoIdOf(item),
 		title: item.title ?? "Unknown Title",
-		artist: artistNames(item),
-		artistId: artistIdOf(item),
-		artists: artistListOf(item),
-		thumbnail: hiResThumb(
-			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url,
-		),
+		artist: credit.map((artist) => artist.name).join(", "),
+		artistId: credit.find((artist) => artist.id)?.id,
+		artists: credit,
+		thumbnail: hiResThumb(rowThumb) || fallback?.thumbnail || "",
 		duration: item.duration?.text,
 	};
 }
@@ -76,11 +94,12 @@ function collectSongs(
 		| YTNodes.MusicTwoRowItem
 		| YTNodes.ContinuationItem
 	>,
+	fallback?: RowFallback,
 ): Song[] {
 	const songs: Song[] = [];
 	for (const item of items) {
 		if (item.is(YTNodes.MusicResponsiveListItem)) {
-			const song = toSong(item);
+			const song = toSong(item, fallback);
 			if (song.id) songs.push(song);
 		}
 	}
@@ -93,14 +112,51 @@ function cleanSubtitle(text: string): string {
 }
 
 /**
- * Title, subtitle and cover for a playlist or album header. Editable playlist
- * pages wrap their real header one level deep, and albums use a different
- * header class than playlists.
+ * Artist credits stored on the header. Album track rows omit the artist, so
+ * it must be read from the album header instead: the strapline on the current
+ * layout ("Nakuru Aitsuki"), the author on older responses.
+ */
+function headerArtists(
+	header: YTNodes.MusicResponsiveHeader | YTNodes.MusicDetailHeader,
+): Array<{ name: string; id?: string }> {
+	if (header instanceof YTNodes.MusicDetailHeader) {
+		const author = header.author;
+		return author?.name
+			? [
+					{
+						name: author.name,
+						id: author.channel_id?.startsWith("UC")
+							? author.channel_id
+							: undefined,
+					},
+				]
+			: [];
+	}
+	const artists: Array<{ name: string; id?: string }> = [];
+	for (const run of header.strapline_text_one?.runs ?? []) {
+		const name = run.text?.trim();
+		if (!name || /^[\s,、&/•·]+$/.test(name)) continue;
+		if (artists.some((artist) => artist.name === name)) continue;
+		const browseId = (run as { endpoint?: { payload?: { browseId?: string } } })
+			.endpoint?.payload?.browseId;
+		artists.push({
+			name,
+			id: browseId?.startsWith("UC") ? browseId : undefined,
+		});
+	}
+	return artists;
+}
+
+/**
+ * Title, subtitle, cover and header-level artists for a playlist or album.
+ * Editable playlist pages wrap their real header one level deep, and albums
+ * use a different header class than playlists.
  */
 function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 	title: string;
 	subtitle: string;
 	thumbnail: string | null;
+	artists: Array<{ name: string; id?: string }>;
 } {
 	const header =
 		raw instanceof YTNodes.MusicEditablePlaylistDetailHeader ? raw.header : raw;
@@ -110,6 +166,7 @@ function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 			title: header.title?.text || "Playlist",
 			subtitle: header.subtitle?.text || "",
 			thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+			artists: headerArtists(header),
 		};
 	}
 	if (header instanceof YTNodes.MusicDetailHeader) {
@@ -119,9 +176,10 @@ function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 			thumbnail: hiResThumb(
 				header.thumbnails?.[header.thumbnails.length - 1]?.url || null,
 			),
+			artists: headerArtists(header),
 		};
 	}
-	return { title: "Playlist", subtitle: "", thumbnail: null };
+	return { title: "Playlist", subtitle: "", thumbnail: null, artists: [] };
 }
 
 /**
@@ -206,11 +264,15 @@ export function PlaylistDetails() {
 
 			const header = collectionHeader(data.header);
 			const items = "items" in data ? (data.items ?? []) : data.contents;
+			const rowFallback: RowFallback = {
+				artists: albumMode ? header.artists : undefined,
+				thumbnail: header.thumbnail,
+			};
 			const view: PlaylistView = {
 				title: header.title,
 				subtitle: cleanSubtitle(header.subtitle),
 				thumbnail: header.thumbnail,
-				songs: collectSongs(items),
+				songs: collectSongs(items, rowFallback),
 				complete: !("has_continuation" in data && data.has_continuation),
 				editable: !albumMode && isEditablePlaylist(data),
 			};
@@ -226,7 +288,10 @@ export function PlaylistDetails() {
 					const continuation = await loadPlaylistContinuation(current);
 					if (!continuation) break;
 					current = continuation;
-					view.songs = [...view.songs, ...collectSongs(current.items ?? [])];
+					view.songs = [
+						...view.songs,
+						...collectSongs(current.items ?? [], rowFallback),
+					];
 					setPlaylist({ ...view, songs: [...view.songs] });
 				}
 				view.complete = !current.has_continuation;

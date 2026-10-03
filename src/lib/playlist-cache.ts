@@ -10,9 +10,10 @@ export const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // localized (e.g. Japanese) auto-playlist name.
 export const LIBRARY_CACHE_KEY = "yumusic:library:v6";
 
+// v9: album tracks inherit the header artist (v8 cached "Unknown Artist");
 // v8: cached playlists carry a reliable editable flag so own playlists offer
 // "Remove from playlist" (v7 could cache a false negative).
-export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v8:";
+export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v9:";
 
 /** Plain-data snapshot of a playlist (JSON-safe for persistence). */
 export interface PlaylistView {
