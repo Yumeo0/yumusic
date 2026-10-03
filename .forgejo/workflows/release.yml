@@ -138,6 +138,12 @@ jobs:
           sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
           echo "Building YuMusic $VERSION"
 
+      # The Cargo cache restores earlier runs' bundle directories; drop them so
+      # only this release's artifacts are uploaded.
+      - name: Clean cached bundles
+        shell: bash
+        run: rm -rf "${{ matrix.bundle-dir }}"
+
       # XWIN_CROSS_COMPILER: the Windows build uses cargo-xwin's clang
       # backend, whose sysroot is a GitHub release asset. The default clang-cl
       # backend downloads the MSVC CRT/SDK from download.visualstudio.microsoft.com,

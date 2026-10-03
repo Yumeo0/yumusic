@@ -197,14 +197,26 @@ function pickArtifact(signatures: string[]): string {
 	return signatures[0];
 }
 
-async function signedArtifacts(bundleDir: string): Promise<string[]> {
+/**
+ * The signed artifacts of this release. The Cargo cache restores earlier
+ * runs' bundle directories, so artifacts from previous versions are filtered
+ * out by filename — otherwise an old installer could be picked for the
+ * updater manifest (and re-published on every run).
+ */
+async function signedArtifacts(
+	bundleDir: string,
+	releaseVersion: string,
+): Promise<string[]> {
 	const glob = new Glob("**/*.sig");
 	const signatures: string[] = [];
 	for await (const file of glob.scan({ cwd: bundleDir, absolute: true })) {
 		signatures.push(file);
 	}
+	const escaped = releaseVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const versioned = new RegExp(`[_-]${escaped}[_.-]`);
 	return signatures
 		.map((file) => file.slice(0, -4))
+		.filter((file) => versioned.test(basename(file)))
 		.sort((a, b) => a.localeCompare(b));
 }
 
@@ -216,9 +228,11 @@ async function publish() {
 		process.env.RELEASE_NOTES ?? releaseNotes(),
 	);
 	const target = process.env.UPDATER_TARGET ?? updaterTarget();
-	const artifacts = await signedArtifacts(bundleDir);
+	const artifacts = await signedArtifacts(bundleDir, version);
 	if (artifacts.length === 0) {
-		throw new Error(`No signed updater artifacts found in ${bundleDir}`);
+		throw new Error(
+			`No signed ${version} updater artifacts found in ${bundleDir}`,
+		);
 	}
 
 	for (const artifact of artifacts) {
