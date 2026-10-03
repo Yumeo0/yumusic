@@ -164,6 +164,20 @@ describe("artist name romaji tails", () => {
 		expect(formatArtistName("紫咲シオン Ch. Shion")).toBe("紫咲シオン");
 	});
 
+	test("channel aliases and group suffixes are dropped", () => {
+		expect(formatArtistName("カグラナナchannel／ななかぐら")).toBe(
+			"カグラナナ",
+		);
+		expect(formatArtistName("カグラナナchannel")).toBe("カグラナナ");
+		expect(formatArtistName("Kanade Ch. 音乃瀬奏 ‐ ReGLOSS")).toBe("音乃瀬奏");
+		expect(
+			mergeArtistNames(
+				[{ name: "Kanade Ch. 音乃瀬奏 ‐ ReGLOSS", id: "UC1" }],
+				["音乃瀬奏"],
+			),
+		).toEqual([{ name: "音乃瀬奏", id: "UC1" }]);
+	});
+
 	test("single-language and Latin-first names are kept", () => {
 		expect(formatArtistName("米津玄師")).toBe("米津玄師");
 		expect(formatArtistName("Ado")).toBe("Ado");

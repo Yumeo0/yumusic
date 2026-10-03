@@ -14,11 +14,14 @@ const LATIN_ONLY = /^[\p{Script=Latin}\p{M}\p{N}\p{P}\p{S}\s]+$/u;
 export function splitDualTitle(
 	title: string,
 ): { original: string; translation: string } | null {
+	// Typographic hyphens (U+2010–U+2015) are folded to the ASCII " - " form
+	// YouTube uses, so "音乃瀬奏 ‐ ReGLOSS" splits like "Name - Reading".
+	const normalized = title.replace(/\s[\u2010-\u2015]\s/gu, " - ");
 	for (const separator of [" - ", " / ", "／", "//"]) {
-		const idx = title.lastIndexOf(separator);
-		if (idx <= 0 || idx >= title.length - separator.length) continue;
-		const left = title.slice(0, idx).trim();
-		const right = title.slice(idx + separator.length).trim();
+		const idx = normalized.lastIndexOf(separator);
+		if (idx <= 0 || idx >= normalized.length - separator.length) continue;
+		const left = normalized.slice(0, idx).trim();
+		const right = normalized.slice(idx + separator.length).trim();
 		if (!left || !right) continue;
 		if (!NON_LATIN.test(left) || !LATIN_ONLY.test(right)) continue;
 		return { original: left, translation: right };
@@ -40,14 +43,23 @@ function applyMode(main: string, mode: TitleMode): string {
  */
 const CHANNEL_NAME = /^(.+?)\s+Ch(?:annel)?(?:\.\s*|\s+)(.+)$/iu;
 
-/**
- * Keeps only the original-language half of a dual artist name such as
- * "眠雲ツクリ / NemukumoTsukuri" — YouTube Music appends the romaji reading
- * after a slash. Also handles the reversed channel-name form
- * ("Shion Ch. 紫咲シオン" → "紫咲シオン"). Names whose original half is
- * already Latin, or that have no Latin counterpart, are returned unchanged.
- */
-export function formatArtistName(name: string): string {
+/** Trailing channel marker: "…channel", "…Ch.", "…ちゃんねる", "…チャンネル". */
+const CHANNEL_MARKER = /(?:channel|ch\.|ちゃんねる|チャンネル)$/iu;
+
+/** Slash-separated alias form, e.g. "カグラナナchannel／ななかぐら". */
+const ALIAS_NAME = /^(.+?)\s*[／/]\s*(.+)$/u;
+
+/** One normalization step for an artist name, or null when nothing changes. */
+function normalizeArtistName(name: string): string | null {
+	// A channel marker before the slash makes the right half an alias of the
+	// channel rather than a second artist: drop marker and alias.
+	const alias = name.match(ALIAS_NAME);
+	if (alias && CHANNEL_MARKER.test(alias[1])) {
+		const head = alias[1].replace(CHANNEL_MARKER, "").trim();
+		if (head) return head;
+	}
+	// "Kanade Ch. 音乃瀬奏 ‐ ReGLOSS": split the group/reading half first,
+	// the next round then strips the channel prefix from the original half.
 	const split = splitDualTitle(name);
 	if (split) return split.original;
 	const channel = name.match(CHANNEL_NAME);
@@ -57,7 +69,32 @@ export function formatArtistName(name: string): string {
 		if (LATIN_ONLY.test(prefix) && NON_LATIN.test(suffix)) return suffix;
 		if (NON_LATIN.test(prefix) && LATIN_ONLY.test(suffix)) return prefix;
 	}
-	return name;
+	// Bare trailing marker: "カグラナナchannel" → "カグラナナ".
+	const trailing = name.match(CHANNEL_MARKER);
+	if (trailing?.index) {
+		const head = name.slice(0, trailing.index).trim();
+		if (head) return head;
+	}
+	return null;
+}
+
+/**
+ * Keeps only the original-language half of a dual artist name such as
+ * "眠雲ツクリ / NemukumoTsukuri" — YouTube Music appends the romaji reading
+ * after a slash. Also handles the reversed channel-name form
+ * ("Shion Ch. 紫咲シオン" → "紫咲シオン") and channel aliases
+ * ("カグラナナchannel／ななかぐら" → "カグラナナ"). Names whose original
+ * half is already Latin, or that have no Latin counterpart, are returned
+ * unchanged.
+ */
+export function formatArtistName(name: string): string {
+	let out = name.trim();
+	for (let step = 0; step < 4; step++) {
+		const next = normalizeArtistName(out);
+		if (!next || next === out) break;
+		out = next;
+	}
+	return out;
 }
 
 /** Case-insensitive comparison key for artist credits. */
