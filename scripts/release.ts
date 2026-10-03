@@ -1,9 +1,10 @@
-// `bun release patch|minor|major [--push]`
+// `bun release patch|minor|major [--no-push]`
 //
 // Bumps the app version everywhere it lives (package.json, the Tauri config,
-// Cargo.toml and Cargo.lock), commits it as "chore: release vX.Y.Z" and tags
-// the commit. Push the branch and tag (or pass --push) to let the release
-// workflow build and publish the signed bundles and updater manifest.
+// Cargo.toml and Cargo.lock), commits it as "chore: release vX.Y.Z", tags the
+// commit and pushes the branch and tag so the release workflow builds and
+// publishes the signed bundles and updater manifest. Pass --no-push to keep
+// the commit and tag local.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -52,10 +53,10 @@ const args = process.argv.slice(2);
 const bump = args.find((arg): arg is Bump =>
 	(BUMPS as readonly string[]).includes(arg),
 );
-const push = args.includes("--push");
+const push = !args.includes("--no-push");
 
 if (!bump) {
-	console.log("Usage: bun release <patch|minor|major> [--push]");
+	console.log("Usage: bun release <patch|minor|major> [--no-push]");
 	process.exit(1);
 }
 if (git("status", "--porcelain")) {
