@@ -440,16 +440,23 @@ const LyricLine = memo(function LyricLine({
 			ref={(el) => onRef(index, el)}
 		>
 			{isActive && text
-				? text.split("").map((char, ci) => (
-						<span
-							className="inline-block animate-char-wave"
-							// biome-ignore lint/suspicious/noArrayIndexKey: positional wave, characters never reorder
-							key={`c-${ci}`}
-							style={{ animationDelay: `${ci * 30}ms` }}
-						>
-							{char === " " ? "\u00A0" : char}
-						</span>
-					))
+				? Array.from(text).map((char, ci) =>
+						// Plain spaces stay outside the spans so line breaks still
+						// happen at word boundaries, and inline spans keep font
+						// shaping (kerning, CJK punctuation) intact.
+						char === " " ? (
+							" "
+						) : (
+							<span
+								className="relative inline animate-char-wave"
+								// biome-ignore lint/suspicious/noArrayIndexKey: positional wave, characters never reorder
+								key={`c-${ci}`}
+								style={{ animationDelay: `${ci * 30}ms` }}
+							>
+								{char}
+							</span>
+						),
+					)
 				: text}
 			{romanize && romanizedText && (
 				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">

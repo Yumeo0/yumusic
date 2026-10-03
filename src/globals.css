@@ -83,10 +83,10 @@
 	@keyframes char-wave {
 		0%,
 		100% {
-			transform: translateY(0);
+			top: 0;
 		}
 		50% {
-			transform: translateY(-0.14em);
+			top: -0.14em;
 		}
 	}
 	@keyframes dot-fill {
