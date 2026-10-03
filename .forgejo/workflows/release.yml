@@ -74,7 +74,13 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        shell: bash
+        run: |
+          # Forgejo points GITHUB_* at the instance itself; Bun resolves
+          # github: dependencies against those and 404s. The tarballs live on
+          # github.com, so the hints are dropped for this step.
+          unset GITHUB_API_URL GITHUB_SERVER_URL GITHUB_GRAPHQL_URL
+          bun install --frozen-lockfile
 
       - name: Stamp release version
         shell: bash
