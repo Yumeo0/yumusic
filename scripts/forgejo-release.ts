@@ -136,7 +136,11 @@ async function upload(
 ) {
 	const existing = release.assets?.find((asset) => asset.name === name);
 	if (existing) {
-		await apiFetch(`/releases/assets/${existing.id}`, { method: "DELETE" });
+		// Forgejo nests attachments under the release (GitHub's top-level
+		// /releases/assets/{id} route does not exist here).
+		await apiFetch(`/releases/${release.id}/assets/${existing.id}`, {
+			method: "DELETE",
+		});
 		release.assets = release.assets?.filter(
 			(asset) => asset.id !== existing.id,
 		);
