@@ -37,7 +37,7 @@
 		"youtubei.js": "18.1.0"
 	},
 	"patchedDependencies": {
-		"googlevideo@4.1.1": "patches/googlevideo@4.1.1.patch",
+		"googlevideo@github:LuanRT/googlevideo#44e360a": "patches/googlevideo@4.1.1.patch",
 		"youtubei.js@18.1.0": "patches/youtubei.js@18.1.0.patch"
 	},
 	"devDependencies": {
