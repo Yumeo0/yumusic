@@ -14,6 +14,14 @@ describe("noise, credit and decoration tails", () => {
 		expect(main("美人局 (covered by 藍月なくる)")).toBe("美人局");
 	});
 
+	test("glued slash covered-by without space after by", () => {
+		expect(
+			main(
+				"BANG!BANG!BANG!/Covered by癒月ちょこ＆大空スバル＆姫森ルーナ＆獅白ぼたん",
+			),
+		).toBe("BANG!BANG!BANG!");
+	});
+
 	test("artist slash credit with (cover)", () => {
 		expect(main("flos / R Sound Design (cover)")).toBe("flos");
 	});
@@ -118,6 +126,42 @@ describe("cover markers and artist credit tails", () => {
 
 	test("mashup and official video parens are noise", () => {
 		expect(main("Idols (EDM Mashup) (Official Video)")).toBe("Idols");
+	});
+
+	test("language cover qualifier tails are noise", () => {
+		expect(main("G4L - English Cover")).toBe("G4L");
+		expect(main("G4L / Japanese Cover")).toBe("G4L");
+		expect(main("Song (English Cover)")).toBe("Song");
+	});
+
+	test("song titles containing a cover word are kept", () => {
+		expect(main("Artist - Take Cover")).toBe("Artist - Take Cover");
+		expect(main("Under Cover")).toBe("Under Cover");
+	});
+
+	test("english cover marker and ver. performer tail", () => {
+		const title =
+			"Invincible Rainbow Arrow (English Cover) ／ver. Elira Pendora";
+		expect(main(title, "Elira Pendora 【NIJISANJI EN】")).toBe(
+			"Invincible Rainbow Arrow",
+		);
+		expect(detectTitleTags(title)).toContain("cover");
+	});
+
+	test("ver. performer tail strips without artist metadata", () => {
+		expect(main("Invincible Rainbow Arrow ／ver. Elira Pendora")).toBe(
+			"Invincible Rainbow Arrow",
+		);
+	});
+
+	test("bracketed dual title with glued cover-by tail", () => {
+		const title =
+			"【チューリングラブ// Turing Love】Cover by Pomu Rainpuff, Elira Pendora";
+		expect(formatTitleParts(title, "both", true).main).toBe(
+			"チューリングラブ// Turing Love",
+		);
+		expect(main(title)).toBe("チューリングラブ");
+		expect(detectTitleTags(title)).toContain("cover");
 	});
 
 	test("leading MV tag, cover paren and channel tag bracket", () => {
