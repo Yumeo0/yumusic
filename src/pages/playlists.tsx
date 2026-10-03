@@ -28,7 +28,10 @@ import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/pinned";
 import {
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
+	type PlaylistView,
+	readCache,
 	SYNC_INTERVAL_MS,
+	writeCache,
 } from "@/lib/playlist-cache";
 import { shareLink } from "@/lib/share";
 import { proxiedImageUrl } from "@/lib/tauri";
@@ -52,48 +55,6 @@ import {
 	type Playlist,
 	removeSongFromPlaylist,
 } from "../lib/youtube-client";
-
-// Auto-sync policy: fetch on first use, persist to localStorage, then only
-// re-sync after 24h — or when the user hits the refresh button.
-// (Cache keys live in lib/playlist-cache so the add-to-playlist dialog can
-// invalidate a playlist after editing it.)
-
-/** Plain-data snapshot of a playlist (JSON-safe for persistence). */
-interface PlaylistView {
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-	songs: Song[];
-	complete: boolean;
-	/** The playlist belongs to the user and can be edited. */
-	editable: boolean;
-}
-
-interface CacheEntry<T> {
-	timestamp: number;
-	data: T;
-}
-
-function readCache<T>(key: string): CacheEntry<T> | null {
-	try {
-		const raw = localStorage.getItem(key);
-		if (!raw) return null;
-		return JSON.parse(raw) as CacheEntry<T>;
-	} catch {
-		return null;
-	}
-}
-
-function writeCache<T>(key: string, data: T) {
-	try {
-		localStorage.setItem(
-			key,
-			JSON.stringify({ timestamp: Date.now(), data } satisfies CacheEntry<T>),
-		);
-	} catch {
-		// quota exceeded — cache is best-effort
-	}
-}
 
 function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 	return {

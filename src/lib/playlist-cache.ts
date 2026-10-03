@@ -1,3 +1,5 @@
+import type { Song } from "@/contexts/player-context";
+
 /**
  * Auto-sync policy: fetch on first use, persist to localStorage, then only
  * re-sync after 24h — or when the user hits the refresh button.
@@ -12,11 +14,52 @@ export const LIBRARY_CACHE_KEY = "yumusic:library:v6";
 // "Remove from playlist" (v7 could cache a false negative).
 export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v8:";
 
-/** Drops a playlist's cached tracklist, e.g. after adding/removing a song. */
-export function clearPlaylistCache(id: string) {
+/** Plain-data snapshot of a playlist (JSON-safe for persistence). */
+export interface PlaylistView {
+	title: string;
+	subtitle: string;
+	thumbnail: string | null;
+	songs: Song[];
+	complete: boolean;
+	/** The playlist belongs to the user and can be edited. */
+	editable: boolean;
+}
+
+export interface CacheEntry<T> {
+	timestamp: number;
+	data: T;
+}
+
+export function readCache<T>(key: string): CacheEntry<T> | null {
 	try {
-		localStorage.removeItem(PLAYLIST_CACHE_PREFIX + id);
+		const raw = localStorage.getItem(key);
+		if (!raw) return null;
+		return JSON.parse(raw) as CacheEntry<T>;
 	} catch {
-		// best-effort
+		return null;
 	}
+}
+
+export function writeCache<T>(key: string, data: T) {
+	try {
+		localStorage.setItem(
+			key,
+			JSON.stringify({ timestamp: Date.now(), data } satisfies CacheEntry<T>),
+		);
+	} catch {
+		// quota exceeded — cache is best-effort
+	}
+}
+
+/**
+ * Prepends a just-added song to a cached playlist so the next visit shows it
+ * without a refetch. Additions land at the top (YouTube Music serves
+ * playlists newest-first). A playlist that was never cached is left alone —
+ * its first fetch already carries the song.
+ */
+export function addSongToCachedPlaylist(id: string, song: Song) {
+	const key = PLAYLIST_CACHE_PREFIX + id;
+	const cached = readCache<PlaylistView>(key);
+	if (!cached) return;
+	writeCache(key, { ...cached.data, songs: [song, ...cached.data.songs] });
 }

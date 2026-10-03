@@ -3,7 +3,7 @@ import { ListMusic, Loader2, Plus, Search, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
-import { clearPlaylistCache } from "@/lib/playlist-cache";
+import { addSongToCachedPlaylist } from "@/lib/playlist-cache";
 import { proxiedImageUrl } from "@/lib/tauri";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -17,7 +17,8 @@ import {
 /**
  * Modal for adding a song to one of the user's playlists, with an inline
  * "new playlist" flow. Playlists are fetched once per session and the chosen
- * playlist's cached tracklist is dropped so the new song shows up.
+ * playlist's cached tracklist is updated in place so the new song shows up
+ * without a refetch.
  */
 export function AddToPlaylistDialog({
 	song,
@@ -64,7 +65,7 @@ export function AddToPlaylistDialog({
 		setBusy(playlist.id);
 		try {
 			await addSongToPlaylist(playlist.id, song.id);
-			clearPlaylistCache(playlist.id);
+			addSongToCachedPlaylist(playlist.id, song);
 			showToast(`Added to ${playlist.title}`);
 			onOpenChange(false);
 		} catch (error) {
@@ -81,8 +82,7 @@ export function AddToPlaylistDialog({
 		if (!song || !title || busy !== null) return;
 		setBusy("new");
 		try {
-			const id = await createPlaylist(title, song.id);
-			if (id) clearPlaylistCache(id);
+			await createPlaylist(title, song.id);
 			showToast(`Added to ${title}`);
 			onOpenChange(false);
 		} catch (error) {
