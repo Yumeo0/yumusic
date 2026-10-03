@@ -1,11 +1,15 @@
+import { Menu } from "@base-ui/react/menu";
 import {
 	ArrowLeftIcon,
+	ArrowUpDown,
 	ArrowUpRight,
+	Check,
 	Music2,
 	Pin,
 	Play,
 	RefreshCw,
 	Search,
+	Share2,
 	Shuffle,
 	X,
 } from "lucide-react";
@@ -26,9 +30,11 @@ import {
 	PLAYLIST_CACHE_PREFIX,
 	SYNC_INTERVAL_MS,
 } from "@/lib/playlist-cache";
+import { shareLink } from "@/lib/share";
 import { proxiedImageUrl } from "@/lib/tauri";
+import { useDisplayTitle } from "@/lib/title";
 import { showToast } from "@/lib/toast";
-import { cn, hiResThumb } from "@/lib/utils";
+import { cn, hiResThumb, parseDuration } from "@/lib/utils";
 import {
 	artistIdOf,
 	artistListOf,
@@ -172,6 +178,27 @@ function isEditablePlaylist(data: Playlist | Album): boolean {
 	return (editable?.length ?? 0) > 0;
 }
 
+type PlaylistSort =
+	| "newest"
+	| "oldest"
+	| "title-asc"
+	| "title-desc"
+	| "artist-asc"
+	| "artist-desc"
+	| "shortest"
+	| "longest";
+
+const PLAYLIST_SORTS: Array<{ value: PlaylistSort; label: string }> = [
+	{ value: "newest", label: "Newest first" },
+	{ value: "oldest", label: "Oldest first" },
+	{ value: "title-asc", label: "Title A–Z" },
+	{ value: "title-desc", label: "Title Z–A" },
+	{ value: "artist-asc", label: "Artist A–Z" },
+	{ value: "artist-desc", label: "Artist Z–A" },
+	{ value: "shortest", label: "Shortest first" },
+	{ value: "longest", label: "Longest first" },
+];
+
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
@@ -183,6 +210,8 @@ export function PlaylistDetails() {
 	const [error, setError] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
 	const [searchOpen, setSearchOpen] = useState(false);
+	const [sort, setSort] = useState<PlaylistSort>("newest");
+	const displayTitle = useDisplayTitle();
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -323,21 +352,65 @@ export function PlaylistDetails() {
 	const showCount =
 		songs.length > 0 && !/\d+\s+songs?\b/i.test(playlist.subtitle);
 
-	// Search filter — matches titles and artist names, keeps the original
-	// playlist position for numbering while queuing the visible songs.
+	// Search filter — matches titles and artist names. Rows keep their original
+	// playlist position for numbering unless a sort is active. YouTube Music
+	// returns a playlist newest-first (new additions land at the top), so
+	// "newest" needs no work and "oldest" reverses it. Ties keep that order.
 	const query = search.trim().toLowerCase();
-	const visible = songs
-		.map((song, index) => ({ song, index }))
-		.filter(({ song }) => {
-			if (!query) return true;
-			return [
-				song.title,
-				song.artist,
-				...(song.artists ?? []).map((a) => a.name),
-			]
-				.filter(Boolean)
-				.some((text) => text.toLowerCase().includes(query));
+	const ordered = songs.map((song, index) => ({ song, index }));
+	if (sort !== "newest") {
+		const titles = new Map<number, string>();
+		const titleKey = (entry: { song: Song; index: number }) => {
+			let key = titles.get(entry.index);
+			if (key === undefined) {
+				key = displayTitle(entry.song.title);
+				titles.set(entry.index, key);
+			}
+			return key;
+		};
+		const collator = (a: string, b: string) =>
+			a.localeCompare(b, undefined, { sensitivity: "base" });
+		ordered.sort((a, b) => {
+			let result = 0;
+			switch (sort) {
+				case "oldest":
+					result = b.index - a.index;
+					break;
+				case "title-asc":
+					result = collator(titleKey(a), titleKey(b));
+					break;
+				case "title-desc":
+					result = collator(titleKey(b), titleKey(a));
+					break;
+				case "artist-asc":
+					result = collator(a.song.artist ?? "", b.song.artist ?? "");
+					break;
+				case "artist-desc":
+					result = collator(b.song.artist ?? "", a.song.artist ?? "");
+					break;
+				case "shortest":
+					result =
+						parseDuration(a.song.duration) - parseDuration(b.song.duration);
+					break;
+				case "longest":
+					result =
+						parseDuration(b.song.duration) - parseDuration(a.song.duration);
+					break;
+			}
+			return result || a.index - b.index;
 		});
+	}
+	const visible = ordered.filter(({ song }) => {
+		if (!query) return true;
+		return [song.title, song.artist, ...(song.artists ?? []).map((a) => a.name)]
+			.filter(Boolean)
+			.some((text) => text.toLowerCase().includes(query));
+	});
+	/** Display order for "Play all", including rows hidden by the search. */
+	const playOrder = ordered.map((entry) => entry.song);
+	const activeSort =
+		PLAYLIST_SORTS.find((option) => option.value === sort)?.label ??
+		"Newest first";
 
 	return (
 		<div className="mx-auto w-full max-w-7xl px-6 pt-6 sm:px-10 sm:pt-10">
@@ -383,6 +456,21 @@ export function PlaylistDetails() {
 				</p>
 				<div className="mt-4 flex items-center justify-center gap-2">
 					<button
+						aria-label="Share playlist"
+						className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
+						onClick={() => {
+							const rawId = id?.startsWith("VL") ? id.slice(2) : id;
+							void shareLink({
+								title: playlist.title,
+								url: `https://music.youtube.com/playlist?list=${rawId}`,
+							});
+						}}
+						title="Share playlist"
+						type="button"
+					>
+						<Share2 className="size-5" />
+					</button>
+					<button
 						aria-label="Shuffle play"
 						className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
 						disabled={songs.length < 2}
@@ -404,13 +492,51 @@ export function PlaylistDetails() {
 						className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
 						disabled={songs.length === 0}
 						onClick={() => {
-							play(songs[0], songs.slice(1));
+							play(playOrder[0], playOrder.slice(1));
 						}}
 						title="Play all"
 						type="button"
 					>
 						<Play className="size-5 translate-x-px fill-current" />
 					</button>
+					{songs.length > 1 && (
+						<Menu.Root>
+							<Menu.Trigger
+								aria-label={`Sort playlist (${activeSort})`}
+								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
+								title={`Sort: ${activeSort}`}
+							>
+								<ArrowUpDown className="size-5" />
+							</Menu.Trigger>
+							<Menu.Portal>
+								<Menu.Positioner
+									align="center"
+									className="z-90 outline-none"
+									sideOffset={8}
+								>
+									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+										<Menu.RadioGroup
+											onValueChange={(value) => setSort(value as PlaylistSort)}
+											value={sort}
+										>
+											{PLAYLIST_SORTS.map((option) => (
+												<Menu.RadioItem
+													className="flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+													key={option.value}
+													value={option.value}
+												>
+													{option.label}
+													<Menu.RadioItemIndicator className="text-primary">
+														<Check className="size-4" />
+													</Menu.RadioItemIndicator>
+												</Menu.RadioItem>
+											))}
+										</Menu.RadioGroup>
+									</Menu.Popup>
+								</Menu.Positioner>
+							</Menu.Portal>
+						</Menu.Root>
+					)}
 					{/* Search — collapsed into the action row; expands in place */}
 					{songs.length > 0 &&
 						(searchOpen ? (
@@ -460,7 +586,7 @@ export function PlaylistDetails() {
 						Loading more…
 					</p>
 				)}
-				{visible.map(({ song, index }) => {
+				{visible.map(({ song, index }, i) => {
 					const isCurrent = currentSong?.id === song.id;
 
 					return (
@@ -482,9 +608,7 @@ export function PlaylistDetails() {
 									onClick={() =>
 										play(
 											song,
-											visible
-												.slice(visible.findIndex((v) => v.index === index) + 1)
-												.map((v) => v.song),
+											visible.slice(i + 1).map((v) => v.song),
 										)
 									}
 									type="button"
@@ -499,7 +623,7 @@ export function PlaylistDetails() {
 										) : (
 											<>
 												<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-													{index + 1}
+													{sort === "newest" ? index + 1 : i + 1}
 												</span>
 												<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
 											</>

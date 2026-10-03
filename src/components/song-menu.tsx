@@ -18,33 +18,19 @@ import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { useSettings } from "@/lib/settings";
+import { shareLink } from "@/lib/share";
 import { displayTitle } from "@/lib/title";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { AddToPlaylistDialog } from "./add-to-playlist-dialog";
 
 /** Copy the song's YouTube Music link, or open the native share sheet. */
-async function shareSong(song: Song) {
-	const url = `https://music.youtube.com/watch?v=${song.id}`;
-	if (typeof navigator.share === "function") {
-		try {
-			await navigator.share({
-				title: song.title,
-				text: `${song.artist} — ${song.title}`,
-				url,
-			});
-			return;
-		} catch (error) {
-			// User dismissed the sheet; don't silently copy instead.
-			if ((error as Error).name === "AbortError") return;
-		}
-	}
-	try {
-		await navigator.clipboard.writeText(url);
-		showToast("Link copied to clipboard");
-	} catch {
-		showToast("Could not copy link");
-	}
+function shareSong(song: Song) {
+	void shareLink({
+		title: song.title,
+		text: `${song.artist} — ${song.title}`,
+		url: `https://music.youtube.com/watch?v=${song.id}`,
+	});
 }
 
 /** Copies text to the clipboard and reports the result as a toast. */
