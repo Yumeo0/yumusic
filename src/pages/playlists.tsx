@@ -94,7 +94,7 @@ function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 		id: videoIdOf(item),
 		title: item.title ?? "Unknown Title",
 		artist: artistNames(item),
-		artistId: artistIdOf(item.artists),
+		artistId: artistIdOf(item),
 		artists: artistListOf(item),
 		thumbnail: hiResThumb(
 			item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url,

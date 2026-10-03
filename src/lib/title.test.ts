@@ -348,4 +348,15 @@ describe("VTuber cover title shapes", () => {
 			mergeArtistNames([{ name: "Minato Aqua" }], parts.coverArtists),
 		).toEqual([{ name: "湊あくあ", id: undefined }, { name: "猫又おかゆ" }]);
 	});
+
+	test("dash-credited performer before the cover marker", () => {
+		const title = "flos (Remix ver.) / R Sound Design - むﾄ (cover)";
+		const parts = formatTitleParts(title, "original", true, "Muto");
+		expect(parts.main).toBe("flos");
+		expect(parts.coverArtists).toEqual(["むﾄ"]);
+		expect(detectTitleTags(title)).toContain("remix");
+		expect(mergeArtistNames([{ name: "Muto" }], parts.coverArtists)).toEqual([
+			{ name: "むﾄ", id: undefined },
+		]);
+	});
 });

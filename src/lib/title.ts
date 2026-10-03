@@ -184,6 +184,16 @@ const COVER_CREDIT_PATTERNS: RegExp[] = [
 ];
 
 /**
+ * "flos (Remix ver.) / R Sound Design - むﾄ (cover)" — the dash-credited
+ * performer right before the cover marker. Only used when the title doesn't
+ * start with the artist, where the dash is the "Artist - Song" prefix.
+ */
+const DASH_COVER_CREDIT = new RegExp(
+	String.raw`\s+-\s+([^-(（【[\]]{1,60}?)\s*` + COVER_MARKER + String.raw`\s*$`,
+	"iu",
+);
+
+/**
  * Trailing tag bracket holding a performer list, e.g. "【神楽めあ× 湊あくあ】"
  * — cover videos credit the singers there after the title.
  */
@@ -196,7 +206,7 @@ const TRAILING_TAG_LIST =
  * them. Requiring two names in a trailing bracket keeps single channel/group
  * tags ("【FUWAMOCO】") out.
  */
-function extractCoverArtists(title: string): string[] {
+function extractCoverArtists(title: string, artist?: string): string[] {
 	for (const pattern of COVER_CREDIT_PATTERNS) {
 		const match = title.match(pattern);
 		if (!match) continue;
@@ -207,6 +217,15 @@ function extractCoverArtists(title: string): string[] {
 	if (list) {
 		const artists = splitCoverArtists(list[1]);
 		if (artists.length >= 2) return artists;
+	}
+	// "Artist - Song (cover)" is a prefix credit, not a performer list.
+	const primary = artist?.trim();
+	if (!primary || !title.toLowerCase().startsWith(primary.toLowerCase())) {
+		const dash = title.match(DASH_COVER_CREDIT);
+		if (dash) {
+			const artists = splitCoverArtists(dash[1]);
+			if (artists.length > 0) return artists;
+		}
 	}
 	return [];
 }
@@ -231,7 +250,7 @@ export function formatTitleParts(
 	let credits: TitleCredit[] = [];
 	let coverArtists: string[] = [];
 	if (clean) {
-		coverArtists = extractCoverArtists(title);
+		coverArtists = extractCoverArtists(title, artist);
 		const extracted = extractCredits(title);
 		credits = extracted.credits;
 		title = extracted.title;
@@ -416,7 +435,17 @@ const TITLE_NOISE: NoiseRule[] = [
 			BRACKET_CLOSE,
 		"i",
 	),
-	// "flos (Remix ver.) / R Sound Design - むﾄ (cover)" → "flos (Remix ver.)"
+	// "flos (Remix ver.) / …" → "flos / …" — an author-less remix version
+	// marker. Stripping it lets the Remix pill (detectTitleTags) show on the
+	// cleaned title; author-carrying remixes are already credits by now.
+	new RegExp(
+		String.raw`\s*` +
+			BRACKET_OPEN +
+			String.raw`\s*(?:remix|rmx)\s*(?:ver(?:sion)?\.?)?\s*` +
+			BRACKET_CLOSE,
+		"i",
+	),
+	// "flos (Remix ver.) / R Sound Design - むﾄ (cover)" → "flos"
 	{
 		pattern: new RegExp(
 			String.raw`^(.{1,80}?)\s*/\s*.{1,60}\s+-\s+.{1,60}?` +

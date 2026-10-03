@@ -72,7 +72,7 @@ function responsiveSong(
 			id,
 			title: item.title ?? "Unknown Title",
 			artist: artistNames(item),
-			artistId: artistIdOf(item.artists),
+			artistId: artistIdOf(item),
 			artists: artistListOf(item),
 			thumbnail: lastThumb(item.thumbnail?.contents),
 			duration: item.duration?.text,

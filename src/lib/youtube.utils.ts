@@ -46,17 +46,36 @@ export function extractVideoId(url: string): string | null {
 }
 
 /**
- * Builds a display string for the artists of a search/playlist item.
- * youtubei.js only parses `artists` when the runs carry channel links,
- * which frequently fails for multi-artist songs — so fall back to the
- * info column runs (skipping separators, durations, years, etc.).
+ * Linked credits of an item, whichever field youtubei.js filled: songs carry
+ * `artists`, UGC videos carry `authors`, and some cards only `author`. Each
+ * keeps the channel endpoint from the browse response. De-duplicated by name.
  */
-export function artistNames(item: YTNodes.MusicResponsiveListItem): string {
-	const linked = item.artists?.map((a) => a.name).filter(Boolean) ?? [];
-	if (linked.length > 0) return linked.join(", ");
+function linkedArtists(
+	item: YTNodes.MusicResponsiveListItem,
+): Array<{ name: string; id?: string }> {
+	const credits = [
+		...(item.artists ?? []),
+		...(item.authors ?? []),
+		...(item.author ? [item.author] : []),
+	];
+	const artists: Array<{ name: string; id?: string }> = [];
+	for (const credit of credits) {
+		const name = credit.name?.trim();
+		if (!name || artists.some((a) => a.name === name)) continue;
+		artists.push({
+			name,
+			id: credit.channel_id?.startsWith("UC") ? credit.channel_id : undefined,
+		});
+	}
+	return artists;
+}
 
+/** Info-column runs as artist credits, keeping their channel links. */
+function infoColumnArtists(
+	item: YTNodes.MusicResponsiveListItem,
+): Array<{ name: string; id?: string }> {
 	const runs = item.flex_columns?.at(1)?.title?.runs ?? [];
-	const parts: string[] = [];
+	const artists: Array<{ name: string; id?: string }> = [];
 	for (const run of runs) {
 		const text = (run as { text?: string }).text?.trim() ?? "";
 		if (!text) continue;
@@ -64,20 +83,37 @@ export function artistNames(item: YTNodes.MusicResponsiveListItem): string {
 		if (/^\d+:\d{2}(:\d{2})?$/.test(text)) continue; // duration
 		if (/^[12]\d{3}$/.test(text)) continue; // year
 		if (/^(song|video|album|single|ep|playlist)$/i.test(text)) continue;
-		if (parts.includes(text)) continue;
-		parts.push(text);
+		if (artists.some((a) => a.name === text)) continue;
+		const browseId = (run as { endpoint?: { payload?: { browseId?: string } } })
+			.endpoint?.payload?.browseId;
+		artists.push({
+			name: text,
+			id: browseId?.startsWith("UC") ? browseId : undefined,
+		});
 	}
-	if (parts.length > 0) return parts.join(", ");
+	return artists;
+}
 
+/**
+ * Builds a display string for the artists of a search/playlist item.
+ * youtubei.js parses linked credits into `artists` (songs) or `authors` (UGC
+ * videos); when both are missing, fall back to the info column runs
+ * (skipping separators, durations, years, etc.).
+ */
+export function artistNames(item: YTNodes.MusicResponsiveListItem): string {
+	const linked = linkedArtists(item);
+	if (linked.length > 0) return linked.map((a) => a.name).join(", ");
+	const runs = infoColumnArtists(item);
+	if (runs.length > 0) return runs.map((a) => a.name).join(", ");
 	const subtitle = item.subtitle?.toString().trim();
 	return subtitle || "Unknown Artist";
 }
 
-/** First linked artist channel id (UC…) of an item, when present. */
+/** First linked channel id (UC…) of an item's artist credits, when present. */
 export function artistIdOf(
-	artists?: { channel_id?: string | undefined }[] | undefined,
+	item: YTNodes.MusicResponsiveListItem,
 ): string | undefined {
-	return artists?.find((a) => a.channel_id?.startsWith("UC"))?.channel_id;
+	return linkedArtists(item).find((a) => a.id)?.id;
 }
 
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
@@ -128,12 +164,9 @@ export function videoIdOf(
 export function artistListOf(
 	item: YTNodes.MusicResponsiveListItem,
 ): Array<{ name: string; id?: string }> {
-	const linked = (item.artists ?? [])
-		.filter((a) => a.name)
-		.map((a) => ({
-			name: a.name,
-			id: a.channel_id?.startsWith("UC") ? a.channel_id : undefined,
-		}));
+	const linked = linkedArtists(item);
 	if (linked.length > 0) return linked;
+	const runs = infoColumnArtists(item);
+	if (runs.length > 0) return runs;
 	return [{ name: artistNames(item) }];
 }

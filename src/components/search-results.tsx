@@ -67,7 +67,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 		id: videoIdOf(video),
 		title: video.title ?? "Unknown Title",
 		artist: artistNames(video),
-		artistId: artistIdOf(video.artists),
+		artistId: artistIdOf(video),
 		artists: artistListOf(video),
 		thumbnail: hiResThumb(video.thumbnails?.[video.thumbnails.length - 1]?.url),
 		duration: video.duration?.text,
