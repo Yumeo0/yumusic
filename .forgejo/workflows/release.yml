@@ -102,7 +102,7 @@ jobs:
         if: matrix.cross
         uses: actions/cache@v4
         with:
-          path: ~/.xwin-cache
+          path: ~/.cache/cargo-xwin
           key: ${{ runner.os }}-xwin
 
       - name: Install cargo-xwin
@@ -136,12 +136,16 @@ jobs:
           sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
           echo "Building YuMusic $VERSION"
 
+      # XWIN_CROSS_COMPILER: the Windows build uses cargo-xwin's clang
+      # backend, whose sysroot is a GitHub release asset. The default clang-cl
+      # backend downloads the MSVC CRT/SDK from download.visualstudio.microsoft.com,
+      # which the runner's job network may not be able to route.
       - name: Build bundles
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          # cargo-xwin downloads the MSVC CRT/SDK from Microsoft on first use.
           XWIN_ACCEPT_LICENSE: "1"
+          XWIN_CROSS_COMPILER: clang
         run: bunx tauri build --bundles ${{ matrix.bundles }} ${{ matrix.build-args }}
 
       - name: Publish release assets
