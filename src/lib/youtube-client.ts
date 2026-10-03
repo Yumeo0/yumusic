@@ -294,6 +294,174 @@ export async function getPlaylist(id: string) {
 	}
 }
 
+export interface LibraryPlaylist {
+	id: string;
+	title: string;
+	subtitle: string;
+	thumbnail: string | null;
+}
+
+let libraryPlaylistsCache: LibraryPlaylist[] | null = null;
+
+/**
+ * The user's playlists from the library — shared by the playlists page and
+ * the "Add to playlist" dialog. Cached for the session unless `force` is set.
+ */
+export async function getLibraryPlaylists(
+	force = false,
+): Promise<LibraryPlaylist[]> {
+	if (!force && libraryPlaylistsCache) return libraryPlaylistsCache;
+	const library = await getUserPlaylists();
+	if (!library) throw new Error("Could not load the playlist library");
+	// The library renders playlists either as square grid tiles
+	// (MusicTwoRowItem) or as list rows (MusicResponsiveListItem),
+	// depending on the section layout — accept both.
+	const list: LibraryPlaylist[] = [];
+	for (const section of library.contents ?? []) {
+		for (const item of section.contents ?? []) {
+			if (item.is(YTNodes.MusicTwoRowItem)) {
+				if (item.item_type !== "playlist" || !item.id) continue;
+				const thumbs = item.thumbnail ?? [];
+				list.push({
+					id: item.id,
+					title: item.title?.text || "Unknown Title",
+					subtitle: item.subtitle?.text || "",
+					thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+				});
+			} else if (item.is(YTNodes.MusicResponsiveListItem)) {
+				if (item.item_type !== "playlist" || !item.id) continue;
+				const thumbs = item.thumbnail?.contents ?? [];
+				list.push({
+					id: item.id,
+					title: item.title || "Unknown Title",
+					subtitle: item.subtitle?.text || "",
+					thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+				});
+			}
+		}
+	}
+	libraryPlaylistsCache = list;
+	return list;
+}
+
+/** The edit endpoint expects the raw id, without the browse-id "VL" prefix. */
+function editablePlaylistId(id: string): string {
+	return id.startsWith("VL") ? id.slice(2) : id;
+}
+
+/** Adds a video to a playlist the user owns. */
+export async function addSongToPlaylist(playlistId: string, videoId: string) {
+	const client = await getYoutubeClient();
+	await client.playlist.addVideos(editablePlaylistId(playlistId), [videoId]);
+}
+
+/**
+ * Walks a raw browse response collecting the per-entry setVideoId — the key
+ * YouTube's edit endpoint removes an entry by (a video can appear twice).
+ */
+function collectSetVideoIds(node: unknown, out: Map<string, string>): void {
+	if (Array.isArray(node)) {
+		for (const item of node) collectSetVideoIds(item, out);
+		return;
+	}
+	if (!node || typeof node !== "object") return;
+	const record = node as Record<string, unknown>;
+	const entry = record.playlistItemData as
+		| { videoId?: string; playlistSetVideoId?: string }
+		| undefined;
+	if (entry?.videoId && entry.playlistSetVideoId && !out.has(entry.videoId)) {
+		out.set(entry.videoId, entry.playlistSetVideoId);
+	}
+	for (const value of Object.values(record)) {
+		collectSetVideoIds(value, out);
+	}
+}
+
+/** First continuation token in a raw browse response. */
+function findContinuationToken(node: unknown): string | null {
+	if (Array.isArray(node)) {
+		for (const item of node) {
+			const token = findContinuationToken(item);
+			if (token) return token;
+		}
+		return null;
+	}
+	if (!node || typeof node !== "object") return null;
+	const record = node as Record<string, unknown>;
+	const command = record.continuationCommand as { token?: string } | undefined;
+	if (command?.token) return command.token;
+	const next = record.nextContinuationData as
+		| { continuation?: string }
+		| undefined;
+	if (next?.continuation) return next.continuation;
+	for (const value of Object.values(record)) {
+		const token = findContinuationToken(value);
+		if (token) return token;
+	}
+	return null;
+}
+
+/** Finds the setVideoId of a track, following playlist pages as needed. */
+async function findSetVideoId(
+	client: Innertube,
+	playlistId: string,
+	videoId: string,
+): Promise<string | null> {
+	const browseId = playlistId.startsWith("VL") ? playlistId : `VL${playlistId}`;
+	const seen = new Set<string>();
+	let continuation: string | null = null;
+	for (let page = 0; page < 6; page++) {
+		const response = await client.actions.execute(
+			"/browse",
+			continuation
+				? { continuation, client: "YTMUSIC" }
+				: { browseId, client: "YTMUSIC" },
+		);
+		const ids = new Map<string, string>();
+		collectSetVideoIds(response.data, ids);
+		const found = ids.get(videoId);
+		if (found) return found;
+		const next = findContinuationToken(response.data);
+		if (!next || seen.has(next)) return null;
+		seen.add(next);
+		continuation = next;
+	}
+	return null;
+}
+
+/**
+ * Removes a video from a playlist the user owns. The library's
+ * `playlist.removeVideos` cannot be used: it looks for `PlaylistVideo`
+ * entries, but YouTube now serves `LockupView` rows the parser exposes
+ * without ids, so it never finds the track and throws.
+ */
+export async function removeSongFromPlaylist(
+	playlistId: string,
+	videoId: string,
+) {
+	const client = await getYoutubeClient();
+	const setVideoId = await findSetVideoId(client, playlistId, videoId);
+	if (!setVideoId) throw new Error("Song not found in the playlist");
+	const response = await client.actions.execute("/browse/edit_playlist", {
+		playlistId: editablePlaylistId(playlistId),
+		actions: [{ action: "ACTION_REMOVE_VIDEO", setVideoId }],
+	});
+	if (!response.success) {
+		throw new Error(`Playlist edit failed (HTTP ${response.status_code})`);
+	}
+}
+
+/** Creates a playlist, optionally with a first video. Returns its id. */
+export async function createPlaylist(
+	title: string,
+	videoId?: string,
+): Promise<string | null> {
+	const client = await getYoutubeClient();
+	const result = await client.playlist.create(title, videoId ? [videoId] : []);
+	libraryPlaylistsCache = null;
+	return result.playlist_id ?? null;
+}
+
 export type Album = Awaited<ReturnType<Innertube["music"]["getAlbum"]>>;
 
 export async function getAlbum(id: string) {

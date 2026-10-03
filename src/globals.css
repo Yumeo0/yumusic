@@ -274,6 +274,18 @@
 	transform: scale(1.3);
 }
 
+/* While a song's context menu is open, highlight the row or card it targets.
+   The menu trigger is `display: contents`, so the overlay lands on the
+   wrapped element (a row, a card, or its swipe wrapper). Painted as a
+   background image so opaque row backgrounds stay intact underneath. */
+.song-menu[data-popup-open] > *,
+.song-menu[data-pressed] > * {
+	background-image: linear-gradient(
+		color-mix(in oklab, var(--primary) 14%, transparent),
+		color-mix(in oklab, var(--primary) 14%, transparent)
+	);
+}
+
 /* Hide video container by default - position off-screen */
 #video-container-wrapper {
 	position: absolute;

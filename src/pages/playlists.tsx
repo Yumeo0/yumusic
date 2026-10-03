@@ -21,7 +21,13 @@ import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/pinned";
+import {
+	LIBRARY_CACHE_KEY,
+	PLAYLIST_CACHE_PREFIX,
+	SYNC_INTERVAL_MS,
+} from "@/lib/playlist-cache";
 import { proxiedImageUrl } from "@/lib/tauri";
+import { showToast } from "@/lib/toast";
 import { cn, hiResThumb } from "@/lib/utils";
 import {
 	artistIdOf,
@@ -33,26 +39,18 @@ import {
 import {
 	type Album,
 	getAlbum,
+	getLibraryPlaylists,
 	getPlaylist,
-	getUserPlaylists,
+	type LibraryPlaylist,
 	loadPlaylistContinuation,
 	type Playlist,
+	removeSongFromPlaylist,
 } from "../lib/youtube-client";
 
 // Auto-sync policy: fetch on first use, persist to localStorage, then only
 // re-sync after 24h — or when the user hits the refresh button.
-const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
-// v6: the library is fetched in English; v5 and earlier could hold a locally
-// localized (e.g. Japanese) auto-playlist name.
-const LIBRARY_CACHE_KEY = "yumusic:library:v6";
-const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v6:";
-
-interface LibraryPlaylist {
-	id: string;
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-}
+// (Cache keys live in lib/playlist-cache so the add-to-playlist dialog can
+// invalidate a playlist after editing it.)
 
 /** Plain-data snapshot of a playlist (JSON-safe for persistence). */
 interface PlaylistView {
@@ -61,6 +59,8 @@ interface PlaylistView {
 	thumbnail: string | null;
 	songs: Song[];
 	complete: boolean;
+	/** The playlist belongs to the user and can be edited. */
+	editable: boolean;
 }
 
 interface CacheEntry<T> {
@@ -157,6 +157,21 @@ function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 	return { title: "Playlist", subtitle: "", thumbnail: null };
 }
 
+/**
+ * Owned playlists nest an editable header renderer in the browse response.
+ * It is checked through the response memo as well: youtubei.js' `header`
+ * can resolve to the inner MusicResponsiveHeader instead of the wrapper.
+ */
+function isEditablePlaylist(data: Playlist | Album): boolean {
+	if (data.header instanceof YTNodes.MusicEditablePlaylistDetailHeader) {
+		return true;
+	}
+	const editable = data.page?.contents_memo?.getType(
+		YTNodes.MusicEditablePlaylistDetailHeader,
+	);
+	return (editable?.length ?? 0) > 0;
+}
+
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
@@ -207,6 +222,7 @@ export function PlaylistDetails() {
 				thumbnail: header.thumbnail,
 				songs: collectSongs(items),
 				complete: !("has_continuation" in data && data.has_continuation),
+				editable: !albumMode && isEditablePlaylist(data),
 			};
 			setPlaylist(view);
 			setLoading(false);
@@ -246,6 +262,31 @@ export function PlaylistDetails() {
 	// Return to wherever the user came from (home, search, an artist, another
 	// playlist…), not a fixed destination.
 	const onBack = () => navigate(-1);
+
+	/**
+	 * Removes one playlist entry. The row index keeps a duplicated video from
+	 * clearing every occurrence locally; the server removes the entry matched
+	 * by its set-video id.
+	 */
+	const removeSong = async (song: Song, index: number) => {
+		if (!id) return;
+		try {
+			await removeSongFromPlaylist(id, song.id);
+			setPlaylist((prev) => {
+				if (!prev) return prev;
+				const next = {
+					...prev,
+					songs: prev.songs.filter((_, i) => i !== index),
+				};
+				writeCache(PLAYLIST_CACHE_PREFIX + id, next);
+				return next;
+			});
+			showToast("Removed from playlist");
+		} catch (error) {
+			console.error("[YuMusic] remove from playlist failed:", error);
+			showToast("Could not remove from playlist");
+		}
+	};
 
 	if (loading) {
 		return (
@@ -425,6 +466,11 @@ export function PlaylistDetails() {
 					return (
 						<SongContextMenu
 							key={`${song.id ?? "playlist-item"}-${index}`}
+							onRemove={
+								playlist.editable
+									? () => void removeSong(song, index)
+									: undefined
+							}
 							song={song}
 						>
 							<SwipeToQueue onQueue={() => addToQueue([song])}>
@@ -538,41 +584,10 @@ export default function PlaylistsPage() {
 		try {
 			setLoading(true);
 			setError(null);
-			const library = await getUserPlaylists();
-
-			if (!library) {
-				setError("Failed to load playlists.");
-				return;
-			}
-
-			// The library renders playlists either as square grid tiles
-			// (MusicTwoRowItem) or as list rows (MusicResponsiveListItem),
-			// depending on the section layout — accept both.
-			const list: LibraryPlaylist[] = [];
-			for (const section of library.contents ?? []) {
-				for (const item of section.contents ?? []) {
-					if (item.is(YTNodes.MusicTwoRowItem)) {
-						if (item.item_type !== "playlist") continue;
-						list.push({
-							id: item.id || "",
-							title: item.title?.text || "Unknown Title",
-							subtitle: cleanSubtitle(item.subtitle?.text || ""),
-							thumbnail: hiResThumb(
-								item.thumbnail?.[item.thumbnail.length - 1]?.url || null,
-							),
-						});
-					} else if (item.is(YTNodes.MusicResponsiveListItem)) {
-						if (item.item_type !== "playlist") continue;
-						const thumbs = item.thumbnail?.contents ?? [];
-						list.push({
-							id: item.id || "",
-							title: item.title || "Unknown Title",
-							subtitle: cleanSubtitle(item.subtitle?.text || ""),
-							thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
-						});
-					}
-				}
-			}
+			const list = (await getLibraryPlaylists(force)).map((playlist) => ({
+				...playlist,
+				subtitle: cleanSubtitle(playlist.subtitle),
+			}));
 			setPlaylists(list);
 			reconcilePinnedTitles(list);
 			if (list.length > 0) writeCache(LIBRARY_CACHE_KEY, list);
