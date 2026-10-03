@@ -11,6 +11,8 @@
 //   RELEASE_TAG         tag being released, e.g. v0.2.0
 //   RELEASE_VERSION     tag without the leading "v"
 //   BUNDLE_DIR          Tauri bundle output (publish only)
+//   UPDATER_TARGET      override the updater platform key (e.g. when a
+//                       Windows build is cross-compiled on Linux)
 //   RELEASE_NOTES       optional override of the generated commit notes
 
 import { execFileSync } from "node:child_process";
@@ -178,6 +180,7 @@ const ARTIFACT_PREFERENCE = [
 	/\.AppImage\.tar\.gz$/,
 	/\.app\.tar\.gz$/,
 	/\.nsis\.zip$/,
+	/-setup\.exe$/,
 	/\.msi\.zip$/,
 	/\.AppImage$/,
 ];
@@ -208,7 +211,7 @@ async function publish() {
 		tag,
 		process.env.RELEASE_NOTES ?? releaseNotes(),
 	);
-	const target = updaterTarget();
+	const target = process.env.UPDATER_TARGET ?? updaterTarget();
 	const artifacts = await signedArtifacts(bundleDir);
 	if (artifacts.length === 0) {
 		throw new Error(`No signed updater artifacts found in ${bundleDir}`);
