@@ -73,7 +73,9 @@ jobs:
       - name: Install Windows cross-compile dependencies
         if: matrix.cross
         run: |
-          sudo apt-get install -y --no-install-recommends clang lld nsis
+          # llvm provides llvm-lib, which cc-rs (ring, via rustls) uses as the
+          # archiver for MSVC targets.
+          sudo apt-get install -y --no-install-recommends clang lld llvm nsis
 
       - name: Set up Rust
         shell: bash
