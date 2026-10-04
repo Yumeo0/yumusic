@@ -484,20 +484,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setInnertube(result.innertube);
 				setIsPlaying(true);
 
-				// Swap the list-item thumbnail for the best one the player
-				// response carries: the biggest variant, center-cut to a square
-				// for music (googleusercontent URLs get a server-side crop,
-				// ytimg ones are cropped by the square containers' object-fit).
-				// Uses the canonical size so the URL matches the list thumbnail
-				// and reuses its HTTP cache entry instead of fetching a variant.
+				// Upgrade the artwork from the player response. YT Music's square
+				// cover (googleusercontent) is kept — it is the clean artwork,
+				// and swapping in the 16:9 video frame re-frames it visibly when
+				// the new image lands. Other sources take the biggest variant,
+				// center-cut to a square for music (googleusercontent URLs get
+				// a server-side crop, ytimg ones are cropped by the square
+				// containers' object-fit).
 				const basic = result.videoInfo.basic_info;
 				const best = biggestThumb(basic.thumbnail);
 				if (best) {
-					const thumbnail =
-						basic.category === "Music" ? hiResThumb(best.url) : best.url;
-					setCurrentSong((prev) =>
-						prev && prev.id === basic.id ? { ...prev, thumbnail } : prev,
-					);
+					setCurrentSong((prev) => {
+						if (!prev || prev.id !== basic.id) return prev;
+						const thumbnail = /googleusercontent\.com|ggpht\.com/.test(
+							prev.thumbnail,
+						)
+							? hiResThumb(prev.thumbnail, 1024)
+							: basic.category === "Music"
+								? hiResThumb(best.url)
+								: best.url;
+						return { ...prev, thumbnail };
+					});
 				}
 			}
 		} catch (error) {
