@@ -16,7 +16,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { EqualizerBars } from "@/components/player/waveform";
 import { ConfirmDeletePlaylistDialog } from "@/components/playlist/confirm-delete-playlist-dialog";
@@ -53,6 +53,7 @@ import {
 	collectionHeader,
 	collectSongs,
 	isEditablePlaylist,
+	mergePlaylistSongs,
 	type RowFallback,
 } from "@/lib/youtube/playlist-data";
 import { isAlbumId } from "@/lib/youtube/youtube.utils";
@@ -94,6 +95,7 @@ export function PlaylistDetails() {
 	const { isPlaying } = usePlayerControls();
 	const [playlist, setPlaylist] = useState<PlaylistView | null>(null);
 	const [loading, setLoading] = useState(true);
+	const [refreshing, setRefreshing] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [search, setSearch] = useState("");
@@ -103,6 +105,18 @@ export function PlaylistDetails() {
 	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const [editOpen, setEditOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
+
+	// Stable handlers for the memoized track rows: the latest visible list is
+	// read through a ref, so row props stay identical across batch appends.
+	const visibleRef = useRef<Array<{ song: Song; index: number }>>([]);
+	const playQueueRef = useRef(playQueue);
+	playQueueRef.current = playQueue;
+	const playTrack = useCallback((position: number) => {
+		void playQueueRef.current(
+			visibleRef.current.map((entry) => entry.song),
+			position,
+		);
+	}, []);
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -115,22 +129,37 @@ export function PlaylistDetails() {
 			cached.data.complete &&
 			Date.now() - cached.timestamp < SYNC_INTERVAL_MS
 		) {
-			setPlaylist(cached.data);
+			setPlaylist({ ...cached.data, id });
 			setLoading(false);
 			return;
 		}
 
-		try {
+		// Content for this id may already be on screen (cached or fetched):
+		// keep it visible and merge the fresh tracks into it once they arrive.
+		const hasContent = !!cached || playlist?.id === id;
+		if (hasContent) {
+			setLoading(false);
+			setRefreshing(true);
+		} else {
 			setLoading(true);
+		}
+		if (cached) {
+			setPlaylist((prev) => (prev?.id === id ? prev : { ...cached.data, id }));
+		}
+
+		try {
 			setError(null);
 			const albumMode = isAlbumId(id);
 			const data = albumMode ? await getAlbum(id) : await getPlaylist(id);
 
 			if (!data) {
-				setError(
-					albumMode ? "Failed to load album." : "Failed to load playlist.",
-				);
-				setLoading(false);
+				if (hasContent) {
+					showToast("Could not refresh playlist");
+				} else {
+					setError(
+						albumMode ? "Failed to load album." : "Failed to load playlist.",
+					);
+				}
 				return;
 			}
 
@@ -141,6 +170,7 @@ export function PlaylistDetails() {
 				thumbnail: header.thumbnail,
 			};
 			const view: PlaylistView = {
+				id,
 				title: header.title,
 				subtitle: cleanSubtitle(header.subtitle),
 				thumbnail: header.thumbnail,
@@ -148,11 +178,16 @@ export function PlaylistDetails() {
 				complete: !("has_continuation" in data && data.has_continuation),
 				editable: !albumMode && isEditablePlaylist(data),
 			};
-			setPlaylist(view);
+			setPlaylist((prev) =>
+				prev?.id === id
+					? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
+					: view,
+			);
 			setLoading(false);
 
 			// Load remaining pages, appending as they arrive (playlists only —
-			// albums fit in a single response).
+			// albums fit in a single response). Only the new batch is applied:
+			// re-diffing the whole list on every page made big playlists stutter.
 			if ("has_continuation" in data && data.has_continuation) {
 				setLoadingMore(true);
 				let current: Playlist = data;
@@ -160,11 +195,13 @@ export function PlaylistDetails() {
 					const continuation = await loadPlaylistContinuation(current);
 					if (!continuation) break;
 					current = continuation;
-					view.songs = [
-						...view.songs,
-						...collectSongs(current.items ?? [], rowFallback),
-					];
-					setPlaylist({ ...view, songs: [...view.songs] });
+					const batch = collectSongs(current.items ?? [], rowFallback);
+					view.songs = [...view.songs, ...batch];
+					setPlaylist((prev) =>
+						prev?.id === id
+							? { ...view, songs: [...prev.songs, ...batch] }
+							: { ...view, songs: [...view.songs] },
+					);
 				}
 				view.complete = !current.has_continuation;
 				setLoadingMore(false);
@@ -173,10 +210,15 @@ export function PlaylistDetails() {
 			writeCache(cacheKey, view);
 		} catch (err) {
 			console.error("Error fetching playlist:", err);
-			// Stale cache beats an error screen
-			if (cached) setPlaylist(cached.data);
-			else setError("Failed to load playlist.");
+			// Whatever is already on screen beats an error screen
+			if (hasContent) {
+				showToast("Could not refresh playlist");
+			} else {
+				setError("Failed to load playlist.");
+			}
+		} finally {
 			setLoading(false);
+			setRefreshing(false);
 		}
 	};
 
@@ -204,25 +246,28 @@ export function PlaylistDetails() {
 	 * clearing every occurrence locally; the server removes the entry matched
 	 * by its set-video id.
 	 */
-	const removeSong = async (song: Song, index: number) => {
-		if (!id) return;
-		try {
-			await removeSongFromPlaylist(id, song.id);
-			setPlaylist((prev) => {
-				if (!prev) return prev;
-				const next = {
-					...prev,
-					songs: prev.songs.filter((_, i) => i !== index),
-				};
-				writeCache(PLAYLIST_CACHE_PREFIX + id, next);
-				return next;
-			});
-			showToast("Removed from playlist");
-		} catch (error) {
-			console.error("[YuMusic] remove from playlist failed:", error);
-			showToast("Could not remove from playlist");
-		}
-	};
+	const removeSong = useCallback(
+		async (song: Song, index: number) => {
+			if (!id) return;
+			try {
+				await removeSongFromPlaylist(id, song.id);
+				setPlaylist((prev) => {
+					if (!prev) return prev;
+					const next = {
+						...prev,
+						songs: prev.songs.filter((_, i) => i !== index),
+					};
+					writeCache(PLAYLIST_CACHE_PREFIX + id, next);
+					return next;
+				});
+				showToast("Removed from playlist");
+			} catch (error) {
+				console.error("[YuMusic] remove from playlist failed:", error);
+				showToast("Could not remove from playlist");
+			}
+		},
+		[id],
+	);
 
 	/** Applies a saved edit to the header and its cache entry. */
 	const onEditSaved = (result: PlaylistEditResult) => {
@@ -331,6 +376,17 @@ export function PlaylistDetails() {
 			.filter(Boolean)
 			.some((text) => text.toLowerCase().includes(query));
 	});
+	// Stable row identity: the same track occurrence keeps its key across
+	// refetches, so an added/removed track doesn't remount the others.
+	const rowKeys = (() => {
+		const occurrence = new Map<string, number>();
+		return visible.map(({ song }) => {
+			const count = occurrence.get(song.id) ?? 0;
+			occurrence.set(song.id, count + 1);
+			return `${song.id}#${count}`;
+		});
+	})();
+	visibleRef.current = visible;
 	/** Display order for "Play all", including rows hidden by the search. */
 	const playOrder = ordered.map((entry) => entry.song);
 	const activeSort =
@@ -343,12 +399,12 @@ export function PlaylistDetails() {
 				<BackButton onClick={onBack} />
 				<button
 					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
-					disabled={loading}
+					disabled={refreshing}
 					onClick={() => fetchPlaylist(true)}
 					title="Refresh playlist"
 					type="button"
 				>
-					<RefreshCw className={cn("size-4", loading && "animate-spin")} />
+					<RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
 				</button>
 			</div>
 
@@ -560,86 +616,21 @@ export function PlaylistDetails() {
 						Loading more…
 					</p>
 				)}
-				{visible.map(({ song, index }, i) => {
-					const isCurrent = currentSong?.id === song.id;
-
-					return (
-						<SongContextMenu
-							key={`${song.id ?? "playlist-item"}-${index}`}
-							onRemove={
-								playlist.editable
-									? () => void removeSong(song, index)
-									: undefined
-							}
-							song={song}
-						>
-							<SwipeToQueue onQueue={() => addToQueue([song])}>
-								<button
-									className={cn(
-										"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors duration-150 hover:bg-foreground/5 sm:px-2.5",
-										isCurrent && "bg-primary/8",
-									)}
-									onClick={() =>
-										playQueue(
-											visible.map((v) => v.song),
-											i,
-										)
-									}
-									type="button"
-								>
-									{/* Index / play / EQ */}
-									<span className="relative grid place-items-center">
-										{isCurrent ? (
-											<EqualizerBars
-												className="size-3.5 text-primary"
-												playing={isPlaying}
-											/>
-										) : (
-											<>
-												<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-													{sort === "newest" ? index + 1 : i + 1}
-												</span>
-												<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
-											</>
-										)}
-									</span>
-
-									{/* Thumbnail */}
-									{song.thumbnail ? (
-										<img
-											alt={song.title}
-											className="size-10 rounded-md border border-foreground/10 object-cover"
-											loading="lazy"
-											src={proxiedImageUrl(song.thumbnail)}
-										/>
-									) : (
-										<div className="size-10 rounded-md bg-muted" />
-									)}
-
-									{/* Title + artists */}
-									<div className="min-w-0">
-										<h3
-											className={cn(
-												"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-												isCurrent && "text-primary",
-											)}
-										>
-											<SongTitle artist={song.artist} title={song.title} />
-										</h3>
-										<p className="truncate text-xs text-muted-foreground">
-											<ArtistLinks song={song} />
-										</p>
-									</div>
-
-									{/* Duration */}
-									<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
-										{song.duration}
-									</span>
-								</button>
-							</SwipeToQueue>
-						</SongContextMenu>
-					);
-				})}
+				{visible.map(({ song, index }, i) => (
+					<PlaylistTrackRow
+						editable={playlist.editable}
+						index={index}
+						isCurrent={currentSong?.id === song.id}
+						isPlaying={currentSong?.id === song.id && isPlaying}
+						key={rowKeys[i]}
+						number={sort === "newest" ? index + 1 : i + 1}
+						onPlay={playTrack}
+						onQueue={addToQueue}
+						onRemove={playlist.editable ? removeSong : undefined}
+						position={i}
+						song={song}
+					/>
+				))}
 				{visible.length === 0 && search.trim() && songs.length > 0 && (
 					<p className="px-4 py-10 text-sm text-muted-foreground sm:px-0">
 						No tracks match "{search.trim()}".
@@ -678,6 +669,103 @@ export function PlaylistDetails() {
 		</div>
 	);
 }
+
+/**
+ * One tracklist row. Memoized on stable props so appending a fetched batch
+ * only renders the new rows, not the whole (often long) list.
+ */
+const PlaylistTrackRow = memo(function PlaylistTrackRow({
+	song,
+	position,
+	index,
+	number,
+	isCurrent,
+	isPlaying,
+	editable,
+	onPlay,
+	onQueue,
+	onRemove,
+}: {
+	song: Song;
+	/** Display position, used to start playback at this row. */
+	position: number;
+	/** Playlist position, used when removing this entry. */
+	index: number;
+	number: number;
+	isCurrent: boolean;
+	isPlaying: boolean;
+	editable: boolean;
+	onPlay: (position: number) => void;
+	onQueue: (songs: Song[]) => void;
+	onRemove?: (song: Song, index: number) => void;
+}) {
+	return (
+		<SongContextMenu
+			onRemove={editable && onRemove ? () => onRemove(song, index) : undefined}
+			song={song}
+		>
+			<SwipeToQueue onQueue={() => onQueue([song])}>
+				<button
+					className={cn(
+						"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors duration-150 hover:bg-foreground/5 sm:px-2.5",
+						isCurrent && "bg-primary/8",
+					)}
+					onClick={() => onPlay(position)}
+					type="button"
+				>
+					{/* Index / play / EQ */}
+					<span className="relative grid place-items-center">
+						{isCurrent ? (
+							<EqualizerBars
+								className="size-3.5 text-primary"
+								playing={isPlaying}
+							/>
+						) : (
+							<>
+								<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+									{number}
+								</span>
+								<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
+							</>
+						)}
+					</span>
+
+					{/* Thumbnail */}
+					{song.thumbnail ? (
+						<img
+							alt={song.title}
+							className="size-10 rounded-md border border-foreground/10 object-cover"
+							loading="lazy"
+							src={proxiedImageUrl(song.thumbnail)}
+						/>
+					) : (
+						<div className="size-10 rounded-md bg-muted" />
+					)}
+
+					{/* Title + artists */}
+					<div className="min-w-0">
+						<h3
+							className={cn(
+								"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+								isCurrent && "text-primary",
+							)}
+						>
+							<SongTitle artist={song.artist} title={song.title} />
+						</h3>
+						<p className="truncate text-xs text-muted-foreground">
+							<ArtistLinks song={song} />
+						</p>
+					</div>
+
+					{/* Duration */}
+					<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
+						{song.duration}
+					</span>
+				</button>
+			</SwipeToQueue>
+		</SongContextMenu>
+	);
+});
 
 export default function PlaylistsPage() {
 	const navigate = useNavigate();

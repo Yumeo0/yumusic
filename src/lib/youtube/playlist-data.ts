@@ -65,6 +65,47 @@ export function collectSongs(
 	return songs;
 }
 
+function sameArtists(a: Song["artists"], b: Song["artists"]): boolean {
+	if (a === b) return true;
+	if (!a || !b || a.length !== b.length) return false;
+	return a.every(
+		(artist, index) =>
+			artist.name === b[index].name && artist.id === b[index].id,
+	);
+}
+
+function sameSong(a: Song, b: Song): boolean {
+	return (
+		a.title === b.title &&
+		a.artist === b.artist &&
+		a.artistId === b.artistId &&
+		a.thumbnail === b.thumbnail &&
+		a.duration === b.duration &&
+		sameArtists(a.artists, b.artists)
+	);
+}
+
+/**
+ * Reconciles a freshly fetched tracklist with the one already on screen.
+ * Entries that still exist keep their previous object (matched by id per
+ * occurrence, so duplicates line up) unless something about them changed;
+ * removed tracks are dropped and new ones added, all in fetched (server)
+ * order.
+ */
+export function mergePlaylistSongs(previous: Song[], fetched: Song[]): Song[] {
+	if (previous.length === 0) return fetched;
+	const byId = new Map<string, Song[]>();
+	for (const song of previous) {
+		const bucket = byId.get(song.id);
+		if (bucket) bucket.push(song);
+		else byId.set(song.id, [song]);
+	}
+	return fetched.map((song) => {
+		const candidate = byId.get(song.id)?.shift();
+		return candidate && sameSong(candidate, song) ? candidate : song;
+	});
+}
+
 /** Removes the redundant "Playlist" prefix from YouTube subtitles. */
 export function cleanSubtitle(text: string): string {
 	return text.replace(/^playlist\s*[•·|:-]?\s*/i, "").trim();
