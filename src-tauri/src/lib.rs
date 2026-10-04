@@ -1,4 +1,5 @@
 mod discord;
+mod media_controls;
 mod proxy;
 
 use std::fs;
@@ -160,6 +161,7 @@ pub fn run() {
 
 	builder
 		.register_asynchronous_uri_scheme_protocol("proxy", proxy::handle)
+		.manage(media_controls::MediaSession::default())
 		.setup(|app| {
 			if cfg!(debug_assertions) {
 				app.handle().plugin(
@@ -168,6 +170,38 @@ pub fn run() {
 						.build(),
 				)?;
 			}
+			// The native media session identifies the app by AUMID; the NSIS
+			// shortcut carries the bundle identifier, so setting it on the
+			// process is what makes Windows show "YuMusic" with its icon
+			// instead of "Unknown App".
+			#[cfg(target_os = "windows")]
+			{
+				use windows::core::HSTRING;
+				use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+				let identifier = app.config().identifier.clone();
+				unsafe {
+					if let Err(error) =
+						SetCurrentProcessExplicitAppUserModelID(&HSTRING::from(identifier))
+					{
+						eprintln!("[media] AUMID not set: {error}");
+					}
+				}
+			}
+			// Native media session: the OS gets the app's real name and icon,
+			// and the hardware media keys reach the frontend. Windows needs
+			// the main window's handle.
+			#[cfg(desktop)]
+			{
+				#[cfg(target_os = "windows")]
+				let hwnd = app
+					.get_webview_window("main")
+					.and_then(|window| window.hwnd().ok())
+					.map(|hwnd| hwnd.0 as u64);
+				#[cfg(not(target_os = "windows"))]
+				let hwnd: Option<u64> = None;
+				app.state::<media_controls::MediaSession>()
+					.init(app.handle(), hwnd);
+			}
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
@@ -175,7 +209,8 @@ pub fn run() {
 			login,
 			logout,
 			discord::set_discord_activity,
-			discord::clear_discord_activity
+			discord::clear_discord_activity,
+			media_controls::update_media_session
 		])
 		.build(tauri::generate_context!())
 		.expect("error while building tauri application")

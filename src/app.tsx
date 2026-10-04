@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
 	HouseIcon,
 	LibraryIcon,
@@ -169,6 +170,160 @@ function DiscordPresenceSync() {
 			invoke("clear_discord_activity").catch(() => undefined);
 		}
 	}, [discordEnabled]);
+
+	return null;
+}
+
+interface MediaControlPayload {
+	action: string;
+	position?: number;
+}
+
+/**
+ * Bridges playback to the native OS media session (Windows SMTC, macOS Now
+ * Playing, Linux MPRIS — see the Rust side). Owning the session natively is
+ * what gives the system the app's real name and icon; WebView2's own
+ * MediaSession shows up as "Unknown App". The hardware media keys arrive as
+ * `media-control` events.
+ */
+function MediaSessionSync() {
+	const {
+		currentSong,
+		currentIndex,
+		hasNext,
+		next,
+		previous,
+		videoElementRef,
+	} = usePlayer();
+	const { isPlaying, toggle } = usePlayerControls();
+	const [settings] = useSettings();
+
+	// Next may roll into the autoplay radio once the queue ends, matching the
+	// in-app button; previous stays queue-only so it never rewrites the queue
+	// from history.
+	const canGoNext = hasNext;
+	const canStepPrevious = currentIndex > 0;
+
+	// Media key presses are handled with the latest player state.
+	const live = useRef({
+		canGoNext,
+		canStepPrevious,
+		isPlaying,
+		next,
+		previous,
+		toggle,
+		videoElementRef,
+	});
+	live.current = {
+		canGoNext,
+		canStepPrevious,
+		isPlaying,
+		next,
+		previous,
+		toggle,
+		videoElementRef,
+	};
+
+	useEffect(() => {
+		if (!isTauri()) return;
+		let disposed = false;
+		let unlisten: (() => void) | undefined;
+		listen<MediaControlPayload>("media-control", (event) => {
+			const { action, position } = event.payload;
+			const video = live.current.videoElementRef?.current;
+			switch (action) {
+				case "play":
+					if (!live.current.isPlaying) live.current.toggle();
+					break;
+				case "pause":
+				case "stop":
+					if (live.current.isPlaying) live.current.toggle();
+					break;
+				case "toggle":
+					live.current.toggle();
+					break;
+				case "next":
+					if (live.current.canGoNext) void live.current.next();
+					break;
+				case "previous":
+					if (live.current.canStepPrevious) void live.current.previous();
+					break;
+				case "seek-by":
+					if (video && typeof position === "number") {
+						video.currentTime = Math.max(0, video.currentTime + position);
+					}
+					break;
+				case "set-position":
+					if (video && typeof position === "number") {
+						video.currentTime = position;
+					}
+					break;
+			}
+		}).then((fn) => {
+			if (disposed) fn();
+			else unlisten = fn;
+		});
+		return () => {
+			disposed = true;
+			unlisten?.();
+		};
+	}, []);
+
+	const title = currentSong
+		? displayTitle(
+				currentSong.title,
+				settings.titleMode,
+				settings.cleanTitles,
+				currentSong.artist,
+			)
+		: null;
+	const artist = currentSong ? formatArtistName(currentSong.artist) : null;
+	const cover = currentSong?.thumbnail ?? null;
+	const songId = currentSong?.id ?? null;
+
+	// Snapshot for the native session; the same cover the fullscreen player
+	// shows (the OS fetches the URL itself).
+	const push = useCallback(() => {
+		if (!isTauri()) return;
+		const video = videoElementRef?.current;
+		const duration =
+			video && Number.isFinite(video.duration) && video.duration > 0
+				? video.duration
+				: null;
+		invoke("update_media_session", {
+			snapshot: {
+				artist,
+				canGoNext,
+				canGoPrevious: canStepPrevious,
+				coverUrl: cover,
+				duration,
+				id: songId,
+				playing: isPlaying,
+				position: video?.currentTime ?? 0,
+				title,
+			},
+		}).catch(() => undefined);
+	}, [
+		artist,
+		canGoNext,
+		canStepPrevious,
+		cover,
+		isPlaying,
+		songId,
+		title,
+		videoElementRef,
+	]);
+
+	useEffect(() => {
+		push();
+	}, [push]);
+
+	// Position ticks keep the OS progress bar moving while playing.
+	useEffect(() => {
+		if (!isPlaying) return;
+		const timer = window.setInterval(push, 5000);
+		return () => window.clearInterval(timer);
+	}, [isPlaying, push]);
 
 	return null;
 }
@@ -454,6 +609,7 @@ function AppShell({
 			<AmbientSync />
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
+			<MediaSessionSync />
 			<UpdateNotifier />
 			<Titlebar />
 			<div

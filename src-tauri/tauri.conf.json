@@ -18,7 +18,8 @@
 				"resizable": true,
 				"fullscreen": false,
 				"decorations": false,
-				"dragDropEnabled": false
+				"dragDropEnabled": false,
+				"additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,HardwareMediaKeyHandling,MediaSessionService"
 			}
 		],
 		"security": {

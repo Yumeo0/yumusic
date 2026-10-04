@@ -47,6 +47,8 @@ export interface Song {
 interface PlayerContextType {
 	currentSong: Song | null;
 	play: (song: Song, queue?: Song[]) => void;
+	/** Replaces the queue with `songs` and starts playing at `index`. */
+	playQueue: (songs: Song[], index: number) => void;
 	videoInfo: YT.VideoInfo | null;
 	innertube: Innertube | null;
 	queue: Song[];
@@ -538,18 +540,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	// Keep the queue's autoplay section stocked: whenever the current track
 	// changes and no suggestions are pending, fetch the radio mix for it. The
 	// list refills once its tracks have been consumed, giving endless radio.
+	// Keyed on the song id, not the object: the thumbnail swap mid-playback
+	// replaces `currentSong` with a new object, which would otherwise cancel
+	// the in-flight fetch and then block the retry for the same id.
+	const autoplaySongId = currentSong?.id ?? null;
 	useEffect(() => {
-		if (!settings.autoplay || !currentSong) {
+		if (!settings.autoplay || !autoplaySongId) {
 			setAutoplayTracks([]);
 			autoplayForRef.current = null;
 			return;
 		}
 		if (autoplayTracks.length > 0 || autoplayLoadingRef.current) return;
-		if (autoplayForRef.current === currentSong.id) return;
-		autoplayForRef.current = currentSong.id;
+		if (autoplayForRef.current === autoplaySongId) return;
+		autoplayForRef.current = autoplaySongId;
 		let cancelled = false;
 		autoplayLoadingRef.current = true;
-		getAutoplaySongs(currentSong.id)
+		getAutoplaySongs(autoplaySongId)
 			.then((tracks) => {
 				if (!cancelled) setAutoplayTracks(tracks);
 			})
@@ -560,7 +566,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			cancelled = true;
 			autoplayLoadingRef.current = false;
 		};
-	}, [settings.autoplay, currentSong, autoplayTracks.length]);
+	}, [settings.autoplay, autoplaySongId, autoplayTracks.length]);
 
 	const play = useCallback(
 		async (song: Song, newQueue?: Song[]) => {
@@ -598,6 +604,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			await playSong(song);
 		},
 		[currentSong, queue, playSong],
+	);
+
+	/**
+	 * Starts a list at `index` with the whole list as the queue, so previous
+	 * and next walk the list in both directions.
+	 */
+	const playQueue = useCallback(
+		async (songs: Song[], index: number) => {
+			const song = songs[index];
+			if (!song) return;
+			if (currentSong?.id === song.id) {
+				setIsPlaying(true);
+				return;
+			}
+			if (currentSong) {
+				setHistory((prev) => [...prev, currentSong]);
+			}
+			// A fresh start gets a fresh radio (same as `play`).
+			setAutoplayTracks([]);
+			autoplayForRef.current = null;
+			setQueueState(songs);
+			setCurrentIndex(index);
+			await playSong(song);
+		},
+		[currentSong, playSong],
 	);
 
 	const next = useCallback(async () => {
@@ -751,6 +782,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		() => ({
 			currentSong,
 			play,
+			playQueue,
 			videoInfo,
 			innertube,
 			queue,
@@ -772,6 +804,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[
 			currentSong,
 			play,
+			playQueue,
 			videoInfo,
 			innertube,
 			queue,

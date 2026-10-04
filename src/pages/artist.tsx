@@ -189,7 +189,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const { play, addToQueue, currentSong } = usePlayer();
+	const { play, playQueue, addToQueue, currentSong } = usePlayer();
 	const { isPlaying } = usePlayerControls();
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -340,7 +340,7 @@ export default function ArtistPage() {
 												"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05]",
 												isCurrent && "bg-primary/[0.08]",
 											)}
-											onClick={() => play(song, artist.songs.slice(index + 1))}
+											onClick={() => playQueue(artist.songs, index)}
 											type="button"
 										>
 											<span className="relative grid place-items-center">

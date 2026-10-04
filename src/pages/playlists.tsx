@@ -221,7 +221,7 @@ const PLAYLIST_SORTS: Array<{ value: PlaylistSort; label: string }> = [
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const { play, addToQueue, currentSong } = usePlayer();
+	const { play, playQueue, addToQueue, currentSong } = usePlayer();
 	const { isPlaying } = usePlayerControls();
 	const [playlist, setPlaylist] = useState<PlaylistView | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -632,9 +632,9 @@ export function PlaylistDetails() {
 										isCurrent && "bg-primary/8",
 									)}
 									onClick={() =>
-										play(
-											song,
-											visible.slice(i + 1).map((v) => v.song),
+										playQueue(
+											visible.map((v) => v.song),
+											i,
 										)
 									}
 									type="button"
