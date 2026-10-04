@@ -3,7 +3,10 @@ import { ListMusic, Loader2, Plus, Search, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
-import { addSongToCachedPlaylist } from "@/lib/stores/playlist-cache";
+import {
+	addSongToCachedPlaylist,
+	invalidateLibraryCache,
+} from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
@@ -83,6 +86,7 @@ export function AddToPlaylistDialog({
 		setBusy("new");
 		try {
 			await createPlaylist(title, song.id);
+			invalidateLibraryCache();
 			showToast(`Added to ${title}`);
 			onOpenChange(false);
 		} catch (error) {

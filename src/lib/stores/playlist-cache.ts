@@ -81,6 +81,24 @@ export function removePlaylistFromCaches(id: string) {
 	}
 }
 
+const LIBRARY_CHANGED_EVENT = "yumusic:library-changed";
+
+/** Drops the cached library list so mounted and future views refetch it. */
+export function invalidateLibraryCache() {
+	try {
+		localStorage.removeItem(LIBRARY_CACHE_KEY);
+	} catch {
+		// best-effort
+	}
+	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+}
+
+/** Subscribes to library invalidations; returns the unsubscribe function. */
+export function subscribeToLibraryChanges(listener: () => void): () => void {
+	window.addEventListener(LIBRARY_CHANGED_EVENT, listener);
+	return () => window.removeEventListener(LIBRARY_CHANGED_EVENT, listener);
+}
+
 /** Tracks from a playlist-page visit less than a sync interval ago. */
 export function readCachedPlaylistSongs(id: string): Song[] | null {
 	const cached = readCache<PlaylistView>(PLAYLIST_CACHE_PREFIX + id);

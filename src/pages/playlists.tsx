@@ -32,6 +32,7 @@ import {
 	type PlaylistView,
 	readCache,
 	SYNC_INTERVAL_MS,
+	subscribeToLibraryChanges,
 	writeCache,
 } from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
@@ -636,6 +637,14 @@ export default function PlaylistsPage() {
 	useEffect(() => {
 		fetchPlaylists();
 	}, []);
+
+	// A playlist was created (or the library otherwise changed) elsewhere:
+	// bypass the cache and refresh the grid in place.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylists changes on every re-render and should not be used as a hook dependency.
+	useEffect(
+		() => subscribeToLibraryChanges(() => void fetchPlaylists(true)),
+		[],
+	);
 
 	if (loading) {
 		return (
