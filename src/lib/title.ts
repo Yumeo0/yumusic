@@ -108,6 +108,21 @@ function isLatinName(name: string): boolean {
 }
 
 /**
+ * The same credit when one name is the other plus a "Ch."/"Channel" group
+ * suffix ("Kobo Kanaeru Ch. hololive" vs the title's "Kobo Kanaeru").
+ * Returns the clean name, or null when the names are unrelated.
+ */
+function channelDecoratedPair(a: string, b: string): string | null {
+	const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+	if (shorter.length === 0) return null;
+	if (longer.slice(0, shorter.length).toLowerCase() !== shorter.toLowerCase()) {
+		return null;
+	}
+	const rest = longer.slice(shorter.length);
+	return /^\s+ch(?:annel)?\.?\s+\S/i.test(rest) ? shorter : null;
+}
+
+/**
  * Merges a song's artists with the cover performers parsed from the title.
  * Names are normalized first ("Shion Ch. 紫咲シオン" → "紫咲シオン"). Entries
  * at the same position are the same credit when they match case-insensitively
@@ -130,6 +145,14 @@ export function mergeArtistNames(
 		if (coverName && artistKey(artistName) === artistKey(coverName)) {
 			consumed[i] = true;
 			merged.push({ name: artistName, id: artist.id });
+			continue;
+		}
+		const channelPair = coverName
+			? channelDecoratedPair(artistName, coverName)
+			: null;
+		if (channelPair) {
+			consumed[i] = true;
+			merged.push({ name: channelPair, id: artist.id });
 			continue;
 		}
 		if (coverName && isLatinName(artistName) !== isLatinName(coverName)) {

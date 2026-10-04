@@ -207,6 +207,26 @@ describe("artist name romaji tails", () => {
 			),
 		).toEqual([{ name: "紫咲シオン", id: undefined }, { name: "湊あくあ" }]);
 	});
+
+	test("channel-decorated artist merges with the title credit", () => {
+		const parts = formatTitleParts(
+			"Overdose - Kobo Kanaeru (Cover)",
+			"original",
+			true,
+			"Kobo Kanaeru Ch. hololive",
+		);
+		expect(parts.coverArtists).toEqual(["Kobo Kanaeru"]);
+		expect(
+			mergeArtistNames(
+				[{ name: "Kobo Kanaeru Ch. hololive", id: "UC1" }],
+				parts.coverArtists,
+			),
+		).toEqual([{ name: "Kobo Kanaeru", id: "UC1" }]);
+		// A surname tail must not be mistaken for a channel decoration.
+		expect(
+			mergeArtistNames([{ name: "Charlie Ch. Brown" }], ["Brown"]),
+		).toEqual([{ name: "Charlie Ch. Brown" }, { name: "Brown" }]);
+	});
 });
 
 describe("cover markers and artist credit tails", () => {
