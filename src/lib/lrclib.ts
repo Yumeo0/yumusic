@@ -37,7 +37,9 @@ export function parseLrc(lrc: string): LrcLine[] {
 	return lines
 		.map((line) => ({
 			...line,
-			time: Math.max(0, line.time + offsetMs / 1000),
+			// LRC offset convention: "+" makes lyrics appear sooner, so the
+			// tag value is subtracted from every timestamp.
+			time: Math.max(0, line.time - offsetMs / 1000),
 		}))
 		.sort((a, b) => a.time - b.time);
 }
@@ -82,6 +84,27 @@ function toPlain(record: LrclibRecord): string | null {
 	return lines.length > 0 ? lines.join("\n") : null;
 }
 
+/**
+ * Records carrying a non-zero `[offset:…]` are corrected copies of one
+ * upload; when LRCLIB holds duplicates, the clean copy usually matches the
+ * video. They are penalized in ranking, not excluded — without a clean
+ * candidate an offset record still wins.
+ */
+const OFFSET_RANKING_PENALTY_SEC = 1;
+
+function hasNonZeroOffset(record: LrclibRecord): boolean {
+	const offset = record.syncedLyrics?.match(/\[offset:\s*([+-]?\d+)\s*\]/i);
+	return offset != null && Number.parseInt(offset[1], 10) !== 0;
+}
+
+/** Ranking distance: duration delta, penalizing offset-carrying copies. */
+function rankingDistance(record: LrclibRecord, durationSec: number): number {
+	return (
+		Math.abs(record.duration - durationSec) +
+		(hasNonZeroOffset(record) ? OFFSET_RANKING_PENALTY_SEC : 0)
+	);
+}
+
 /** Best record for a query: prefer one that carries timed lyrics, then the
  * closest duration; ties keep LRCLIB's own (relevance) order. */
 async function bestRecord(
@@ -102,8 +125,7 @@ async function bestRecord(
 		const aSynced = a.syncedLyrics ? 1 : 0;
 		const bSynced = b.syncedLyrics ? 1 : 0;
 		if (aSynced !== bSynced) return aSynced > bSynced ? a : b;
-		return Math.abs(a.duration - durationSec) <=
-			Math.abs(b.duration - durationSec)
+		return rankingDistance(a, durationSec) <= rankingDistance(b, durationSec)
 			? a
 			: b;
 	});
@@ -112,13 +134,14 @@ async function bestRecord(
 /**
  * Fetches time-synced lyrics from LRCLIB (free, no key, CORS enabled).
  * Uses the app's cleaned title (the same normalization scrobbles use, which
- * strips covers/credits and resolves "Original - Translation" titles), tries an
- * exact artist+track+duration match, then searches by title+artist. When
- * `allowLooseMatch` is set it additionally searches by title alone — more
- * forgiving but can match the wrong version. A loose match is only returned as
- * synced when its length is within LOOSE_SYNCED_TOLERANCE_SEC; otherwise the
- * lyrics are returned as unsynced text so they can't desync. Returns null when
- * nothing usable is found; callers re-fetch once the duration becomes known.
+ * strips covers/credits and resolves "Original - Translation" titles) and
+ * ranks artist+title search results — synced first, then closest duration,
+ * with offset-carrying duplicates penalized. When `allowLooseMatch` is set it
+ * additionally searches by title alone — more forgiving but can match the
+ * wrong version. A loose match is only returned as synced when its length is
+ * within LOOSE_SYNCED_TOLERANCE_SEC; otherwise the lyrics are returned as
+ * unsynced text so they can't desync. Returns null when nothing usable is
+ * found; callers re-fetch once the duration becomes known.
  */
 export async function fetchSyncedLyrics(
 	title: string,
@@ -142,20 +165,10 @@ export async function fetchSyncedLyrics(
 	};
 
 	try {
-		// Exact artist+track+duration match.
-		if (name) {
-			const res = await fetch(
-				`https://lrclib.net/api/get?artist_name=${encodeURIComponent(name)}&track_name=${encodeURIComponent(track)}&duration=${Math.round(durationSec)}`,
-			);
-			if (res.ok) {
-				const record = (await res.json()) as LrclibRecord;
-				if (Math.abs(record.duration - durationSec) <= DURATION_TOLERANCE_SEC) {
-					return confirmedResult(record);
-				}
-			}
-		}
-
-		// Confirmed search: title + artist.
+		// Confirmed search: title + artist. The single-record /api/get lookup
+		// is deliberately not used: with duplicate uploads it returns an
+		// arbitrary one (often an old copy with a bogus offset), while the
+		// ranked search picks the cleanest.
 		if (name) {
 			const record = await bestRecord(
 				`https://lrclib.net/api/search?track_name=${encodeURIComponent(track)}&artist_name=${encodeURIComponent(name)}`,
