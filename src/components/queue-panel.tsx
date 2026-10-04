@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, X } from "lucide-react";
-import { useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { SongContextMenu } from "@/components/song-menu";
 import { SongTitle } from "@/components/song-title";
 import {
@@ -60,6 +60,56 @@ export function QueuePanel() {
 		overscan: 8,
 	});
 
+	// Opening the queue eases from wherever the list was left to the current
+	// song. Animated by hand rather than with `behavior: "smooth"`, which
+	// WebView2 drops when the OS animation setting is off (same workaround as
+	// the lyrics panel). Read through a ref so changing tracks while browsing
+	// doesn't yank the list.
+	const currentIndexRef = useRef(currentIndex);
+	currentIndexRef.current = currentIndex;
+	const scrollFrameRef = useRef(0);
+	const stopScroll = useCallback(() => {
+		cancelAnimationFrame(scrollFrameRef.current);
+		scrollFrameRef.current = 0;
+	}, []);
+	useEffect(() => {
+		if (!open) return;
+		const container = scrollRef.current;
+		const index = currentIndexRef.current;
+		if (!container || index < 0) return;
+		// Re-read the target every frame: scrolling through a long list renders
+		// (and measures) rows, which shifts the offsets and would otherwise
+		// leave the animation short or past the song.
+		const target = () => {
+			const offset = rowVirtualizer.getOffsetForIndex(index, "center")?.[0];
+			if (offset === undefined) return null;
+			const max = container.scrollHeight - container.clientHeight;
+			return Math.min(max, Math.max(0, offset));
+		};
+		const from = container.scrollTop;
+		const initial = target();
+		if (initial === null) return;
+		const distance = initial - from;
+		if (Math.abs(distance) < 1) return;
+		const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
+		const start = performance.now();
+		const tick = (now: number) => {
+			const t = Math.min((now - start) / duration, 1);
+			// easeOutCubic: quick off the line, settling onto the song
+			const eased = 1 - (1 - t) ** 3;
+			const live = target() ?? initial;
+			container.scrollTop = from + (live - from) * eased;
+			if (t < 1) {
+				scrollFrameRef.current = requestAnimationFrame(tick);
+			} else {
+				scrollFrameRef.current = 0;
+				rowVirtualizer.scrollToIndex(index, { align: "center" });
+			}
+		};
+		scrollFrameRef.current = requestAnimationFrame(tick);
+		return stopScroll;
+	}, [open, rowVirtualizer, stopScroll]);
+
 	return (
 		<aside
 			className={cn(
@@ -111,6 +161,8 @@ export function QueuePanel() {
 
 			<div
 				className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]"
+				onTouchMove={stopScroll}
+				onWheel={stopScroll}
 				ref={scrollRef}
 			>
 				{queue.length === 0 && autoplayTracks.length === 0 ? (
