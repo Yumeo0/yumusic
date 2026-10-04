@@ -19,48 +19,48 @@ import {
 	useNavigate,
 } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Player } from "./components/player";
-import { QueuePanel } from "./components/queue-panel";
-import { Titlebar } from "./components/titlebar";
-import { Toaster } from "./components/toaster";
-import { UpdateNotifier } from "./components/updates";
-import { UserMenu } from "./components/user-menu";
+import { Titlebar } from "./components/app/titlebar";
+import { Toaster } from "./components/app/toaster";
+import { UpdateNotifier } from "./components/app/updates";
+import { UserMenu } from "./components/app/user-menu";
+import { Player } from "./components/player/player";
+import { QueuePanel } from "./components/queue/queue-panel";
 import {
 	PlayerProvider,
 	usePlayer,
 	usePlayerControls,
 } from "./contexts/player-context";
-import { useAmbientColor } from "./lib/hooks";
-import { findRecording, submitListen } from "./lib/listenbrainz";
-import { listeningSession } from "./lib/listening";
 import {
 	useNowPlayingMotion,
 	useNowPlayingSwipe,
-} from "./lib/now-playing-motion";
-import { usePinnedPlaylists } from "./lib/pinned";
+} from "./lib/motion/now-playing-motion";
+import { listeningSession } from "./lib/player/listening";
 import {
 	setQueueOpen,
 	toggleNowPlaying,
 	toggleQueue,
 	useNowPlayingOpen,
 	useQueueOpen,
-} from "./lib/player-ui";
-import { useSettings } from "./lib/settings";
-import { IS_MOBILE, proxiedImageUrl } from "./lib/tauri";
+} from "./lib/player/player-ui";
+import { findRecording, submitListen } from "./lib/services/listenbrainz";
+import { usePinnedPlaylists } from "./lib/stores/pinned";
+import { useSettings } from "./lib/stores/settings";
+import { useAmbientColor } from "./lib/utils/hooks";
+import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
 	cleanSearchTitle,
 	displayTitle,
 	formatArtistName,
 	formatTitleParts,
 	joinArtists,
-} from "./lib/title";
-import { cn } from "./lib/utils";
+} from "./lib/utils/title";
+import { cn } from "./lib/utils/utils";
 import {
 	getTrackMeta,
 	getUserProfile,
 	getYoutubeClient,
 	type TrackMeta,
-} from "./lib/youtube-client";
+} from "./lib/youtube/youtube-client";
 import ArtistPage from "./pages/artist";
 import HomePage from "./pages/home";
 import { NowPlayingPage } from "./pages/now-playing";

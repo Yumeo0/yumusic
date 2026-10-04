@@ -18,25 +18,30 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { ArtistLinks } from "@/components/artist-link";
-import { LyricsPanel } from "@/components/lyrics";
-import { SongContextMenu } from "@/components/song-menu";
-import { SongTitle } from "@/components/song-title";
-import { VolumeControl } from "@/components/volume-control";
-import { ProgressBar } from "@/components/waveform";
+import { LyricsPanel } from "@/components/lyrics/lyrics";
+import { VolumeControl } from "@/components/player/volume-control";
+import { ProgressBar } from "@/components/player/waveform";
+import { ArtistLinks } from "@/components/song/artist-link";
+import { SongContextMenu } from "@/components/song/song-menu";
+import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
-import { useMediaTime } from "@/lib/hooks";
-import { useLyricsMorph } from "@/lib/lyrics-motion";
-import { setQueueRevealTarget } from "@/lib/player-ui";
+import { useLyricsMorph } from "@/lib/motion/lyrics-motion";
 import {
 	mergeTouchHandlers,
 	type QueueGestureCheck,
 	useQueueDragGesture,
 	useQueueSheetGesture,
-} from "@/lib/queue-drag";
-import { proxiedImageUrl } from "@/lib/tauri";
-import { cn, coverViewBox, formatDuration, formatTime } from "@/lib/utils";
+} from "@/lib/motion/queue-drag";
+import { setQueueRevealTarget } from "@/lib/player/player-ui";
+import { useMediaTime } from "@/lib/utils/hooks";
+import { proxiedImageUrl } from "@/lib/utils/tauri";
+import {
+	cn,
+	coverViewBox,
+	formatDuration,
+	formatTime,
+} from "@/lib/utils/utils";
 
 interface NowPlayingPageProps {
 	onClose: () => void;

@@ -1,9 +1,9 @@
 import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { HomeFeed } from "@/components/home-feed";
-import { cn } from "@/lib/utils";
-import SearchResults from "../components/search-results";
+import { HomeFeed } from "@/components/home/home-feed";
+import { cn } from "@/lib/utils/utils";
+import SearchResults from "../components/search/search-results";
 
 export default function HomePage() {
 	const [searchParams, setSearchParams] = useSearchParams();

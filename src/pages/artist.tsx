@@ -9,18 +9,22 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
-import { ArtistLinks } from "@/components/artist-link";
-import { SongContextMenu } from "@/components/song-menu";
-import { SongTitle } from "@/components/song-title";
-import { SwipeToQueue } from "@/components/swipe-to-queue";
-import { EqualizerBars } from "@/components/waveform";
+import { EqualizerBars } from "@/components/player/waveform";
+import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
+import { ArtistLinks } from "@/components/song/artist-link";
+import { SongContextMenu } from "@/components/song/song-menu";
+import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
-import { proxiedImageUrl } from "@/lib/tauri";
-import { formatArtistName } from "@/lib/title";
-import { cn, hiResThumb } from "@/lib/utils";
-import { artistListOf, artistNames, videoIdOf } from "@/lib/youtube.utils";
-import { getYoutubeClient } from "@/lib/youtube-client";
+import { proxiedImageUrl } from "@/lib/utils/tauri";
+import { formatArtistName } from "@/lib/utils/title";
+import { cn, hiResThumb } from "@/lib/utils/utils";
+import {
+	artistListOf,
+	artistNames,
+	videoIdOf,
+} from "@/lib/youtube/youtube.utils";
+import { getYoutubeClient } from "@/lib/youtube/youtube-client";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;

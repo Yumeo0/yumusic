@@ -1,3 +1,3 @@
 import "./globals.css";
-import "./lib/tauri";
+import "./lib/utils/tauri";
 import "./app";

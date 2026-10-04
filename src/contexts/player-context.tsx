@@ -13,17 +13,17 @@ import {
 } from "react";
 import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
-import { botguardService } from "@/lib/botguard-service";
-import { MAX_VOLUME } from "@/lib/hooks";
-import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/listening";
-import { useSettings } from "@/lib/settings";
-import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils";
-import { isVideoId } from "@/lib/youtube.utils";
+import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
+import { useSettings } from "@/lib/stores/settings";
+import { MAX_VOLUME } from "@/lib/utils/hooks";
+import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils/utils";
+import { botguardService } from "@/lib/youtube/botguard-service";
+import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	fetchFunction,
 	getAutoplaySongs,
 	getSongStream,
-} from "@/lib/youtube-client";
+} from "@/lib/youtube/youtube-client";
 
 export interface Song {
 	id: string;

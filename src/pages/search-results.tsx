@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { YTNodes } from "youtubei.js/web";
-import { SongTitle } from "@/components/song-title";
+import { SongTitle } from "@/components/song/song-title";
 import { Card } from "@/components/ui/card";
-import { proxiedImageUrl } from "../lib/tauri";
-import { getYoutubeClient } from "../lib/youtube-client";
+import { proxiedImageUrl } from "../lib/utils/tauri";
+import { getYoutubeClient } from "../lib/youtube/youtube-client";
 
 interface SearchResultsPageProps {
 	query: string;

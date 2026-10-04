@@ -16,15 +16,16 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
-import { ArtistLinks } from "@/components/artist-link";
-import { SongContextMenu } from "@/components/song-menu";
-import { SongTitle } from "@/components/song-title";
-import { SwipeToQueue } from "@/components/swipe-to-queue";
+import { EqualizerBars } from "@/components/player/waveform";
+import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
+import { ArtistLinks } from "@/components/song/artist-link";
+import { SongContextMenu } from "@/components/song/song-menu";
+import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
-import { EqualizerBars } from "@/components/waveform";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
-import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/pinned";
+import { shareLink } from "@/lib/services/share";
+import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/stores/pinned";
 import {
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
@@ -32,13 +33,16 @@ import {
 	readCache,
 	SYNC_INTERVAL_MS,
 	writeCache,
-} from "@/lib/playlist-cache";
-import { shareLink } from "@/lib/share";
-import { proxiedImageUrl } from "@/lib/tauri";
-import { useDisplayTitle } from "@/lib/title";
-import { showToast } from "@/lib/toast";
-import { cn, hiResThumb, parseDuration } from "@/lib/utils";
-import { artistListOf, isAlbumId, videoIdOf } from "../lib/youtube.utils";
+} from "@/lib/stores/playlist-cache";
+import { showToast } from "@/lib/stores/toast";
+import { proxiedImageUrl } from "@/lib/utils/tauri";
+import { useDisplayTitle } from "@/lib/utils/title";
+import { cn, hiResThumb, parseDuration } from "@/lib/utils/utils";
+import {
+	artistListOf,
+	isAlbumId,
+	videoIdOf,
+} from "../lib/youtube/youtube.utils";
 import {
 	type Album,
 	getAlbum,
@@ -48,7 +52,7 @@ import {
 	loadPlaylistContinuation,
 	type Playlist,
 	removeSongFromPlaylist,
-} from "../lib/youtube-client";
+} from "../lib/youtube/youtube-client";
 
 /** Whether parsed credits name a real artist, not the unknown placeholder. */
 function hasArtistCredit(artists: Array<{ name: string }>): boolean {

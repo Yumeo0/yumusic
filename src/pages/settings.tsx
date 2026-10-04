@@ -10,18 +10,18 @@ import {
 	Trash2,
 } from "lucide-react";
 import { type DragEvent, useEffect, useState } from "react";
+import { UpdatesSection } from "@/components/app/updates";
 import { Input } from "@/components/ui/input";
-import { UpdatesSection } from "@/components/updates";
-import { validateListenbrainzToken } from "@/lib/listenbrainz";
 import {
 	LYRICS_KIND_LABELS,
 	LYRICS_PROVIDERS,
 	type LyricsProviderId,
-} from "@/lib/lyrics-providers";
-import { useSettings } from "@/lib/settings";
-import { proxiedImageUrl } from "@/lib/tauri";
-import { updaterSupported } from "@/lib/updater";
-import { cn } from "@/lib/utils";
+} from "@/lib/lyrics/lyrics-providers";
+import { validateListenbrainzToken } from "@/lib/services/listenbrainz";
+import { updaterSupported } from "@/lib/services/updater";
+import { useSettings } from "@/lib/stores/settings";
+import { proxiedImageUrl } from "@/lib/utils/tauri";
+import { cn } from "@/lib/utils/utils";
 
 const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
 const PROVIDER_KINDS = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.kinds]));
