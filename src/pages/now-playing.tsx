@@ -739,7 +739,7 @@ function TransportRow({
 			<div className="col-start-2 row-start-1 flex items-center gap-4">
 				<button
 					aria-label="Previous"
-					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 active:origin-center! disabled:pointer-events-none disabled:opacity-25"
 					data-np-prev
 					disabled={!hasPrevious}
 					onClick={onPrevious}
@@ -750,7 +750,7 @@ function TransportRow({
 				</button>
 				<button
 					aria-label={isPlaying ? "Pause" : "Play"}
-					className="np-morph grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_6px_24px_-6px_color-mix(in_oklab,var(--primary)_65%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90"
+					className="np-morph grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_6px_24px_-6px_color-mix(in_oklab,var(--primary)_65%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90 active:origin-center!"
 					data-np-play
 					onClick={onToggle}
 					style={morphStyle("--np-play")}
@@ -764,7 +764,7 @@ function TransportRow({
 				</button>
 				<button
 					aria-label="Next"
-					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 active:origin-center! disabled:pointer-events-none disabled:opacity-25"
 					data-np-next
 					disabled={!hasNext}
 					onClick={onNext}
