@@ -550,9 +550,9 @@ function LyricsFallback() {
 }
 
 /**
- * Three white dots representing extended silence in the lyrics.
- * With `looping` they fill sequentially on a loop; otherwise `progress`
- * (0-1) fills them up in sync with the song time.
+ * Three white dots representing extended silence in the lyrics. The dots
+ * always bounce up and down; with `looping` they also fill sequentially on a
+ * loop, otherwise `progress` (0-1) fills them up in sync with the song time.
  */
 function PauseDots({
 	progress,
@@ -570,10 +570,10 @@ function PauseDots({
 						className={cn(
 							"size-2 rounded-full bg-white/25",
 							filled && "bg-white shadow-[0_0_8px_rgba(255,255,255,0.45)]",
-							looping && "animate-dot-fill",
+							looping ? "animate-dot-fill" : "animate-dot-wave",
 						)}
 						key={d}
-						style={looping ? { animationDelay: `${d * 0.35}s` } : undefined}
+						style={{ animationDelay: `${d * (looping ? 0.35 : 0.18)}s` }}
 					/>
 				);
 			})}
@@ -584,5 +584,5 @@ function PauseDots({
 /** Detects silence-only LRC lines ("♪", empty, etc.). */
 function isSilentLine(text: string): boolean {
 	const s = text.trim();
-	return s === "" || /^[♪*●○]+$/u.test(s);
+	return s === "" || /^[♪♫*●○]+$/u.test(s);
 }

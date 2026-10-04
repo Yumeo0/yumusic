@@ -79,6 +79,7 @@
 	--animate-shimmer: shimmer 1.8s linear infinite;
 	--animate-char-wave: char-wave 0.5s ease-in-out both;
 	--animate-dot-fill: dot-fill 1.8s ease-in-out infinite;
+	--animate-dot-wave: dot-wave 1.8s ease-in-out infinite;
 
 	@keyframes char-wave {
 		0%,
@@ -89,16 +90,27 @@
 			top: -0.14em;
 		}
 	}
+	@keyframes dot-wave {
+		0%,
+		100% {
+			transform: translateY(0);
+		}
+		50% {
+			transform: translateY(-0.3em);
+		}
+	}
 	@keyframes dot-fill {
 		0%,
 		60%,
 		100% {
 			background-color: rgb(255 255 255 / 0.25);
 			box-shadow: none;
+			transform: translateY(0);
 		}
 		20% {
 			background-color: rgb(255 255 255 / 0.95);
 			box-shadow: 0 0 10px rgb(255 255 255 / 0.4);
+			transform: translateY(-0.3em);
 		}
 	}
 
