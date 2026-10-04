@@ -24,6 +24,7 @@ import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
 import { UserMenu } from "./components/app/user-menu";
 import { Player } from "./components/player/player";
+import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
 import {
 	PlayerProvider,
@@ -677,37 +678,46 @@ function AppShell({
 										const isActive =
 											location.pathname === `/playlists/${playlist.id}`;
 										return (
-											<div className="group/pin relative" key={playlist.id}>
-												<button
-													className={cn(
-														"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
-														isActive
-															? "bg-primary/12 text-primary"
-															: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-													)}
-													onClick={() => navigate(`/playlists/${playlist.id}`)}
-													type="button"
-												>
-													{playlist.thumbnail ? (
-														<img
-															alt=""
-															className="size-5 shrink-0 rounded object-cover"
-															src={proxiedImageUrl(playlist.thumbnail)}
-														/>
-													) : (
-														<Music2 className="size-4 shrink-0" />
-													)}
-													<span className="truncate">{playlist.title}</span>
-												</button>
-												<button
-													aria-label={`Unpin ${playlist.title}`}
-													className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
-													onClick={() => unpin(playlist.id)}
-													type="button"
-												>
-													<X className="size-3.5" />
-												</button>
-											</div>
+											<PlaylistContextMenu
+												isPinned
+												key={playlist.id}
+												onTogglePinned={() => unpin(playlist.id)}
+												playlist={playlist}
+											>
+												<div className="group/pin relative rounded-xl">
+													<button
+														className={cn(
+															"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
+															isActive
+																? "bg-primary/12 text-primary"
+																: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+														)}
+														onClick={() =>
+															navigate(`/playlists/${playlist.id}`)
+														}
+														type="button"
+													>
+														{playlist.thumbnail ? (
+															<img
+																alt=""
+																className="size-5 shrink-0 rounded object-cover"
+																src={proxiedImageUrl(playlist.thumbnail)}
+															/>
+														) : (
+															<Music2 className="size-4 shrink-0" />
+														)}
+														<span className="truncate">{playlist.title}</span>
+													</button>
+													<button
+														aria-label={`Unpin ${playlist.title}`}
+														className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
+														onClick={() => unpin(playlist.id)}
+														type="button"
+													>
+														<X className="size-3.5" />
+													</button>
+												</div>
+											</PlaylistContextMenu>
 										);
 									})}
 								</div>

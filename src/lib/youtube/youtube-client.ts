@@ -462,6 +462,21 @@ export async function createPlaylist(
 	return result.playlist_id ?? null;
 }
 
+/**
+ * Deletes a playlist the user owns. Calls the endpoint directly because the
+ * library's `playlist.delete` builds an empty request body (upstream bug).
+ */
+export async function deletePlaylist(playlistId: string) {
+	const client = await getYoutubeClient();
+	const response = await client.actions.execute("/playlist/delete", {
+		playlistId: editablePlaylistId(playlistId),
+	});
+	if (!response.success) {
+		throw new Error(`Playlist delete failed (HTTP ${response.status_code})`);
+	}
+	libraryPlaylistsCache = null;
+}
+
 export type Album = Awaited<ReturnType<Innertube["music"]["getAlbum"]>>;
 
 export async function getAlbum(id: string) {

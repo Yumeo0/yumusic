@@ -2,11 +2,13 @@ import { ArrowUpRight, Disc3, ListMusic } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
+import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSettings } from "@/lib/stores/settings";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
@@ -266,8 +268,24 @@ export function HomeFeed() {
 	const { play } = usePlayer();
 	const navigate = useNavigate();
 	const [settings] = useSettings();
+	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const [sections, setSections] = useState<FeedSection[] | null>(null);
 	const [failed, setFailed] = useState(false);
+
+	const removeFeedItem = (id: string) =>
+		setSections((prev) =>
+			prev
+				? prev.map((section) => ({
+						...section,
+						items: section.items.filter(
+							(entry) =>
+								entry.kind === "song" ||
+								entry.kind === "artist" ||
+								entry.id !== id,
+						),
+					}))
+				: prev,
+		);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -383,6 +401,25 @@ export function HomeFeed() {
 									<SongContextMenu key={key} song={item.song}>
 										<FeedCard item={item} onClick={onOpen} />
 									</SongContextMenu>
+								);
+							}
+							if (item.kind === "playlist" || item.kind === "album") {
+								return (
+									<PlaylistContextMenu
+										isPinned={isPinned(item.id)}
+										key={key}
+										onDeleted={() => removeFeedItem(item.id)}
+										onTogglePinned={() =>
+											togglePinned({
+												id: item.id,
+												thumbnail: item.thumbnail,
+												title: item.title,
+											})
+										}
+										playlist={item}
+									>
+										<FeedCard item={item} onClick={onOpen} />
+									</PlaylistContextMenu>
 								);
 							}
 							return <FeedCard item={item} key={key} onClick={onOpen} />;

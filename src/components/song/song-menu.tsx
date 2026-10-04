@@ -98,7 +98,9 @@ export function SongContextMenu({
 	return (
 		<>
 			<ContextMenu.Root>
-				<ContextMenu.Trigger className={cn("song-menu", className)}>
+				<ContextMenu.Trigger
+					className={cn("context-menu-highlight", className)}
+				>
 					{children}
 				</ContextMenu.Trigger>
 				<ContextMenu.Portal>

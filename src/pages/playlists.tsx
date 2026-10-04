@@ -15,8 +15,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
+import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { SongContextMenu } from "@/components/song/song-menu";
@@ -37,14 +37,16 @@ import {
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { useDisplayTitle } from "@/lib/utils/title";
-import { cn, hiResThumb, parseDuration } from "@/lib/utils/utils";
+import { cn, parseDuration } from "@/lib/utils/utils";
 import {
-	artistListOf,
-	isAlbumId,
-	videoIdOf,
-} from "../lib/youtube/youtube.utils";
+	cleanSubtitle,
+	collectionHeader,
+	collectSongs,
+	isEditablePlaylist,
+	type RowFallback,
+} from "@/lib/youtube/playlist-data";
+import { isAlbumId } from "@/lib/youtube/youtube.utils";
 import {
-	type Album,
 	getAlbum,
 	getLibraryPlaylists,
 	getPlaylist,
@@ -53,153 +55,6 @@ import {
 	type Playlist,
 	removeSongFromPlaylist,
 } from "../lib/youtube/youtube-client";
-
-/** Whether parsed credits name a real artist, not the unknown placeholder. */
-function hasArtistCredit(artists: Array<{ name: string }>): boolean {
-	return artists.some((artist) => {
-		const name = artist.name?.trim();
-		return !!name && !/^unknown artist$/i.test(name);
-	});
-}
-
-/** Header-level info used for rows that carry no per-track credit or art. */
-interface RowFallback {
-	artists?: Array<{ name: string; id?: string }>;
-	thumbnail?: string | null;
-}
-
-/**
- * Album rows usually omit both the artist and the artwork (the header holds
- * them), so album pages pass those down as a fallback for rows without them.
- */
-function toSong(
-	item: YTNodes.MusicResponsiveListItem,
-	fallback?: RowFallback,
-): Song {
-	const artists = artistListOf(item);
-	const credit =
-		fallback?.artists && !hasArtistCredit(artists) ? fallback.artists : artists;
-	const rowThumb =
-		item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url;
-	return {
-		id: videoIdOf(item),
-		title: item.title ?? "Unknown Title",
-		artist: credit.map((artist) => artist.name).join(", "),
-		artistId: credit.find((artist) => artist.id)?.id,
-		artists: credit,
-		thumbnail: hiResThumb(rowThumb) || fallback?.thumbnail || "",
-		duration: item.duration?.text,
-	};
-}
-
-function collectSongs(
-	items: Iterable<
-		| YTNodes.MusicResponsiveListItem
-		| YTNodes.MusicTwoRowItem
-		| YTNodes.ContinuationItem
-	>,
-	fallback?: RowFallback,
-): Song[] {
-	const songs: Song[] = [];
-	for (const item of items) {
-		if (item.is(YTNodes.MusicResponsiveListItem)) {
-			const song = toSong(item, fallback);
-			if (song.id) songs.push(song);
-		}
-	}
-	return songs;
-}
-
-/** Removes the redundant "Playlist" prefix from YouTube subtitles. */
-function cleanSubtitle(text: string): string {
-	return text.replace(/^playlist\s*[•·|:-]?\s*/i, "").trim();
-}
-
-/**
- * Artist credits stored on the header. Album track rows omit the artist, so
- * it must be read from the album header instead: the strapline on the current
- * layout ("Nakuru Aitsuki"), the author on older responses.
- */
-function headerArtists(
-	header: YTNodes.MusicResponsiveHeader | YTNodes.MusicDetailHeader,
-): Array<{ name: string; id?: string }> {
-	if (header instanceof YTNodes.MusicDetailHeader) {
-		const author = header.author;
-		return author?.name
-			? [
-					{
-						name: author.name,
-						id: author.channel_id?.startsWith("UC")
-							? author.channel_id
-							: undefined,
-					},
-				]
-			: [];
-	}
-	const artists: Array<{ name: string; id?: string }> = [];
-	for (const run of header.strapline_text_one?.runs ?? []) {
-		const name = run.text?.trim();
-		if (!name || /^[\s,、&/•·]+$/.test(name)) continue;
-		if (artists.some((artist) => artist.name === name)) continue;
-		const browseId = (run as { endpoint?: { payload?: { browseId?: string } } })
-			.endpoint?.payload?.browseId;
-		artists.push({
-			name,
-			id: browseId?.startsWith("UC") ? browseId : undefined,
-		});
-	}
-	return artists;
-}
-
-/**
- * Title, subtitle, cover and header-level artists for a playlist or album.
- * Editable playlist pages wrap their real header one level deep, and albums
- * use a different header class than playlists.
- */
-function collectionHeader(raw: Playlist["header"] | Album["header"]): {
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-	artists: Array<{ name: string; id?: string }>;
-} {
-	const header =
-		raw instanceof YTNodes.MusicEditablePlaylistDetailHeader ? raw.header : raw;
-	if (header instanceof YTNodes.MusicResponsiveHeader) {
-		const thumbs = header.thumbnail?.contents ?? [];
-		return {
-			title: header.title?.text || "Playlist",
-			subtitle: header.subtitle?.text || "",
-			thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
-			artists: headerArtists(header),
-		};
-	}
-	if (header instanceof YTNodes.MusicDetailHeader) {
-		return {
-			title: header.title?.text || "Album",
-			subtitle: header.subtitle?.text || "",
-			thumbnail: hiResThumb(
-				header.thumbnails?.[header.thumbnails.length - 1]?.url || null,
-			),
-			artists: headerArtists(header),
-		};
-	}
-	return { title: "Playlist", subtitle: "", thumbnail: null, artists: [] };
-}
-
-/**
- * Owned playlists nest an editable header renderer in the browse response.
- * It is checked through the response memo as well: youtubei.js' `header`
- * can resolve to the inner MusicResponsiveHeader instead of the wrapper.
- */
-function isEditablePlaylist(data: Playlist | Album): boolean {
-	if (data.header instanceof YTNodes.MusicEditablePlaylistDetailHeader) {
-		return true;
-	}
-	const editable = data.page?.contents_memo?.getType(
-		YTNodes.MusicEditablePlaylistDetailHeader,
-	);
-	return (editable?.length ?? 0) > 0;
-}
 
 type PlaylistSort =
 	| "newest"
@@ -235,6 +90,7 @@ export function PlaylistDetails() {
 	const [searchOpen, setSearchOpen] = useState(false);
 	const [sort, setSort] = useState<PlaylistSort>("newest");
 	const displayTitle = useDisplayTitle();
+	const { isPinned, togglePinned } = usePinnedPlaylists();
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -458,155 +314,176 @@ export function PlaylistDetails() {
 			</div>
 
 			{/* Header — cover on top, identity + icon actions below, centered */}
-			<header className="animate-track-in mt-4 text-center sm:mt-6">
-				{playlist.thumbnail ? (
-					<img
-						alt={playlist.title}
-						className="mx-auto size-36 rounded-xl border border-foreground/10 object-cover sm:size-40"
-						loading="lazy"
-						src={proxiedImageUrl(playlist.thumbnail)}
-					/>
-				) : (
-					<div className="mx-auto grid size-36 place-items-center rounded-xl border border-foreground/10 bg-card sm:size-40">
-						<Music2 className="size-10 text-muted-foreground" />
-					</div>
-				)}
-				<h1 className="mt-4 truncate text-3xl font-bold tracking-tight sm:text-4xl">
-					{playlist.title}
-				</h1>
-				<p className="mt-2 text-sm text-muted-foreground">
-					{[
-						playlist.subtitle,
-						showCount
-							? `${songs.length} ${songs.length === 1 ? "track" : "tracks"}`
-							: "",
-					]
-						.filter(Boolean)
-						.join(" · ")}
-				</p>
-				<div className="mt-4 flex items-center justify-center gap-2">
-					<button
-						aria-label="Share playlist"
-						className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
-						onClick={() => {
-							const rawId = id?.startsWith("VL") ? id.slice(2) : id;
-							void shareLink({
-								title: playlist.title,
-								url: `https://music.youtube.com/playlist?list=${rawId}`,
-							});
-						}}
-						title="Share playlist"
-						type="button"
-					>
-						<Share2 className="size-5" />
-					</button>
-					<button
-						aria-label="Shuffle play"
-						className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-						disabled={songs.length < 2}
-						onClick={() => {
-							const shuffled = [...songs];
-							for (let i = shuffled.length - 1; i > 0; i--) {
-								const j = Math.floor(Math.random() * (i + 1));
-								[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-							}
-							play(shuffled[0], shuffled.slice(1));
-						}}
-						title="Shuffle play"
-						type="button"
-					>
-						<Shuffle className="size-5" />
-					</button>
-					<button
-						aria-label="Play all"
-						className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-						disabled={songs.length === 0}
-						onClick={() => {
-							play(playOrder[0], playOrder.slice(1));
-						}}
-						title="Play all"
-						type="button"
-					>
-						<Play className="size-5 translate-x-px fill-current" />
-					</button>
-					{songs.length > 1 && (
-						<Menu.Root>
-							<Menu.Trigger
-								aria-label={`Sort playlist (${activeSort})`}
-								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
-								title={`Sort: ${activeSort}`}
-							>
-								<ArrowUpDown className="size-5" />
-							</Menu.Trigger>
-							<Menu.Portal>
-								<Menu.Positioner
-									align="center"
-									className="z-90 outline-none"
-									sideOffset={8}
-								>
-									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-										<Menu.RadioGroup
-											onValueChange={(value) => setSort(value as PlaylistSort)}
-											value={sort}
-										>
-											{PLAYLIST_SORTS.map((option) => (
-												<Menu.RadioItem
-													className="flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
-													key={option.value}
-													value={option.value}
-												>
-													{option.label}
-													<Menu.RadioItemIndicator className="text-primary">
-														<Check className="size-4" />
-													</Menu.RadioItemIndicator>
-												</Menu.RadioItem>
-											))}
-										</Menu.RadioGroup>
-									</Menu.Popup>
-								</Menu.Positioner>
-							</Menu.Portal>
-						</Menu.Root>
+			<PlaylistContextMenu
+				highlight={false}
+				isPinned={isPinned(id ?? "")}
+				onDeleted={() => navigate("/playlists")}
+				onTogglePinned={() =>
+					togglePinned({
+						id: id ?? "",
+						thumbnail: playlist.thumbnail,
+						title: playlist.title,
+					})
+				}
+				playlist={{
+					id: id ?? "",
+					thumbnail: playlist.thumbnail,
+					title: playlist.title,
+				}}
+				songs={songs}
+			>
+				<header className="animate-track-in mt-4 text-center sm:mt-6">
+					{playlist.thumbnail ? (
+						<img
+							alt={playlist.title}
+							className="mx-auto size-36 rounded-xl border border-foreground/10 object-cover sm:size-40"
+							loading="lazy"
+							src={proxiedImageUrl(playlist.thumbnail)}
+						/>
+					) : (
+						<div className="mx-auto grid size-36 place-items-center rounded-xl border border-foreground/10 bg-card sm:size-40">
+							<Music2 className="size-10 text-muted-foreground" />
+						</div>
 					)}
-					{/* Search — collapsed into the action row; expands in place */}
-					{songs.length > 0 &&
-						(searchOpen ? (
-							<div className="relative w-64">
-								<Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-								<Input
-									autoFocus
-									className="h-11 rounded-full pr-8 pl-9"
-									onChange={(event) => setSearch(event.target.value)}
-									placeholder="Search in playlist"
-									value={search}
-								/>
+					<h1 className="mt-4 truncate text-3xl font-bold tracking-tight sm:text-4xl">
+						{playlist.title}
+					</h1>
+					<p className="mt-2 text-sm text-muted-foreground">
+						{[
+							playlist.subtitle,
+							showCount
+								? `${songs.length} ${songs.length === 1 ? "track" : "tracks"}`
+								: "",
+						]
+							.filter(Boolean)
+							.join(" · ")}
+					</p>
+					<div className="mt-4 flex items-center justify-center gap-2">
+						<button
+							aria-label="Share playlist"
+							className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
+							onClick={() => {
+								const rawId = id?.startsWith("VL") ? id.slice(2) : id;
+								void shareLink({
+									title: playlist.title,
+									url: `https://music.youtube.com/playlist?list=${rawId}`,
+								});
+							}}
+							title="Share playlist"
+							type="button"
+						>
+							<Share2 className="size-5" />
+						</button>
+						<button
+							aria-label="Shuffle play"
+							className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+							disabled={songs.length < 2}
+							onClick={() => {
+								const shuffled = [...songs];
+								for (let i = shuffled.length - 1; i > 0; i--) {
+									const j = Math.floor(Math.random() * (i + 1));
+									[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+								}
+								play(shuffled[0], shuffled.slice(1));
+							}}
+							title="Shuffle play"
+							type="button"
+						>
+							<Shuffle className="size-5" />
+						</button>
+						<button
+							aria-label="Play all"
+							className="grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
+							disabled={songs.length === 0}
+							onClick={() => {
+								play(playOrder[0], playOrder.slice(1));
+							}}
+							title="Play all"
+							type="button"
+						>
+							<Play className="size-5 translate-x-px fill-current" />
+						</button>
+						{songs.length > 1 && (
+							<Menu.Root>
+								<Menu.Trigger
+									aria-label={`Sort playlist (${activeSort})`}
+									className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
+									title={`Sort: ${activeSort}`}
+								>
+									<ArrowUpDown className="size-5" />
+								</Menu.Trigger>
+								<Menu.Portal>
+									<Menu.Positioner
+										align="center"
+										className="z-90 outline-none"
+										sideOffset={8}
+									>
+										<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+											<Menu.RadioGroup
+												onValueChange={(value) =>
+													setSort(value as PlaylistSort)
+												}
+												value={sort}
+											>
+												{PLAYLIST_SORTS.map((option) => (
+													<Menu.RadioItem
+														className="flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+														key={option.value}
+														value={option.value}
+													>
+														{option.label}
+														<Menu.RadioItemIndicator className="text-primary">
+															<Check className="size-4" />
+														</Menu.RadioItemIndicator>
+													</Menu.RadioItem>
+												))}
+											</Menu.RadioGroup>
+										</Menu.Popup>
+									</Menu.Positioner>
+								</Menu.Portal>
+							</Menu.Root>
+						)}
+						{/* Search — collapsed into the action row; expands in place */}
+						{songs.length > 0 &&
+							(searchOpen ? (
+								<div className="relative w-64">
+									<Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+									<Input
+										autoFocus
+										className="h-11 rounded-full pr-8 pl-9"
+										onChange={(event) => setSearch(event.target.value)}
+										placeholder="Search in playlist"
+										value={search}
+									/>
+									<button
+										aria-label={search ? "Clear search" : "Close search"}
+										className="absolute top-1/2 right-2 -translate-y-1/2 grid size-6 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+										onClick={() => {
+											if (search) {
+												setSearch("");
+											} else {
+												setSearchOpen(false);
+											}
+										}}
+										type="button"
+									>
+										<X className="size-4" />
+									</button>
+								</div>
+							) : (
 								<button
-									aria-label={search ? "Clear search" : "Close search"}
-									className="absolute top-1/2 right-2 -translate-y-1/2 grid size-6 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-									onClick={() => {
-										if (search) {
-											setSearch("");
-										} else {
-											setSearchOpen(false);
-										}
-									}}
+									aria-label="Search in playlist"
+									className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
+									onClick={() => setSearchOpen(true)}
+									title="Search in playlist"
 									type="button"
 								>
-									<X className="size-4" />
+									<Search className="size-5" />
 								</button>
-							</div>
-						) : (
-							<button
-								aria-label="Search in playlist"
-								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
-								onClick={() => setSearchOpen(true)}
-								title="Search in playlist"
-								type="button"
-							>
-								<Search className="size-5" />
-							</button>
-						))}
-				</div>
-			</header>
+							))}
+					</div>
+				</header>
+			</PlaylistContextMenu>
 
 			{/* Tracklist — edge-to-edge on mobile */}
 			<div className="mt-8 space-y-0.5 pb-4 -mx-6 sm:mx-0">
@@ -804,69 +681,89 @@ export default function PlaylistsPage() {
 
 			<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
 				{playlists.map((item, index) => (
-					<div
-						className="group animate-track-in relative"
+					<PlaylistContextMenu
+						isPinned={isPinned(item.id)}
 						key={item.id}
-						style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
+						onDeleted={() =>
+							setPlaylists((prev) =>
+								prev.filter((playlist) => playlist.id !== item.id),
+							)
+						}
+						onTogglePinned={() =>
+							togglePinned({
+								id: item.id,
+								thumbnail: item.thumbnail,
+								title: item.title,
+							})
+						}
+						playlist={item}
 					>
-						<button
-							className="block w-full overflow-hidden rounded-xl border border-foreground/8 bg-card text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40"
-							onClick={() => navigate(`/playlists/${item.id}`)}
-							type="button"
+						<div
+							className="group animate-track-in relative rounded-xl"
+							style={{ animationDelay: `${Math.min(index * 40, 400)}ms` }}
 						>
-							<div className="relative aspect-square overflow-hidden bg-muted">
-								{item.thumbnail ? (
-									<img
-										alt={item.title}
-										className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-										loading="lazy"
-										src={proxiedImageUrl(item.thumbnail)}
-									/>
-								) : (
-									<div className="grid size-full place-items-center text-muted-foreground">
-										<Music2 className="size-8" />
-									</div>
+							<button
+								className="block w-full overflow-hidden rounded-xl border border-foreground/8 bg-card text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40"
+								onClick={() => navigate(`/playlists/${item.id}`)}
+								type="button"
+							>
+								<div className="relative aspect-square overflow-hidden bg-muted">
+									{item.thumbnail ? (
+										<img
+											alt={item.title}
+											className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+											loading="lazy"
+											src={proxiedImageUrl(item.thumbnail)}
+										/>
+									) : (
+										<div className="grid size-full place-items-center text-muted-foreground">
+											<Music2 className="size-8" />
+										</div>
+									)}
+									<span className="absolute top-2.5 right-2.5 grid size-7 translate-y-1 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+										<ArrowUpRight className="size-3.5" />
+									</span>
+								</div>
+								<div className="p-3.5">
+									<h3 className="line-clamp-1 text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+										{item.title}
+									</h3>
+									<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+										{item.subtitle}
+									</p>
+								</div>
+							</button>
+							<button
+								aria-label={
+									isPinned(item.id) ? "Unpin from sidebar" : "Pin to sidebar"
+								}
+								className={cn(
+									"absolute top-2.5 left-2.5 grid size-7 -translate-y-1 place-items-center rounded-full backdrop-blur-sm transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100",
+									isPinned(item.id)
+										? "bg-primary text-primary-foreground opacity-100"
+										: "bg-black/55 text-white opacity-0 hover:bg-black/70",
 								)}
-								<span className="absolute top-2.5 right-2.5 grid size-7 translate-y-1 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-									<ArrowUpRight className="size-3.5" />
-								</span>
-							</div>
-							<div className="p-3.5">
-								<h3 className="line-clamp-1 text-sm font-medium transition-colors duration-150 group-hover:text-primary">
-									{item.title}
-								</h3>
-								<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-									{item.subtitle}
-								</p>
-							</div>
-						</button>
-						<button
-							aria-label={
-								isPinned(item.id) ? "Unpin from sidebar" : "Pin to sidebar"
-							}
-							className={cn(
-								"absolute top-2.5 left-2.5 grid size-7 -translate-y-1 place-items-center rounded-full backdrop-blur-sm transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100",
-								isPinned(item.id)
-									? "bg-primary text-primary-foreground opacity-100"
-									: "bg-black/55 text-white opacity-0 hover:bg-black/70",
-							)}
-							onClick={() =>
-								togglePinned({
-									id: item.id,
-									title: item.title,
-									thumbnail: item.thumbnail,
-								})
-							}
-							title={
-								isPinned(item.id) ? "Unpin from sidebar" : "Pin to sidebar"
-							}
-							type="button"
-						>
-							<Pin
-								className={cn("size-3.5", isPinned(item.id) && "fill-current")}
-							/>
-						</button>
-					</div>
+								onClick={() =>
+									togglePinned({
+										id: item.id,
+										title: item.title,
+										thumbnail: item.thumbnail,
+									})
+								}
+								title={
+									isPinned(item.id) ? "Unpin from sidebar" : "Pin to sidebar"
+								}
+								type="button"
+							>
+								<Pin
+									className={cn(
+										"size-3.5",
+										isPinned(item.id) && "fill-current",
+									)}
+								/>
+							</button>
+						</div>
+					</PlaylistContextMenu>
 				))}
 			</div>
 			{playlists.length === 0 && (

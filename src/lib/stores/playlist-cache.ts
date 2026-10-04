@@ -64,3 +64,39 @@ export function addSongToCachedPlaylist(id: string, song: Song) {
 	if (!cached) return;
 	writeCache(key, { ...cached.data, songs: [song, ...cached.data.songs] });
 }
+
+/** Drops a deleted playlist from the library list and its track cache. */
+export function removePlaylistFromCaches(id: string) {
+	const cached = readCache<Array<{ id: string }>>(LIBRARY_CACHE_KEY);
+	if (cached) {
+		writeCache(
+			LIBRARY_CACHE_KEY,
+			cached.data.filter((playlist) => playlist.id !== id),
+		);
+	}
+	try {
+		localStorage.removeItem(PLAYLIST_CACHE_PREFIX + id);
+	} catch {
+		// best-effort
+	}
+}
+
+/** Tracks from a playlist-page visit less than a sync interval ago. */
+export function readCachedPlaylistSongs(id: string): Song[] | null {
+	const cached = readCache<PlaylistView>(PLAYLIST_CACHE_PREFIX + id);
+	if (!cached || cached.data.songs.length === 0) return null;
+	if (Date.now() - cached.timestamp >= SYNC_INTERVAL_MS) return null;
+	return cached.data.songs;
+}
+
+/**
+ * Replaces the stored tracklist after a fresh fetch, keeping the cached
+ * metadata (title, editable flag, …) intact. Playlists never visited are
+ * left alone — there is no metadata to keep.
+ */
+export function refreshCachedPlaylistSongs(id: string, songs: Song[]) {
+	const key = PLAYLIST_CACHE_PREFIX + id;
+	const cached = readCache<PlaylistView>(key);
+	if (!cached) return;
+	writeCache(key, { ...cached.data, songs, complete: true });
+}
