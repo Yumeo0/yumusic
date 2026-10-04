@@ -12,7 +12,12 @@ import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSettings } from "@/lib/stores/settings";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
-import { cn, hiResThumb } from "@/lib/utils/utils";
+import {
+	biggestThumb,
+	cn,
+	hiResThumb,
+	type ThumbCandidate,
+} from "@/lib/utils/utils";
 import {
 	artistIdOf,
 	artistListOf,
@@ -58,8 +63,8 @@ function isHiddenSectionTitle(title: string): boolean {
 	return HIDDEN_SECTION_TITLES.has(normalized);
 }
 
-function lastThumb(urls: { url?: string }[] | undefined): string {
-	return hiResThumb(urls?.[urls.length - 1]?.url);
+function lastThumb(urls: ThumbCandidate[] | undefined): string {
+	return hiResThumb(biggestThumb(urls)?.url);
 }
 
 /** A playable card from a responsive list item (song/video/non-music track). */

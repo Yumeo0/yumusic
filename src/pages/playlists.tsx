@@ -4,18 +4,26 @@ import {
 	ArrowUpDown,
 	ArrowUpRight,
 	Check,
+	Ellipsis,
 	Music2,
+	Pencil,
 	Pin,
 	Play,
 	RefreshCw,
 	Search,
 	Share2,
 	Shuffle,
+	Trash2,
 	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { EqualizerBars } from "@/components/player/waveform";
+import { ConfirmDeletePlaylistDialog } from "@/components/playlist/confirm-delete-playlist-dialog";
+import {
+	EditPlaylistDialog,
+	type PlaylistEditResult,
+} from "@/components/playlist/edit-playlist-dialog";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -27,6 +35,7 @@ import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { shareLink } from "@/lib/services/share";
 import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/stores/pinned";
 import {
+	invalidateLibraryCache,
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
 	type PlaylistView,
@@ -92,6 +101,8 @@ export function PlaylistDetails() {
 	const [sort, setSort] = useState<PlaylistSort>("newest");
 	const displayTitle = useDisplayTitle();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
+	const [editOpen, setEditOpen] = useState(false);
+	const [deleteOpen, setDeleteOpen] = useState(false);
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
@@ -179,6 +190,15 @@ export function PlaylistDetails() {
 	// playlist…), not a fixed destination.
 	const onBack = () => navigate(-1);
 
+	const sharePlaylist = () => {
+		if (!playlist) return;
+		const rawId = id?.startsWith("VL") ? id.slice(2) : id;
+		void shareLink({
+			title: playlist.title,
+			url: `https://music.youtube.com/playlist?list=${rawId}`,
+		});
+	};
+
 	/**
 	 * Removes one playlist entry. The row index keeps a duplicated video from
 	 * clearing every occurrence locally; the server removes the entry matched
@@ -202,6 +222,24 @@ export function PlaylistDetails() {
 			console.error("[YuMusic] remove from playlist failed:", error);
 			showToast("Could not remove from playlist");
 		}
+	};
+
+	/** Applies a saved edit to the header and its cache entry. */
+	const onEditSaved = (result: PlaylistEditResult) => {
+		const renamed = result.title !== playlist?.title;
+		setPlaylist((prev) => {
+			if (!prev) return prev;
+			const next = {
+				...prev,
+				title: result.title,
+				thumbnail: result.thumbnail,
+			};
+			writeCache(PLAYLIST_CACHE_PREFIX + (id ?? ""), next);
+			return next;
+		});
+		// The library list stores the old name; drop it so the next visit
+		// refetches and reconciles pinned sidebar titles.
+		if (renamed) invalidateLibraryCache();
 	};
 
 	if (loading) {
@@ -319,6 +357,7 @@ export function PlaylistDetails() {
 				highlight={false}
 				isPinned={isPinned(id ?? "")}
 				onDeleted={() => navigate("/playlists")}
+				onEdit={playlist.editable ? () => setEditOpen(true) : undefined}
 				onTogglePinned={() =>
 					togglePinned({
 						id: id ?? "",
@@ -360,25 +399,46 @@ export function PlaylistDetails() {
 							.join(" · ")}
 					</p>
 					<div className="mt-4 flex items-center justify-center gap-2">
-						<button
-							aria-label="Share playlist"
-							className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
-							onClick={() => {
-								const rawId = id?.startsWith("VL") ? id.slice(2) : id;
-								void shareLink({
-									title: playlist.title,
-									url: `https://music.youtube.com/playlist?list=${rawId}`,
-								});
-							}}
-							title="Share playlist"
-							type="button"
-						>
-							<Share2 className="size-5" />
-						</button>
+						<Menu.Root>
+							<Menu.Trigger
+								aria-label={`Sort playlist (${activeSort})`}
+								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
+								title={`Sort: ${activeSort}`}
+							>
+								<ArrowUpDown className="size-5" />
+							</Menu.Trigger>
+							<Menu.Portal>
+								<Menu.Positioner
+									align="center"
+									className="z-90 outline-none"
+									sideOffset={8}
+								>
+									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+										<Menu.RadioGroup
+											onValueChange={(value) => setSort(value as PlaylistSort)}
+											value={sort}
+										>
+											{PLAYLIST_SORTS.map((option) => (
+												<Menu.RadioItem
+													className="flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+													key={option.value}
+													value={option.value}
+												>
+													{option.label}
+													<Menu.RadioItemIndicator className="text-primary">
+														<Check className="size-4" />
+													</Menu.RadioItemIndicator>
+												</Menu.RadioItem>
+											))}
+										</Menu.RadioGroup>
+									</Menu.Popup>
+								</Menu.Positioner>
+							</Menu.Portal>
+						</Menu.Root>
 						<button
 							aria-label="Shuffle play"
 							className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
-							disabled={songs.length < 2}
+							disabled={songs.length === 0}
 							onClick={() => {
 								const shuffled = [...songs];
 								for (let i = shuffled.length - 1; i > 0; i--) {
@@ -404,47 +464,6 @@ export function PlaylistDetails() {
 						>
 							<Play className="size-5 translate-x-px fill-current" />
 						</button>
-						{songs.length > 1 && (
-							<Menu.Root>
-								<Menu.Trigger
-									aria-label={`Sort playlist (${activeSort})`}
-									className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
-									title={`Sort: ${activeSort}`}
-								>
-									<ArrowUpDown className="size-5" />
-								</Menu.Trigger>
-								<Menu.Portal>
-									<Menu.Positioner
-										align="center"
-										className="z-90 outline-none"
-										sideOffset={8}
-									>
-										<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-											<Menu.RadioGroup
-												onValueChange={(value) =>
-													setSort(value as PlaylistSort)
-												}
-												value={sort}
-											>
-												{PLAYLIST_SORTS.map((option) => (
-													<Menu.RadioItem
-														className="flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
-														key={option.value}
-														value={option.value}
-													>
-														{option.label}
-														<Menu.RadioItemIndicator className="text-primary">
-															<Check className="size-4" />
-														</Menu.RadioItemIndicator>
-													</Menu.RadioItem>
-												))}
-											</Menu.RadioGroup>
-										</Menu.Popup>
-									</Menu.Positioner>
-								</Menu.Portal>
-							</Menu.Root>
-						)}
-						{/* Search — collapsed into the action row; expands in place */}
 						{songs.length > 0 &&
 							(searchOpen ? (
 								<div className="relative w-64">
@@ -482,6 +501,53 @@ export function PlaylistDetails() {
 									<Search className="size-5" />
 								</button>
 							))}
+						<Menu.Root>
+							<Menu.Trigger
+								aria-label="More options"
+								className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 data-popup-open:border-primary/40 data-popup-open:text-primary"
+								title="More options"
+							>
+								<Ellipsis className="size-5" />
+							</Menu.Trigger>
+							<Menu.Portal>
+								<Menu.Positioner
+									align="end"
+									className="z-90 outline-none"
+									sideOffset={8}
+								>
+									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+										{playlist.editable && (
+											<Menu.Item
+												className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+												onClick={() => setEditOpen(true)}
+											>
+												<Pencil className="size-4 text-muted-foreground" />
+												Edit playlist
+											</Menu.Item>
+										)}
+										<Menu.Item
+											className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+											onClick={sharePlaylist}
+										>
+											<Share2 className="size-4 text-muted-foreground" />
+											Share playlist
+										</Menu.Item>
+										{!isAlbumId(id ?? "") && (
+											<>
+												<Menu.Separator className="my-1 h-px bg-foreground/8" />
+												<Menu.Item
+													className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+													onClick={() => setDeleteOpen(true)}
+												>
+													<Trash2 className="size-4 text-muted-foreground" />
+													Delete playlist
+												</Menu.Item>
+											</>
+										)}
+									</Menu.Popup>
+								</Menu.Positioner>
+							</Menu.Portal>
+						</Menu.Root>
 					</div>
 				</header>
 			</PlaylistContextMenu>
@@ -585,6 +651,30 @@ export function PlaylistDetails() {
 					</p>
 				)}
 			</div>
+
+			<EditPlaylistDialog
+				currentThumbnail={playlist.thumbnail}
+				currentTitle={playlist.title}
+				onOpenChange={setEditOpen}
+				onSaved={onEditSaved}
+				open={editOpen}
+				playlistId={id ?? null}
+			/>
+			<ConfirmDeletePlaylistDialog
+				isPinned={isPinned(id ?? "")}
+				onDeleted={() => navigate("/playlists")}
+				onOpenChange={setDeleteOpen}
+				onTogglePinned={() =>
+					togglePinned({
+						id: id ?? "",
+						thumbnail: playlist.thumbnail,
+						title: playlist.title,
+					})
+				}
+				open={deleteOpen}
+				playlistId={id ?? ""}
+				playlistTitle={playlist.title}
+			/>
 		</div>
 	);
 }

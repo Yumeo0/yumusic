@@ -1,6 +1,6 @@
 import { YTNodes } from "youtubei.js/web";
 import type { Song } from "@/contexts/player-context";
-import { hiResThumb } from "@/lib/utils/utils";
+import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
 import { artistListOf, isAlbumId, videoIdOf } from "./youtube.utils";
 import {
 	type Album,
@@ -35,8 +35,7 @@ function toSong(
 	const artists = artistListOf(item);
 	const credit =
 		fallback?.artists && !hasArtistCredit(artists) ? fallback.artists : artists;
-	const rowThumb =
-		item.thumbnail?.contents?.[item.thumbnail.contents.length - 1]?.url;
+	const rowThumb = biggestThumb(item.thumbnail?.contents)?.url;
 	return {
 		id: videoIdOf(item),
 		title: item.title ?? "Unknown Title",
@@ -125,7 +124,7 @@ export function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 		return {
 			title: header.title?.text || "Playlist",
 			subtitle: header.subtitle?.text || "",
-			thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+			thumbnail: hiResThumb(biggestThumb(thumbs)?.url),
 			artists: headerArtists(header),
 		};
 	}
@@ -133,9 +132,7 @@ export function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 		return {
 			title: header.title?.text || "Album",
 			subtitle: header.subtitle?.text || "",
-			thumbnail: hiResThumb(
-				header.thumbnails?.[header.thumbnails.length - 1]?.url || null,
-			),
+			thumbnail: hiResThumb(biggestThumb(header.thumbnails)?.url),
 			artists: headerArtists(header),
 		};
 	}
@@ -155,6 +152,52 @@ export function isEditablePlaylist(data: Playlist | Album): boolean {
 		YTNodes.MusicEditablePlaylistDetailHeader,
 	);
 	return (editable?.length ?? 0) > 0;
+}
+
+export type PlaylistPrivacyStatus = "PUBLIC" | "UNLISTED" | "PRIVATE";
+
+export interface PlaylistEditMeta {
+	title: string;
+	description: string;
+	privacy: PlaylistPrivacyStatus | null;
+	thumbnail: string | null;
+	editable: boolean;
+}
+
+/** Reads the edit-form prefill (name, description, visibility) of a playlist. */
+export async function fetchPlaylistEditMeta(
+	id: string,
+): Promise<PlaylistEditMeta | null> {
+	const data = await getPlaylist(id);
+	if (!data) return null;
+	const header = collectionHeader(data.header);
+	const editableHeader =
+		data.header instanceof YTNodes.MusicEditablePlaylistDetailHeader
+			? data.header
+			: null;
+	const editHeader =
+		editableHeader?.edit_header instanceof YTNodes.MusicPlaylistEditHeader
+			? editableHeader.edit_header
+			: data.page?.contents_memo?.getType(YTNodes.MusicPlaylistEditHeader)[0];
+	const rawPrivacy = editHeader?.privacy?.toUpperCase();
+	const privacy =
+		rawPrivacy === "PUBLIC" ||
+		rawPrivacy === "UNLISTED" ||
+		rawPrivacy === "PRIVATE"
+			? rawPrivacy
+			: null;
+	const rawHeader = editableHeader ? editableHeader.header : data.header;
+	const description =
+		rawHeader instanceof YTNodes.MusicResponsiveHeader
+			? (rawHeader.description?.description?.toString() ?? "")
+			: "";
+	return {
+		title: header.title,
+		description,
+		privacy,
+		thumbnail: header.thumbnail,
+		editable: isEditablePlaylist(data),
+	};
 }
 
 /**

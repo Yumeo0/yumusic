@@ -9,7 +9,7 @@ import {
 } from "youtubei.js/web";
 import type { LrcLine } from "../lyrics/lrclib";
 import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
-import { hiResThumb } from "../utils/utils";
+import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
 import { getOembedMetadata } from "./oembed";
 
@@ -326,7 +326,7 @@ export async function getLibraryPlaylists(
 					id: item.id,
 					title: item.title?.text || "Unknown Title",
 					subtitle: item.subtitle?.text || "",
-					thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+					thumbnail: hiResThumb(biggestThumb(thumbs)?.url),
 				});
 			} else if (item.is(YTNodes.MusicResponsiveListItem)) {
 				if (item.item_type !== "playlist" || !item.id) continue;
@@ -335,7 +335,7 @@ export async function getLibraryPlaylists(
 					id: item.id,
 					title: item.title || "Unknown Title",
 					subtitle: item.subtitle?.text || "",
-					thumbnail: hiResThumb(thumbs[thumbs.length - 1]?.url || null),
+					thumbnail: hiResThumb(biggestThumb(thumbs)?.url),
 				});
 			}
 		}
@@ -477,6 +477,208 @@ export async function deletePlaylist(playlistId: string) {
 	libraryPlaylistsCache = null;
 }
 
+export type PlaylistPrivacy = "PUBLIC" | "UNLISTED" | "PRIVATE";
+
+export interface PlaylistEdit {
+	title?: string;
+	description?: string;
+	privacy?: PlaylistPrivacy;
+}
+
+async function editPlaylistActions(
+	client: Innertube,
+	playlistId: string,
+	actions: Array<Record<string, unknown>>,
+): Promise<unknown> {
+	const response = await client.actions.execute("/browse/edit_playlist", {
+		playlistId: editablePlaylistId(playlistId),
+		actions,
+		// Music-only actions (custom thumbnails) are rejected with the default
+		// WEB client context; run every playlist edit as YouTube Music.
+		client: "YTMUSIC",
+	});
+	// The endpoint answers 200 even when the edit was refused; the refusal is
+	// marked by STATUS_FAILED in the body.
+	const failed =
+		(response.data as { status?: string } | undefined)?.status ===
+		"STATUS_FAILED";
+	if (!response.success || failed) {
+		throw new Error(`Playlist edit failed (HTTP ${response.status_code})`);
+	}
+	return response.data;
+}
+
+function findKey(node: unknown, key: string): unknown {
+	if (Array.isArray(node)) {
+		for (const item of node) {
+			const found = findKey(item, key);
+			if (found !== undefined) return found;
+		}
+		return undefined;
+	}
+	if (!node || typeof node !== "object") return undefined;
+	const record = node as Record<string, unknown>;
+	if (key in record) return record[key];
+	for (const value of Object.values(record)) {
+		const found = findKey(value, key);
+		if (found !== undefined) return found;
+	}
+	return undefined;
+}
+
+function lastThumbnailUrl(node: unknown): string | null {
+	if (Array.isArray(node)) {
+		for (const item of node) {
+			const url = lastThumbnailUrl(item);
+			if (url) return url;
+		}
+		return null;
+	}
+	if (!node || typeof node !== "object") return null;
+	const record = node as Record<string, unknown>;
+	const thumbnails = record.thumbnails;
+	if (Array.isArray(thumbnails) && thumbnails.length > 0) {
+		let best: { url?: string; width?: number; height?: number } | null = null;
+		for (const candidate of thumbnails) {
+			const entry = candidate as {
+				url?: string;
+				width?: number;
+				height?: number;
+			};
+			if (!entry?.url) continue;
+			const area = (entry.width ?? 0) * (entry.height ?? 0);
+			if (!best || area > (best.width ?? 0) * (best.height ?? 0)) {
+				best = entry;
+			}
+		}
+		const url = best?.url;
+		if (url) return url;
+	}
+	for (const value of Object.values(record)) {
+		const url = lastThumbnailUrl(value);
+		if (url) return url;
+	}
+	return null;
+}
+
+/**
+ * The playlist's cover as the edit left it — the edit response echoes the
+ * updated header, which is fresher than a follow-up browse (that can still
+ * serve the old image for a while). Null when the response omits it.
+ */
+function editedThumbnailUrl(data: unknown): string | null {
+	const header = findKey(data, "newHeader");
+	return header ? lastThumbnailUrl(header) : null;
+}
+
+/** Applies metadata edits (name, description, visibility) to an owned playlist. */
+export async function updatePlaylist(playlistId: string, edit: PlaylistEdit) {
+	const actions: Array<Record<string, unknown>> = [];
+	if (edit.title !== undefined) {
+		actions.push({
+			action: "ACTION_SET_PLAYLIST_NAME",
+			playlistName: edit.title,
+		});
+	}
+	if (edit.description !== undefined) {
+		actions.push({
+			action: "ACTION_SET_PLAYLIST_DESCRIPTION",
+			playlistDescription: edit.description,
+		});
+	}
+	if (edit.privacy !== undefined) {
+		actions.push({
+			action: "ACTION_SET_PLAYLIST_PRIVACY",
+			playlistPrivacy: edit.privacy,
+		});
+	}
+	if (actions.length === 0) return;
+	const client = await getYoutubeClient();
+	await editPlaylistActions(client, playlistId, actions);
+}
+
+const PLAYLIST_UPLOAD_URL =
+	"https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail";
+
+/**
+ * Uploads a custom cover for an owned playlist through YouTube's resumable
+ * upload endpoint, then applies the returned blob via the edit endpoint.
+ * Returns the cover URL echoed in the edit response, when present.
+ */
+export async function setPlaylistThumbnail(
+	playlistId: string,
+	image: Uint8Array,
+	mimeType: string,
+): Promise<string | null> {
+	const client = await getYoutubeClient();
+	const http = client.session.http;
+
+	const start = await http.fetch(new URL(PLAYLIST_UPLOAD_URL), {
+		method: "POST",
+		headers: {
+			"X-Goog-Api-Format-Version": "1",
+			"X-Goog-Upload-Command": "start",
+			"X-Goog-Upload-Header-Content-Length": String(image.byteLength),
+			"X-Goog-Upload-Header-Content-Type": mimeType,
+			"X-Goog-Upload-Protocol": "resumable",
+		},
+	});
+	const uploadId =
+		start.headers.get("X-Goog-Upload-Id") ??
+		start.headers.get("X-Guploader-Uploadid");
+	if (!uploadId) {
+		throw new Error("Thumbnail upload was rejected");
+	}
+
+	const uploadUrl = new URL(PLAYLIST_UPLOAD_URL);
+	uploadUrl.searchParams.set("upload_id", uploadId);
+	uploadUrl.searchParams.set("upload_protocol", "resumable");
+	const upload = await http.fetch(uploadUrl, {
+		method: "POST",
+		headers: {
+			"Content-Type": mimeType,
+			"X-Goog-Api-Format-Version": "1",
+			"X-Goog-Upload-Command": "upload, finalize",
+			"X-Goog-Upload-Offset": "0",
+		},
+		// Slice into a fresh, exactly-sized buffer: BodyInit only accepts
+		// ArrayBuffer-backed views, not views over an ArrayBufferLike.
+		body: image.slice().buffer,
+	});
+	const result = (await upload.json()) as { encryptedBlobId?: string };
+	if (!result.encryptedBlobId) {
+		throw new Error("Thumbnail upload failed");
+	}
+
+	const data = await editPlaylistActions(client, playlistId, [
+		{
+			action: "ACTION_SET_CUSTOM_THUMBNAIL",
+			addedCustomThumbnail: {
+				imageKey: {
+					name: "studio_square_thumbnail",
+					type: "PLAYLIST_IMAGE_TYPE_CUSTOM_THUMBNAIL",
+				},
+				playlistScottyEncryptedBlobId: result.encryptedBlobId,
+			},
+		},
+	]);
+	return editedThumbnailUrl(data);
+}
+
+/**
+ * Restores the playlist cover to the default (first video). Returns the cover
+ * URL echoed in the edit response, when present.
+ */
+export async function removePlaylistThumbnail(
+	playlistId: string,
+): Promise<string | null> {
+	const client = await getYoutubeClient();
+	const data = await editPlaylistActions(client, playlistId, [
+		{ action: "ACTION_REMOVE_CUSTOM_THUMBNAIL" },
+	]);
+	return editedThumbnailUrl(data);
+}
+
 export type Album = Awaited<ReturnType<Innertube["music"]["getAlbum"]>>;
 
 export async function getAlbum(id: string) {
@@ -540,9 +742,7 @@ export async function getAutoplaySongs(
 					"",
 				artistId: artists.find((artist) => artist.id)?.id,
 				artists: artists.length > 0 ? artists : undefined,
-				thumbnail: hiResThumb(
-					video.thumbnail?.[video.thumbnail.length - 1]?.url,
-				),
+				thumbnail: hiResThumb(biggestThumb(video.thumbnail)?.url),
 				duration: video.duration?.text,
 			});
 		}

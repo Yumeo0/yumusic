@@ -8,7 +8,7 @@ import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { cn, hiResThumb } from "@/lib/utils/utils";
+import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
 import {
 	artistIdOf,
 	artistListOf,
@@ -69,7 +69,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 		artist: artistNames(video),
 		artistId: artistIdOf(video),
 		artists: artistListOf(video),
-		thumbnail: hiResThumb(video.thumbnails?.[video.thumbnails.length - 1]?.url),
+		thumbnail: hiResThumb(biggestThumb(video.thumbnails)?.url),
 		duration: video.duration?.text,
 	});
 

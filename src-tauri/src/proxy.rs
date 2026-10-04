@@ -284,6 +284,12 @@ fn apply_cors(response: &mut Response<Vec<u8>>, origin: &str) {
 		"access-control-allow-headers",
 		HeaderValue::from_static(ALLOWED_HEADERS),
 	);
+	// The resumable upload session id lives in a response header; expose it
+	// (and its legacy spelling) so the WebView can read it.
+	headers.insert(
+		"access-control-expose-headers",
+		HeaderValue::from_static("X-Goog-Upload-Id, X-Guploader-Uploadid"),
+	);
 	headers.insert(
 		"access-control-allow-methods",
 		HeaderValue::from_static("GET, POST, OPTIONS"),
@@ -512,6 +518,9 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		"content-disposition",
 		"accept-ranges",
 		"content-range",
+		// Resumable uploads: the session id must reach the WebView.
+		"x-goog-upload-id",
+		"x-guploader-uploadid",
 		// Cache headers must reach the WebView so responses can be revalidated.
 		"cache-control",
 		"etag",

@@ -6,14 +6,18 @@ import type { Song } from "@/contexts/player-context";
  */
 export const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// v7: covers resolve to the largest variant (v6 and earlier could cache one
+// of the tiny variants, e.g. a 64px custom playlist cover);
 // v6: the library is fetched in English; v5 and earlier could hold a locally
 // localized (e.g. Japanese) auto-playlist name.
-export const LIBRARY_CACHE_KEY = "yumusic:library:v6";
+export const LIBRARY_CACHE_KEY = "yumusic:library:v7";
 
+// v10: playlist covers resolve to the largest variant (v9 and earlier could
+// cache a tiny custom-cover variant);
 // v9: album tracks inherit the header artist (v8 cached "Unknown Artist");
 // v8: cached playlists carry a reliable editable flag so own playlists offer
 // "Remove from playlist" (v7 could cache a false negative).
-export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v9:";
+export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v10:";
 
 /** Plain-data snapshot of a playlist (JSON-safe for persistence). */
 export interface PlaylistView {

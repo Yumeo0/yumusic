@@ -36,7 +36,9 @@ export function parseDuration(text: string | undefined | null): number {
 /**
  * Rewrites a YouTube thumbnail URL to a larger variant. YT Music returns
  * tiny 60-120px sources; googleusercontent URLs accept any size parameter
- * (deterministic — no probing needed). i.ytimg.com URLs are returned as-is:
+ * (deterministic — no probing needed). URLs on other hosts are upgraded only
+ * when they already carry a Google-style size suffix (e.g. custom playlist
+ * covers served from music.youtube.com). i.ytimg.com URLs are returned as-is:
  * callers already select the highest variant contained in the API response.
  */
 export function hiResThumb(url: string | undefined | null, size = 544): string {
@@ -48,6 +50,10 @@ export function hiResThumb(url: string | undefined | null, size = 544): string {
 	) {
 		const base = url.split("=")[0];
 		return `${base}=w${size}-h${size}-l90-rj`;
+	}
+	const sizeSuffix = /=(?:w\d+-h\d+|s\d+)(?:-[a-z0-9]+)*$/i;
+	if (sizeSuffix.test(url)) {
+		return url.replace(sizeSuffix, `=w${size}-h${size}-l90-rj`);
 	}
 	return url;
 }
@@ -81,7 +87,9 @@ export interface ThumbCandidate {
 
 /**
  * Picks the highest-resolution candidate from a YouTube thumbnail list,
- * ranked by pixel area. Returns undefined when the list is missing or empty.
+ * ranked by pixel area. Later entries win ties, so lists that omit dimensions
+ * keep resolving to the last (largest-by-convention) variant. Returns
+ * undefined when the list is missing or empty.
  */
 export function biggestThumb(
 	thumbnail: readonly ThumbCandidate[] | null | undefined,
@@ -90,7 +98,7 @@ export function biggestThumb(
 	for (const candidate of thumbnail ?? []) {
 		if (!candidate.url) continue;
 		const area = (candidate.width ?? 0) * (candidate.height ?? 0);
-		if (!best || area > (best.width ?? 0) * (best.height ?? 0)) {
+		if (!best || area >= (best.width ?? 0) * (best.height ?? 0)) {
 			best = candidate;
 		}
 	}
