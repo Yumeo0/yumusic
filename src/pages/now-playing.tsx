@@ -36,7 +36,7 @@ import {
 	useQueueSheetGesture,
 } from "@/lib/queue-drag";
 import { proxiedImageUrl } from "@/lib/tauri";
-import { cn, formatDuration, formatTime } from "@/lib/utils";
+import { cn, coverViewBox, formatDuration, formatTime } from "@/lib/utils";
 
 interface NowPlayingPageProps {
 	onClose: () => void;
@@ -412,6 +412,9 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 											draggable={false}
 											key={`hero-${currentSong.id}`}
 											src={proxiedImageUrl(currentSong.thumbnail)}
+											style={{
+												objectViewBox: coverViewBox(currentSong.thumbnail),
+											}}
 										/>
 									) : (
 										<div className="absolute inset-0 grid place-items-center">

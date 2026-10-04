@@ -52,6 +52,20 @@ export function hiResThumb(url: string | undefined | null, size = 544): string {
 	return url;
 }
 
+/**
+ * Central-square view box for 16:9 i.ytimg video frames: they usually center
+ * a square cover between baked-in side bars, which show once the artwork is
+ * stretched into a wider-than-square container. Square YT Music covers (and
+ * every other source) need no crop.
+ */
+export function coverViewBox(
+	url: string | undefined | null,
+): string | undefined {
+	return url && /\/(?:maxresdefault|hq720|mqdefault)\.\w+/i.test(url)
+		? "inset(0 21.875% 0 21.875%)"
+		: undefined;
+}
+
 /** Entry of a YouTube thumbnail candidate list (e.g. basic_info.thumbnail). */
 export interface ThumbCandidate {
 	url: string;
