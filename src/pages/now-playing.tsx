@@ -391,57 +391,59 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							    shrinks onto the mini-player thumbnail while the
 							    player is dismissed — pinned in place while the
 							    page itself slides away. */}
-							<div
-								className="np-morph absolute touch-none select-none transition-[left,top,width,height] duration-300 ease-out"
-								data-np-cover
-								style={{
-									height:
-										"calc((var(--np-cover-size) + (var(--np-cover-open-h) - var(--np-cover-size)) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-size, 0px) * var(--np-dismiss, 0))",
-									left: "calc(((100% - var(--np-cover-size)) * (1 - var(--queue-reveal, 0)) / 2) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-left, 0px) * var(--np-dismiss, 0))",
-									top: "calc((var(--np-cover-top) * (1 - var(--queue-reveal, 0)) + var(--np-cover-top-open) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-top, 0px) * var(--np-dismiss, 0) - var(--np-slide, 0px))",
-									width:
-										"calc((var(--np-cover-size) + (100% - var(--np-cover-size)) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-size, 0px) * var(--np-dismiss, 0))",
-								}}
-							>
+							<SongContextMenu song={currentSong}>
 								<div
-									className="np-morph relative size-full overflow-hidden bg-card transition-[border-radius] duration-300 ease-out"
+									className="np-morph absolute touch-none select-none transition-[left,top,width,height] duration-300 ease-out"
+									data-np-cover
 									style={{
-										borderRadius:
-											"calc((16px * (1 - var(--queue-reveal, 0))) * (1 - var(--np-dismiss, 0)) + 6px * var(--np-dismiss, 0))",
+										height:
+											"calc((var(--np-cover-size) + (var(--np-cover-open-h) - var(--np-cover-size)) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-size, 0px) * var(--np-dismiss, 0))",
+										left: "calc(((100% - var(--np-cover-size)) * (1 - var(--queue-reveal, 0)) / 2) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-left, 0px) * var(--np-dismiss, 0))",
+										top: "calc((var(--np-cover-top) * (1 - var(--queue-reveal, 0)) + var(--np-cover-top-open) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-top, 0px) * var(--np-dismiss, 0) - var(--np-slide, 0px))",
+										width:
+											"calc((var(--np-cover-size) + (100% - var(--np-cover-size)) * var(--queue-reveal, 0)) * (1 - var(--np-dismiss, 0)) + var(--np-min-cover-size, 0px) * var(--np-dismiss, 0))",
 									}}
 								>
-									{currentSong.thumbnail ? (
-										<img
-											alt={currentSong.title}
-											className="animate-track-in absolute inset-0 size-full object-cover"
-											draggable={false}
-											key={`hero-${currentSong.id}`}
-											src={proxiedImageUrl(currentSong.thumbnail)}
+									<div
+										className="np-morph relative size-full overflow-hidden bg-card transition-[border-radius] duration-300 ease-out"
+										style={{
+											borderRadius:
+												"calc((16px * (1 - var(--queue-reveal, 0))) * (1 - var(--np-dismiss, 0)) + 6px * var(--np-dismiss, 0))",
+										}}
+									>
+										{currentSong.thumbnail ? (
+											<img
+												alt={currentSong.title}
+												className="animate-track-in absolute inset-0 size-full object-cover"
+												draggable={false}
+												key={`hero-${currentSong.id}`}
+												src={proxiedImageUrl(currentSong.thumbnail)}
+												style={{
+													objectViewBox: coverViewBox(currentSong.thumbnail),
+												}}
+											/>
+										) : (
+											<div className="absolute inset-0 grid place-items-center">
+												<Music2 className="size-14 text-muted-foreground" />
+											</div>
+										)}
+										{/* Hairline edge of the floating square, faded out
+									    once the cover reaches the screen edges. */}
+										<div
+											aria-hidden
+											className="np-morph pointer-events-none absolute inset-0 ring-1 ring-foreground/10 ring-inset"
 											style={{
-												objectViewBox: coverViewBox(currentSong.thumbnail),
+												borderRadius: "inherit",
+												opacity: "calc(1 - var(--queue-reveal, 0))",
 											}}
 										/>
-									) : (
-										<div className="absolute inset-0 grid place-items-center">
-											<Music2 className="size-14 text-muted-foreground" />
-										</div>
-									)}
-									{/* Hairline edge of the floating square, faded out
-									    once the cover reaches the screen edges. */}
-									<div
-										aria-hidden
-										className="np-morph pointer-events-none absolute inset-0 ring-1 ring-foreground/10 ring-inset"
-										style={{
-											borderRadius: "inherit",
-											opacity: "calc(1 - var(--queue-reveal, 0))",
-										}}
-									/>
-									<div
-										className="np-morph pointer-events-none absolute inset-x-0 bottom-0 h-1/2 max-h-72 bg-gradient-to-t from-background via-background/75 to-transparent transition-[opacity] duration-300 ease-out"
-										style={{ opacity: "var(--queue-reveal, 0)" }}
-									/>
+										<div
+											className="np-morph pointer-events-none absolute inset-x-0 bottom-0 h-1/2 max-h-72 bg-gradient-to-t from-background via-background/75 to-transparent transition-[opacity] duration-300 ease-out"
+											style={{ opacity: "var(--queue-reveal, 0)" }}
+										/>
+									</div>
 								</div>
-							</div>
+							</SongContextMenu>
 
 							{/* Title: slides from under the cover to the top of the
 							    seek + transport stack. The title and artist lines
@@ -506,24 +508,26 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 					{/* Mobile lyrics mode: compact artwork + title row. */}
 					{showLyrics && (
 						<div className="flex w-full items-center gap-4 md:hidden">
-							<div
-								className="np-morph shrink-0"
-								data-np-cover
-								style={morphStyle("--np-cover")}
-							>
-								{currentSong.thumbnail ? (
-									<img
-										alt=""
-										className="size-16 shrink-0 rounded-xl border border-foreground/10 object-cover"
-										draggable={false}
-										src={proxiedImageUrl(currentSong.thumbnail)}
-									/>
-								) : (
-									<div className="grid size-16 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card">
-										<Music2 className="size-8 text-muted-foreground" />
-									</div>
-								)}
-							</div>
+							<SongContextMenu song={currentSong}>
+								<div
+									className="np-morph shrink-0"
+									data-np-cover
+									style={morphStyle("--np-cover")}
+								>
+									{currentSong.thumbnail ? (
+										<img
+											alt=""
+											className="size-16 shrink-0 rounded-xl border border-foreground/10 object-cover"
+											draggable={false}
+											src={proxiedImageUrl(currentSong.thumbnail)}
+										/>
+									) : (
+										<div className="grid size-16 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card">
+											<Music2 className="size-8 text-muted-foreground" />
+										</div>
+									)}
+								</div>
+							</SongContextMenu>
 							<TrackHeading
 								className="min-w-0 flex-1 text-left"
 								song={currentSong}
@@ -533,32 +537,34 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 
 					{/* Desktop: centered artwork above the title. */}
 					<div className="hidden w-full flex-col items-center gap-6 md:flex">
-						<div
-							className="np-morph group relative touch-none select-none"
-							data-np-cover
-							style={morphStyle("--np-cover")}
-						>
+						<SongContextMenu song={currentSong}>
 							<div
-								aria-hidden
-								className="absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl"
-								style={{
-									transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 2.5))",
-								}}
-							/>
-							{currentSong.thumbnail ? (
-								<img
-									alt={currentSong.title}
-									className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
-									draggable={false}
-									key={`art-${currentSong.id}`}
-									src={proxiedImageUrl(currentSong.thumbnail)}
+								className="np-morph group relative touch-none select-none"
+								data-np-cover
+								style={morphStyle("--np-cover")}
+							>
+								<div
+									aria-hidden
+									className="absolute -inset-7 rounded-[2.5rem] bg-primary/20 blur-3xl"
+									style={{
+										transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 2.5))",
+									}}
 								/>
-							) : (
-								<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
-									<Music2 className="size-14 text-muted-foreground" />
-								</div>
-							)}
-						</div>
+								{currentSong.thumbnail ? (
+									<img
+										alt={currentSong.title}
+										className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
+										draggable={false}
+										key={`art-${currentSong.id}`}
+										src={proxiedImageUrl(currentSong.thumbnail)}
+									/>
+								) : (
+									<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
+										<Music2 className="size-14 text-muted-foreground" />
+									</div>
+								)}
+							</div>
+						</SongContextMenu>
 						<TrackHeading className="text-center" song={currentSong} />
 					</div>
 
