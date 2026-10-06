@@ -59,11 +59,26 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 	let login_url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
 		.map_err(|e| e.to_string())?;
 
-	let window = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(login_url))
+	let mut builder = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(login_url))
 		.title("Sign in with Google")
-		.inner_size(800.0, 600.0)
-		.build()
-		.map_err(|e| e.to_string())?;
+		.inner_size(800.0, 600.0);
+
+	// WebView2 shares one user data folder across all webviews and refuses to
+	// create a second environment for it when the browser arguments differ
+	// (HRESULT 0x8007139F), so the login webview has to reuse the main
+	// window's `additionalBrowserArgs` exactly.
+	if let Some(args) = app
+		.config()
+		.app
+		.windows
+		.iter()
+		.find(|config| config.label == "main")
+		.and_then(|config| config.additional_browser_args.clone())
+	{
+		builder = builder.additional_browser_args(&args);
+	}
+
+	let window = builder.build().map_err(|e| e.to_string())?;
 
 	// Check both the desktop and mobile YouTube origins: after signing in, the
 	// webview can land on m.youtube.com, whose cookies would not be returned
