@@ -680,6 +680,7 @@ export async function removePlaylistThumbnail(
 }
 
 export type Album = Awaited<ReturnType<Innertube["music"]["getAlbum"]>>;
+export type Artist = Awaited<ReturnType<Innertube["music"]["getArtist"]>>;
 
 export async function getAlbum(id: string) {
 	const client = await getYoutubeClient();
@@ -703,6 +704,44 @@ export interface AutoplayTrack {
 	duration?: string;
 }
 
+/** Converts a queue panel's videos into playable tracks, skipping `skipId`. */
+function panelTracks(
+	panel: YTNodes.PlaylistPanel,
+	skipId?: string,
+): AutoplayTrack[] {
+	const tracks: AutoplayTrack[] = [];
+	for (const item of panel.contents) {
+		const video = item.is(YTNodes.PlaylistPanelVideo)
+			? item
+			: item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary
+				? item.primary
+				: null;
+		if (!video || video.video_id === skipId) continue;
+		const artists = (video.artists ?? [])
+			.filter((artist) => artist.name)
+			.map((artist) => ({
+				name: artist.name,
+				id: artist.channel_id?.startsWith("UC") ? artist.channel_id : undefined,
+			}));
+		tracks.push({
+			id: video.video_id,
+			title: video.title.toString() || "Unknown Title",
+			artist:
+				artists
+					.map((artist) => artist.name)
+					.filter(Boolean)
+					.join(", ") ||
+				video.author ||
+				"",
+			artistId: artists.find((artist) => artist.id)?.id,
+			artists: artists.length > 0 ? artists : undefined,
+			thumbnail: hiResThumb(biggestThumb(video.thumbnail)?.url),
+			duration: video.duration?.text,
+		});
+	}
+	return tracks;
+}
+
 /**
  * Similar tracks to keep playing once the queue ends — YouTube Music's "Up
  * next" mix for the given video (automix fallback included). The current track
@@ -714,41 +753,79 @@ export async function getAutoplaySongs(
 	try {
 		const client = await getYoutubeClient();
 		const panel = await client.music.getUpNext(videoId, true);
-		const tracks: AutoplayTrack[] = [];
-		for (const item of panel.contents) {
-			const video = item.is(YTNodes.PlaylistPanelVideo)
-				? item
-				: item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary
-					? item.primary
-					: null;
-			if (!video || video.video_id === videoId) continue;
-			const artists = (video.artists ?? [])
-				.filter((artist) => artist.name)
-				.map((artist) => ({
-					name: artist.name,
-					id: artist.channel_id?.startsWith("UC")
-						? artist.channel_id
-						: undefined,
-				}));
-			tracks.push({
-				id: video.video_id,
-				title: video.title.toString() || "Unknown Title",
-				artist:
-					artists
-						.map((artist) => artist.name)
-						.filter(Boolean)
-						.join(", ") ||
-					video.author ||
-					"",
-				artistId: artists.find((artist) => artist.id)?.id,
-				artists: artists.length > 0 ? artists : undefined,
-				thumbnail: hiResThumb(biggestThumb(video.thumbnail)?.url),
-				duration: video.duration?.text,
-			});
-		}
-		return tracks;
+		return panelTracks(panel, videoId);
 	} catch (error) {
 		console.warn("[YuMusic] failed to load autoplay tracks:", error);
+		return [];
+	}
+}
+
+/** The context a mix queue starts from — the artist header's "Mix" button. */
+export interface MixSource {
+	videoId: string;
+	playlistId: string;
+	params?: string;
+}
+
+/** The "Mix" context an artist page header carries, when it has one. */
+export function artistMixSource(header: Artist["header"]): MixSource | null {
+	const button =
+		header instanceof YTNodes.MusicImmersiveHeader
+			? header.start_radio_button
+			: null;
+	const payload = button?.endpoint?.payload as
+		| { videoId?: string; playlistId?: string; params?: string }
+		| undefined;
+	if (!payload?.videoId || !payload.playlistId) return null;
+	return {
+		videoId: payload.videoId,
+		playlistId: payload.playlistId,
+		params: payload.params,
+	};
+}
+
+/**
+ * Tracks of an artist mix started from its source context. The mix context
+ * feeds the queue endpoint; returns `[]` when the queue cannot be loaded.
+ */
+export async function getMixSongs(mix: MixSource): Promise<AutoplayTrack[]> {
+	try {
+		const client = await getYoutubeClient();
+		const response = await client.actions.execute("/next", {
+			videoId: mix.videoId,
+			playlistId: mix.playlistId,
+			params: mix.params,
+			enablePersistentPlaylistPanel: true,
+			client: "YTMUSIC",
+			parse: true,
+		});
+		const tab = response.contents_memo?.getType(YTNodes.Tab)?.[0];
+		const queue = tab?.content?.is(YTNodes.MusicQueue) ? tab.content : null;
+		const panel = queue?.content;
+		return panel ? panelTracks(panel) : [];
+	} catch (error) {
+		console.warn("[YuMusic] failed to load mix queue:", error);
+		return [];
+	}
+}
+
+/**
+ * Starts an artist's "Mix" (radio) by id. The mix context lives on the artist
+ * page's header button (`RDEM…` playlist id plus seed) and cannot be derived
+ * from the channel id — hence one artist fetch, paid only on demand. Callers
+ * that already hold the artist page (the artist view) should use
+ * `artistMixSource` + `getMixSongs` instead.
+ */
+export async function getArtistMixSongs(
+	artistId: string,
+): Promise<AutoplayTrack[]> {
+	try {
+		const client = await getYoutubeClient();
+		const artist = await client.music.getArtist(artistId);
+		const mix = artistMixSource(artist.header);
+		return mix ? await getMixSongs(mix) : [];
+	} catch (error) {
+		console.warn("[YuMusic] failed to start artist mix:", error);
 		return [];
 	}
 }
@@ -905,6 +982,45 @@ export async function loadPlaylistContinuation(playlist: Playlist) {
 		}
 	}
 	return null;
+}
+
+/** Ids one bulk queue request takes; more than a search list holds anyway. */
+const MAX_QUEUE_IDS = 50;
+
+/** Pulls `videoId → length label` pairs out of a bulk queue response. */
+function collectQueueLengths(node: unknown, out: Map<string, string>): void {
+	if (Array.isArray(node)) {
+		for (const item of node) collectQueueLengths(item, out);
+		return;
+	}
+	if (!node || typeof node !== "object") return;
+	const record = node as Record<string, unknown>;
+	const panel = record.playlistPanelVideoRenderer as
+		| { videoId?: string; lengthText?: { runs?: { text?: string }[] } }
+		| undefined;
+	const id = panel?.videoId;
+	const text = panel?.lengthText?.runs?.[0]?.text;
+	if (id && text) out.set(id, text);
+	for (const value of Object.values(record)) collectQueueLengths(value, out);
+}
+
+/**
+ * Length labels for a batch of tracks, from the bulk queue endpoint. The mixed
+ * "All" search rows carry no length (their trailing column shows play counts
+ * instead), so one call backfills every listed track at once.
+ */
+export async function getTrackDurations(
+	videoIds: string[],
+): Promise<Map<string, string>> {
+	const durations = new Map<string, string>();
+	if (videoIds.length === 0) return durations;
+	const client = await getYoutubeClient();
+	const response = await client.actions.execute("/music/get_queue", {
+		videoIds: videoIds.slice(0, MAX_QUEUE_IDS),
+		client: "YTMUSIC",
+	});
+	collectQueueLengths(response.data, durations);
+	return durations;
 }
 
 export async function getSongStream(videoId: string) {

@@ -224,6 +224,14 @@ describe("artist name romaji tails", () => {
 		expect(formatArtistName("Nanashi Mumei Ch. hololive-EN")).toBe(
 			"Nanashi Mumei",
 		);
+		// Bracketed group tags are dropped as well.
+		expect(formatArtistName("Elira Pendora 【NIJISANJI EN】")).toBe(
+			"Elira Pendora",
+		);
+		// Role credits in brackets are kept: they name a person.
+		expect(formatArtistName("Ellen Joe (CV:Shion Wakayama)")).toBe(
+			"Ellen Joe (CV:Shion Wakayama)",
+		);
 		expect(
 			mergeArtistNames(
 				[{ name: "Kanade Ch. 音乃瀬奏 ‐ ReGLOSS", id: "UC1" }],
@@ -417,6 +425,17 @@ describe("cover markers and artist credit tails", () => {
 		const parts = formatTitleParts(title, "original", true, "Nene Ch.桃鈴ねね");
 		expect(parts.main).toBe("私、アイドル宣言");
 		expect(parts.coverArtists).toEqual(["ホロライブ", "桃鈴ねね"]);
+	});
+
+	test("bracketed group tags in performer lists are dropped", () => {
+		const parts = formatTitleParts(
+			"【全力Chu!で】可愛くてごめん／Honeyworks covered by 博衣こより(hololive)【歌ってみた】",
+			"original",
+			true,
+			"Koyori ch. 博衣こより - holoX -",
+		);
+		expect(parts.main).toBe("可愛くてごめん");
+		expect(parts.coverArtists).toEqual(["博衣こより"]);
 	});
 
 	test("marker lists in brackets are filtered", () => {

@@ -1,6 +1,8 @@
 import {
 	ArrowLeftIcon,
 	ArrowUpRight,
+	AudioLines,
+	Loader2,
 	Music2,
 	Play,
 	RefreshCw,
@@ -17,6 +19,7 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
@@ -25,7 +28,12 @@ import {
 	artistNames,
 	videoIdOf,
 } from "@/lib/youtube/youtube.utils";
-import { getYoutubeClient } from "@/lib/youtube/youtube-client";
+import {
+	artistMixSource,
+	getMixSongs,
+	getYoutubeClient,
+	type MixSource,
+} from "@/lib/youtube/youtube-client";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -49,6 +57,8 @@ interface ArtistView {
 	songsTitle: string;
 	songs: Song[];
 	shelves: ArtistShelf[];
+	/** Context for the header's "Mix" (radio) action, when the artist has one. */
+	mix: MixSource | null;
 }
 
 const artistCache = new Map<string, { timestamp: number; data: ArtistView }>();
@@ -93,6 +103,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	const client = await getYoutubeClient();
 	const artist = await client.music.getArtist(id);
 	const header = artist.header;
+	const mix = artistMixSource(header);
 
 	let name = "Artist";
 	let description: string | null = null;
@@ -175,6 +186,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 		songsTitle,
 		songs,
 		shelves,
+		mix,
 	};
 	artistCache.set(id, { timestamp: Date.now(), data: view });
 	return view;
@@ -188,6 +200,7 @@ export default function ArtistPage() {
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [mixPending, setMixPending] = useState(false);
 	const artistName = artist?.name;
 
 	const fetchArtist = async (force = false) => {
@@ -211,6 +224,21 @@ export default function ArtistPage() {
 	}, [id]);
 
 	const onBack = () => navigate(-1);
+
+	const startMix = async () => {
+		if (!artist?.mix || mixPending) return;
+		setMixPending(true);
+		try {
+			const songs = await getMixSongs(artist.mix);
+			if (songs.length === 0) {
+				showToast("Could not start mix");
+				return;
+			}
+			playQueue(songs, 0);
+		} finally {
+			setMixPending(false);
+		}
+	};
 
 	if (loading) {
 		return (
@@ -279,32 +307,52 @@ export default function ArtistPage() {
 							{artist.description}
 						</p>
 					)}
-					{artist.songs.length > 0 && (
-						<div className="mt-4 flex items-center gap-2.5">
-							<button
-								className="flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 active:scale-95"
-								onClick={() => play(artist.songs[0], artist.songs.slice(1))}
-								type="button"
-							>
-								<Play className="size-4 translate-x-[1px] fill-current" />
-								Play
-							</button>
-							<button
-								className="flex h-10 items-center gap-2 rounded-full border border-foreground/12 px-5 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
-								onClick={() => {
-									const shuffled = [...artist.songs];
-									for (let i = shuffled.length - 1; i > 0; i--) {
-										const j = Math.floor(Math.random() * (i + 1));
-										[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-									}
-									play(shuffled[0], shuffled.slice(1));
-								}}
-								title="Shuffle play"
-								type="button"
-							>
-								<Shuffle className="size-4" />
-								Shuffle
-							</button>
+					{(artist.songs.length > 0 || artist.mix) && (
+						<div className="mt-4 flex flex-wrap items-center gap-2.5">
+							{artist.songs.length > 0 && (
+								<button
+									className="flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 active:scale-95"
+									onClick={() => play(artist.songs[0], artist.songs.slice(1))}
+									type="button"
+								>
+									<Play className="size-4 translate-x-[1px] fill-current" />
+									Play
+								</button>
+							)}
+							{artist.songs.length > 0 && (
+								<button
+									className="flex h-10 items-center gap-2 rounded-full border border-foreground/12 px-5 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
+									onClick={() => {
+										const shuffled = [...artist.songs];
+										for (let i = shuffled.length - 1; i > 0; i--) {
+											const j = Math.floor(Math.random() * (i + 1));
+											[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+										}
+										play(shuffled[0], shuffled.slice(1));
+									}}
+									title="Shuffle play"
+									type="button"
+								>
+									<Shuffle className="size-4" />
+									Shuffle
+								</button>
+							)}
+							{artist.mix && (
+								<button
+									className="flex h-10 items-center gap-2 rounded-full border border-foreground/12 px-5 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:opacity-60"
+									disabled={mixPending}
+									onClick={() => void startMix()}
+									title="Start mix"
+									type="button"
+								>
+									{mixPending ? (
+										<Loader2 className="size-4 animate-spin" />
+									) : (
+										<AudioLines className="size-4" />
+									)}
+									Mix
+								</button>
+							)}
 						</div>
 					)}
 				</div>

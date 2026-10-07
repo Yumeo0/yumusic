@@ -44,7 +44,7 @@ export default function HomePage() {
 
 			{query && (
 				<div className="mt-10">
-					<SearchResults query={query} />
+					<SearchResults key={query} query={query} />
 				</div>
 			)}
 

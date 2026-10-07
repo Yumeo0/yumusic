@@ -91,6 +91,10 @@ function normalizeArtistName(name: string): string | null {
 		const head = name.slice(0, trailing.index).trim();
 		if (head) return head;
 	}
+	// Bracketed group tags: "Elira Pendora 【NIJISANJI EN】" → "Elira Pendora".
+	// Credit brackets stay: "Ellen Joe (CV:Shion Wakayama)".
+	const core = dropGroupTags(name);
+	if (core && core !== name) return core;
 	return null;
 }
 
@@ -250,10 +254,6 @@ const COVER_BRACKET =
 	String.raw`\s*cover(?:ed)?\s*` +
 	BRACKET_CLOSE;
 
-/** Trailing "(cover)"/"（カバー）" marker on one entry of a credit list. */
-const CREDIT_MARKER_SUFFIX =
-	/\s*[(（]\s*(?:cover(?:ed)?|カバー|[歌弾踊叩]ってみた)\s*[)）]\s*$/iu;
-
 /**
  * Whether a split credit entry is a marker or descriptor rather than a name —
  * "歌ってみた", "少し演奏してみた" ("played a little"), "カバー", "cover",
@@ -269,13 +269,14 @@ function isMarkerEntry(entry: string): boolean {
 
 /**
  * Splits a cover-credit artist list on slashes, commas and ampersands, drops
- * a per-entry cover marker ("桃鈴ねね(cover)" → "桃鈴ねね") and keeps only the
- * actual names of mixed marker lists ("歌ってみた/ときのそら" → "ときのそら").
+ * bracketed decorators per entry ("桃鈴ねね(cover)", "博衣こより(hololive)")
+ * and keeps only the actual names of mixed marker lists
+ * ("歌ってみた/ときのそら" → "ときのそら").
  */
 function splitCoverArtists(raw: string): string[] {
 	return raw
 		.split(/\s*[，,、]\s*|\s*[/／]\s*|\s*＆\s*|\s+&\s+|\s*[×✕]\s*/u)
-		.map((name) => name.replace(CREDIT_MARKER_SUFFIX, "").trim())
+		.map((name) => artistCore(name).trim())
 		.filter((name) => name !== "" && name.length <= 60 && !isMarkerEntry(name));
 }
 
@@ -551,6 +552,20 @@ function foldName(text: string): string {
 function artistCore(name: string): string {
 	return name
 		.replace(/[([（【『「〈≪][^)）】』」〉≫\]]*[)）】』」〉≫\]]/gu, " ")
+		.trim();
+}
+
+/**
+ * Drops bracketed group tags for display ("Elira Pendora 【NIJISANJI EN】" →
+ * "Elira Pendora") but keeps credit brackets naming a person, which carry a
+ * role ("Ellen Joe (CV:Shion Wakayama)").
+ */
+function dropGroupTags(name: string): string {
+	return name
+		.replace(/[([（【『「〈≪][^)）】』」〉≫\]]*[)）】』」〉≫\]]/gu, (match) =>
+			/[：:]/u.test(match) ? match : " ",
+		)
+		.replace(/\s+/g, " ")
 		.trim();
 }
 
