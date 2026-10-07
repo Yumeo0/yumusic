@@ -164,7 +164,7 @@ export function LyricsPanel({
 					Lyrics
 				</span>
 				{available.length >= 2 && (
-					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/[0.06] p-0.5">
+					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/6 p-0.5">
 						{available.map((provider) => (
 							<button
 								className={cn(

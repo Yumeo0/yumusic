@@ -9,7 +9,7 @@ import {
 	LogOut,
 	Trash2,
 } from "lucide-react";
-import { type DragEvent, useEffect, useState } from "react";
+import { type CSSProperties, type DragEvent, useEffect, useState } from "react";
 import { UpdatesSection } from "@/components/app/updates";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,7 +19,12 @@ import {
 } from "@/lib/lyrics/lyrics-providers";
 import { validateListenbrainzToken } from "@/lib/services/listenbrainz";
 import { updaterSupported } from "@/lib/services/updater";
-import { useSettings } from "@/lib/stores/settings";
+import {
+	CROSSFADE_MAX_SECONDS,
+	CROSSFADE_MIN_SECONDS,
+	clampCrossfadeSeconds,
+	useSettings,
+} from "@/lib/stores/settings";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 
@@ -491,6 +496,75 @@ export default function SettingsPage({
 							/>
 						</button>
 					</div>
+					<div className="flex items-center justify-between gap-6 p-4">
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Crossfade</p>
+							<p className="mt-0.5 text-xs text-muted-foreground">
+								Blend the end of a song into the start of the next one instead
+								of cutting between tracks. Needs an upcoming song from the queue
+								or autoplay.
+							</p>
+						</div>
+						<button
+							aria-label="Toggle crossfade"
+							aria-pressed={settings.crossfade}
+							className={cn(
+								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
+								settings.crossfade ? "bg-primary" : "bg-foreground/15",
+							)}
+							onClick={() => update({ crossfade: !settings.crossfade })}
+							type="button"
+						>
+							<span
+								className={cn(
+									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
+									settings.crossfade && "translate-x-5",
+								)}
+							/>
+						</button>
+					</div>
+					{settings.crossfade && (
+						<div className="p-4">
+							<div className="flex items-center justify-between gap-6">
+								<label
+									className="text-sm font-medium"
+									htmlFor="crossfade-length"
+								>
+									Crossfade length
+								</label>
+								<span className="font-mono text-xs text-muted-foreground tabular-nums">
+									{settings.crossfadeSeconds}s
+								</span>
+							</div>
+							<input
+								className="range-fx mt-3 w-full"
+								id="crossfade-length"
+								max={CROSSFADE_MAX_SECONDS}
+								min={CROSSFADE_MIN_SECONDS}
+								onChange={(event) =>
+									update({
+										crossfadeSeconds: clampCrossfadeSeconds(
+											Number(event.target.value),
+										),
+									})
+								}
+								step={1}
+								style={
+									{
+										"--vol":
+											(settings.crossfadeSeconds - CROSSFADE_MIN_SECONDS) /
+											(CROSSFADE_MAX_SECONDS - CROSSFADE_MIN_SECONDS),
+									} as CSSProperties
+								}
+								type="range"
+								value={settings.crossfadeSeconds}
+							/>
+							<p className="mt-2 text-xs text-muted-foreground">
+								Seconds of overlap. The next song starts this much before the
+								current one ends.
+							</p>
+						</div>
+					)}
 					<div className="flex items-center justify-between gap-6 p-4">
 						<div className="min-w-0">
 							<p className="text-sm font-medium">Watch history</p>

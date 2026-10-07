@@ -33,7 +33,10 @@ import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { shareLink } from "@/lib/services/share";
-import { reconcilePinnedTitles, usePinnedPlaylists } from "@/lib/stores/pinned";
+import {
+	reconcilePinnedPlaylists,
+	usePinnedPlaylists,
+} from "@/lib/stores/pinned";
 import {
 	invalidateLibraryCache,
 	LIBRARY_CACHE_KEY,
@@ -227,6 +230,16 @@ export function PlaylistDetails() {
 		fetchPlaylist();
 		setSearch("");
 	}, [id]);
+
+	// The pinned sidebar entry stores its cover from pin time; refresh it
+	// whenever this page has fresher metadata (cached or fetched) so a dead
+	// or outdated URL heals even for playlists that aren't in the library.
+	useEffect(() => {
+		if (!id || !playlist) return;
+		reconcilePinnedPlaylists([
+			{ id, title: playlist.title, thumbnail: playlist.thumbnail },
+		]);
+	}, [id, playlist]);
 
 	// Return to wherever the user came from (home, search, an artist, another
 	// playlist…), not a fixed destination.
@@ -799,7 +812,7 @@ export default function PlaylistsPage() {
 				subtitle: cleanSubtitle(playlist.subtitle),
 			}));
 			setPlaylists(list);
-			reconcilePinnedTitles(list);
+			reconcilePinnedPlaylists(list);
 			if (list.length > 0) writeCache(LIBRARY_CACHE_KEY, list);
 		} catch (err) {
 			console.error("Error fetching playlists:", err);

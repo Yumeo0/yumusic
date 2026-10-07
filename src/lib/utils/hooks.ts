@@ -39,6 +39,10 @@ export function useMediaTime(
 		setMediaDuration(0);
 	}, [resetKey]);
 
+	// Re-attach on `resetKey` too: after a crossfade handover the active
+	// element behind `videoElementRef` changes without the ref itself doing
+	// so, and the media clock must follow the deck that is now audible.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is an intentional re-attach trigger, not a read value
 	useEffect(() => {
 		const videoEl = videoElementRef?.current;
 		if (!videoEl) return;
@@ -64,7 +68,7 @@ export function useMediaTime(
 			videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
 			videoEl.removeEventListener("timeupdate", handleTimeUpdate);
 		};
-	}, [videoElementRef]);
+	}, [videoElementRef, resetKey]);
 
 	const duration =
 		knownDuration && knownDuration > 0 ? knownDuration : mediaDuration;

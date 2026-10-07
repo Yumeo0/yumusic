@@ -30,23 +30,33 @@ function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 }
 
 /**
- * Updates the stored title of any pinned playlist that appears (with a
- * different title) in the given library list — e.g. a system playlist whose
- * name was previously captured in another locale.
+ * Updates stored titles and thumbnails of pinned playlists that appear (with
+ * different values) in a freshly loaded list — e.g. a system playlist whose
+ * name was previously captured in another locale, or a cover URL that has
+ * since changed or died. Older app versions persisted the raw tiny variant
+ * (e.g. `=s192`), whose token may no longer resolve on the CDN.
+ *
+ * Thumbnails are only replaced when the fresh list provides one, so a failed
+ * lookup never strips artwork that might still load.
  */
-export function reconcilePinnedTitles(
-	items: Array<{ id: string; title: string }>,
+export function reconcilePinnedPlaylists(
+	items: Array<{ id: string; title: string; thumbnail?: string | null }>,
 ) {
-	const titles = new Map(items.map((item) => [item.id, item.title]));
+	const fresh = new Map(items.map((item) => [item.id, item]));
 	const current = getPinnedPlaylists();
 	let changed = false;
 	const next = current.map((pinned) => {
-		const title = titles.get(pinned.id);
-		if (title && title !== pinned.title) {
-			changed = true;
-			return { ...pinned, title };
-		}
-		return pinned;
+		const item = fresh.get(pinned.id);
+		if (!item) return pinned;
+		const title =
+			item.title && item.title !== pinned.title ? item.title : pinned.title;
+		const thumbnail =
+			item.thumbnail && item.thumbnail !== pinned.thumbnail
+				? item.thumbnail
+				: pinned.thumbnail;
+		if (title === pinned.title && thumbnail === pinned.thumbnail) return pinned;
+		changed = true;
+		return { ...pinned, title, thumbnail };
 	});
 	if (changed) savePinnedPlaylists(next);
 }

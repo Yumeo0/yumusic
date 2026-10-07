@@ -44,7 +44,11 @@ import {
 	useQueueOpen,
 } from "./lib/player/player-ui";
 import { findRecording, submitListen } from "./lib/services/listenbrainz";
-import { usePinnedPlaylists } from "./lib/stores/pinned";
+import {
+	reconcilePinnedPlaylists,
+	usePinnedPlaylists,
+} from "./lib/stores/pinned";
+import { LIBRARY_CACHE_KEY, readCache } from "./lib/stores/playlist-cache";
 import { useSettings } from "./lib/stores/settings";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
@@ -60,6 +64,7 @@ import {
 	getTrackMeta,
 	getUserProfile,
 	getYoutubeClient,
+	type LibraryPlaylist,
 	type TrackMeta,
 } from "./lib/youtube/youtube-client";
 import ArtistPage from "./pages/artist";
@@ -605,6 +610,17 @@ function AppShell({
 	const { pinned, unpin } = usePinnedPlaylists();
 	const { currentSong } = usePlayer();
 
+	// Pinned entries store their cover URL as it was when pinned; heal it from
+	// the cached library on startup so a dead URL (older versions saved tiny
+	// raw variants that no longer resolve) doesn't leave the sidebar artwork
+	// broken until the playlists page is visited.
+	useEffect(() => {
+		const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+		if (cached && cached.data.length > 0) {
+			reconcilePinnedPlaylists(cached.data);
+		}
+	}, []);
+
 	return (
 		<>
 			<AmbientSync />
@@ -697,15 +713,10 @@ function AppShell({
 														}
 														type="button"
 													>
-														{playlist.thumbnail ? (
-															<img
-																alt=""
-																className="size-5 shrink-0 rounded object-cover"
-																src={proxiedImageUrl(playlist.thumbnail)}
-															/>
-														) : (
-															<Music2 className="size-4 shrink-0" />
-														)}
+														<PinnedThumbnail
+															key={playlist.thumbnail ?? ""}
+															thumbnail={playlist.thumbnail}
+														/>
 														<span className="truncate">{playlist.title}</span>
 													</button>
 													<button
@@ -763,6 +774,29 @@ function AppShell({
 			</div>
 			<MobileNav />
 		</>
+	);
+}
+
+/**
+ * Sidebar artwork for a pinned playlist. The pin stores its cover URL by
+ * value, so the image can outlive the URL (replaced covers, dead legacy
+ * variants); a failed load degrades to the placeholder icon instead of a
+ * broken glyph. Keyed by the URL at the call site, so a reconciled URL gets
+ * a fresh attempt.
+ */
+function PinnedThumbnail({ thumbnail }: { thumbnail: string | null }) {
+	const [failed, setFailed] = useState(false);
+
+	if (!thumbnail || failed) {
+		return <Music2 className="size-4 shrink-0" />;
+	}
+	return (
+		<img
+			alt=""
+			className="size-5 shrink-0 rounded object-cover"
+			onError={() => setFailed(true)}
+			src={proxiedImageUrl(thumbnail)}
+		/>
 	);
 }
 

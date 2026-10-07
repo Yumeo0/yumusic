@@ -14,9 +14,14 @@ import {
 import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
-import { useSettings } from "@/lib/stores/settings";
+import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import { MAX_VOLUME } from "@/lib/utils/hooks";
-import { biggestThumb, hiResThumb, parseDuration } from "@/lib/utils/utils";
+import {
+	biggestThumb,
+	hiResThumb,
+	parseDuration,
+	type ThumbCandidate,
+} from "@/lib/utils/utils";
 import { botguardService } from "@/lib/youtube/botguard-service";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
@@ -189,6 +194,90 @@ function reportWatchTime(
 		});
 }
 
+/**
+ * Seconds before the end of a track at which the next one starts buffering
+ * on the idle deck. Generous enough for the metadata request, PoToken and
+ * SABR handshake to finish before the fade window opens; a preload that is
+ * still not ready when the track ends falls back to the normal load path.
+ */
+const CROSSFADE_PRELOAD_LEAD_SECONDS = 15;
+
+/**
+ * One of the two hidden media elements the player renders and swaps between.
+ * The idle deck buffers the next track so a crossfade can overlap the two.
+ */
+interface Deck {
+	/** The hidden media element this deck outputs through. */
+	ref: RefObject<HTMLVideoElement | null>;
+	/**
+	 * Video id mounted on the element (a load in progress counts). Null while
+	 * idle; the guard that keeps a crossfade promotion from re-loading the
+	 * track that is already mounted.
+	 */
+	videoId: string | null;
+	/** True once audio chunks have been appended and the deck can play. */
+	ready: boolean;
+	/** Aborts this deck's reader and tears down its MediaSource. */
+	stop: (() => void) | null;
+	/** Invalidates async work after a teardown or a newer load. */
+	generation: number;
+}
+
+interface LoadedStream {
+	videoInfo: YT.VideoInfo;
+	innertube: Innertube;
+}
+
+interface MountOptions {
+	/** Start playback as soon as the first chunks land (normal loads). */
+	autoPlay: boolean;
+	/** Called once the deck is buffered enough to play (crossfade preloads). */
+	onReady?: () => void;
+}
+
+/** Crossfade runtime state; null while no crossfade is in flight. */
+interface CrossfadeState {
+	phase: "preload" | "fading";
+	/** Song that fades in (the track after the current one). */
+	nextSong: Song;
+	/** Song that fades out; committed to history on completion. */
+	fromSong: Song;
+	/** Deck the next song is buffered on (always the idle one). */
+	deckIndex: number;
+	/** Stream metadata once the preload has finished fetching. */
+	result: LoadedStream | null;
+	/** Overlap length in seconds, captured when the preload was armed. */
+	seconds: number;
+	/** Next song comes from the autoplay radio and gets promoted to the queue. */
+	promote: boolean;
+	/**
+	 * Advances the ramp one step. Called by rAF while the window renders and
+	 * again on every timeupdate, so a backgrounded window (where rAF is
+	 * paused) still completes the fade on the audio clock.
+	 */
+	advance: (() => void) | null;
+}
+
+/**
+ * Picks the artwork for a playing track from its player response. YT Music's
+ * square cover (googleusercontent) is kept — it is the clean artwork — and
+ * other sources take the biggest variant, center-cut to a square for music
+ * (googleusercontent URLs get a server-side crop, ytimg ones are cropped by
+ * the square containers' object-fit).
+ */
+function pickArtwork(
+	song: Song,
+	basic: { category?: string | null; thumbnail?: readonly ThumbCandidate[] },
+): string | null {
+	const best = biggestThumb(basic.thumbnail);
+	if (!best) return null;
+	return /googleusercontent\.com|ggpht\.com/.test(song.thumbnail)
+		? hiResThumb(song.thumbnail, 1024)
+		: basic.category === "Music"
+			? hiResThumb(best.url)
+			: best.url;
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [settings] = useSettings();
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
@@ -201,8 +290,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [history, setHistory] = useState<Song[]>([]);
 	const queueSheetRef = useRef<HTMLElement | null>(null);
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
-	const videoElementRef = useRef<HTMLVideoElement>(null);
-	const sabrStreamRef = useRef<SabrStream | null>(null);
+	const deckARef = useRef<HTMLVideoElement | null>(null);
+	const deckBRef = useRef<HTMLVideoElement | null>(null);
+	/**
+	 * The deck owning playback. Flipped when a crossfade completes (the
+	 * preloaded deck becomes active), which is also when `videoElementRef`
+	 * is repointed so every consumer follows the new element.
+	 */
+	const activeDeckRef = useRef(0);
+	/** Element the app reads through `videoElementRef`; tracks the active deck. */
+	const videoElementRef = useRef<HTMLVideoElement | null>(null);
+	const decksRef = useRef<Deck[]>([]);
+	if (decksRef.current.length === 0) {
+		decksRef.current = [
+			{ ref: deckARef, videoId: null, ready: false, stop: null, generation: 0 },
+			{ ref: deckBRef, videoId: null, ready: false, stop: null, generation: 0 },
+		];
+	}
+	const crossfadeRef = useRef<CrossfadeState | null>(null);
+	const crossfadeRafRef = useRef<number | null>(null);
+	/** Latest crossfade scheduler; async preload completions call through it. */
+	const updateCrossfadeRef = useRef<() => void>(() => undefined);
+	/** Invalidates a `playSong` request superseded by a newer one. */
+	const loadRequestRef = useRef(0);
 	const autoplayLoadingRef = useRef(false);
 	/** Video id the current autoplay suggestions were fetched for. */
 	const autoplayForRef = useRef<string | null>(null);
@@ -214,142 +324,462 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			: MAX_VOLUME;
 	});
 
-	// Load video when videoInfo changes
+	/** Read by the fade loop so volume changes mid-fade stay respected. */
+	const volumeRef = useRef(volume);
+	volumeRef.current = volume;
+
+	// The app reads playback through `videoElementRef`; point it at deck A
+	// before any track loads so consumers never hold a stale element.
 	useEffect(() => {
-		if (!videoInfo || !innertube) return;
-		const videoEl = videoElementRef.current;
-		if (!videoEl) return;
-
-		const videoId = videoInfo.basic_info.id;
-		if (!videoId || !videoInfo.streaming_data) return;
-		if (videoInfo.basic_info.is_live || videoInfo.basic_info.is_post_live_dvr) {
-			console.warn("[PlayerContext] Live streams are not supported yet.");
-			return;
+		if (!videoElementRef.current) {
+			videoElementRef.current = deckARef.current;
 		}
-		const streamingData = videoInfo.streaming_data;
-		const decipher = async (url?: string) =>
-			(await innertube.session.player?.decipher(url)) as string;
+	}, []);
 
-		let cancelled = false;
-		let objectUrl: string | null = null;
-		let mediaSource: MediaSource | null = null;
-		let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-
-		const client = innertube.session.context.client;
-		const ustreamerConfig =
-			videoInfo.player_config?.media_common_config
-				.media_ustreamer_request_config?.video_playback_ustreamer_config;
-		const clientInfo = {
-			osName: client.osName,
-			osVersion: client.osVersion,
-			clientName: parseInt(
-				Constants.CLIENT_NAME_IDS[
-					client.clientName as keyof typeof Constants.CLIENT_NAME_IDS
-				],
-				10,
-			),
-			clientVersion: client.clientVersion,
-		};
-		const sabrFormats = streamingData.adaptive_formats.map(buildSabrFormat);
-
-		/**
-		 * googlevideo's SabrStream manages the SABR session. Its audio is fed
-		 * straight into a MediaSource — the app is audio-only, so there's no
-		 * manifest and no Shaka. YouTube currently caps a SABR session at
-		 * roughly a minute; that limit is upstream and awaiting a library fix.
-		 */
-		const loadVideo = async () => {
-			const stream = new SabrStream({
-				videoId,
-				fetchFunction: fetchFunction as unknown as typeof fetch,
-				serverAbrStreamingUrl: await decipher(
-					streamingData.server_abr_streaming_url,
-				),
-				videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
-				clientInfo,
-				poToken: await botguardService.mintToken(videoId),
-				formats: sabrFormats,
-			});
-			sabrStreamRef.current = stream;
-
-			const { audioStream, selectedFormats } = stream.start({
-				enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
-				audioPreferences: {},
-				isPostLiveDvr: false,
-			});
-			if (cancelled) {
-				stream.abort();
-				return;
-			}
-
-			const mime = selectedFormats.audioFormat?.mimeType;
-			if (!mime) throw new Error("SABR audio format is missing.");
-
-			mediaSource = new MediaSource();
-			objectUrl = URL.createObjectURL(mediaSource);
-			videoEl.src = objectUrl;
-			await new Promise<void>((resolve) => {
-				mediaSource?.addEventListener("sourceopen", () => resolve(), {
-					once: true,
-				});
-			});
-			if (cancelled || !mediaSource) return;
-
-			const sourceBuffer = mediaSource.addSourceBuffer(mime);
-			if (videoInfo.basic_info.duration) {
-				mediaSource.duration = videoInfo.basic_info.duration;
-			}
-
-			reader =
-				audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-			let started = false;
-			while (!cancelled) {
-				const { value, done } = await reader.read();
-				if (done) break;
-				if (!value || value.byteLength === 0) continue;
-				await appendToSourceBuffer(sourceBuffer, value);
-				if (!started) {
-					started = true;
-					videoEl.play().catch((error) => {
-						// Ignore AbortError: play() interrupted by a pause.
-						if ((error as Error).name !== "AbortError") {
-							console.error("[PlayerContext] Auto-playback failed:", error);
-						}
-					});
-				}
-			}
-
-			// Without an explicit endOfStream() the MediaSource never reports
-			// the end of the track, so the element never fires `ended` and
-			// playback just stalls at the last sample.
-			if (!cancelled && mediaSource?.readyState === "open") {
-				try {
-					mediaSource.endOfStream();
-				} catch (error) {
-					console.warn("[PlayerContext] endOfStream failed:", error);
-				}
-			}
-		};
-
-		loadVideo().catch((error) => {
-			if (!cancelled) {
-				console.error("[PlayerContext] Load video error:", error);
-			}
-		});
-
-		return () => {
-			cancelled = true;
-			reader?.cancel().catch(() => undefined);
-			sabrStreamRef.current?.abort();
-			sabrStreamRef.current = null;
+	/** Aborts a deck's stream and detaches its media element. Idempotent. */
+	const teardownDeck = useCallback((deck: Deck) => {
+		deck.generation += 1;
+		deck.videoId = null;
+		deck.ready = false;
+		deck.stop?.();
+		deck.stop = null;
+		const videoEl = deck.ref.current;
+		if (videoEl) {
+			videoEl.pause();
 			if (videoEl.src.startsWith("blob:")) {
 				videoEl.removeAttribute("src");
 				videoEl.load();
 			}
-			if (objectUrl) URL.revokeObjectURL(objectUrl);
-			mediaSource = null;
+		}
+	}, []);
+
+	/**
+	 * googlevideo's SabrStream manages the SABR session. Its audio is fed
+	 * straight into a MediaSource — the app is audio-only, so there's no
+	 * manifest and no Shaka. YouTube currently caps a SABR session at
+	 * roughly a minute; that limit is upstream and awaiting a library fix.
+	 *
+	 * Mounts onto either deck so the idle one can buffer the next track for
+	 * a crossfade while the active one keeps playing.
+	 */
+	const mountTrack = useCallback(
+		async (deck: Deck, result: LoadedStream, options: MountOptions) => {
+			const { videoInfo, innertube } = result;
+			const videoEl = deck.ref.current;
+			if (!videoEl) return;
+
+			const videoId = videoInfo.basic_info.id;
+			if (!videoId || !videoInfo.streaming_data) return;
+			if (
+				videoInfo.basic_info.is_live ||
+				videoInfo.basic_info.is_post_live_dvr
+			) {
+				console.warn("[PlayerContext] Live streams are not supported yet.");
+				return;
+			}
+
+			teardownDeck(deck);
+			deck.generation += 1;
+			const generation = deck.generation;
+			deck.videoId = videoId;
+			if (deck === decksRef.current[activeDeckRef.current]) {
+				videoElementRef.current = videoEl;
+			}
+
+			const streamingData = videoInfo.streaming_data;
+			const decipher = async (url?: string) =>
+				(await innertube.session.player?.decipher(url)) as string;
+
+			let objectUrl: string | null = null;
+			let mediaSource: MediaSource | null = null;
+			let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+			let stream: SabrStream | null = null;
+			let stopped = false;
+
+			/** True once this mount has been superseded or torn down. */
+			const cancelled = () => deck.generation !== generation;
+
+			const stop = () => {
+				if (stopped) return;
+				stopped = true;
+				reader?.cancel().catch(() => undefined);
+				stream?.abort();
+				const el = deck.ref.current;
+				if (el?.src.startsWith("blob:")) {
+					el.removeAttribute("src");
+					el.load();
+				}
+				if (objectUrl) URL.revokeObjectURL(objectUrl);
+				mediaSource = null;
+			};
+			deck.stop = stop;
+
+			try {
+				const client = innertube.session.context.client;
+				const ustreamerConfig =
+					videoInfo.player_config?.media_common_config
+						.media_ustreamer_request_config?.video_playback_ustreamer_config;
+				const clientInfo = {
+					osName: client.osName,
+					osVersion: client.osVersion,
+					clientName: parseInt(
+						Constants.CLIENT_NAME_IDS[
+							client.clientName as keyof typeof Constants.CLIENT_NAME_IDS
+						],
+						10,
+					),
+					clientVersion: client.clientVersion,
+				};
+				const sabrFormats = streamingData.adaptive_formats.map(buildSabrFormat);
+
+				stream = new SabrStream({
+					videoId,
+					fetchFunction: fetchFunction as unknown as typeof fetch,
+					serverAbrStreamingUrl: await decipher(
+						streamingData.server_abr_streaming_url,
+					),
+					videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
+					clientInfo,
+					poToken: await botguardService.mintToken(videoId),
+					formats: sabrFormats,
+				});
+				if (cancelled()) return;
+
+				const { audioStream, selectedFormats } = stream.start({
+					enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
+					audioPreferences: {},
+					isPostLiveDvr: false,
+				});
+				if (cancelled()) return;
+
+				const mime = selectedFormats.audioFormat?.mimeType;
+				if (!mime) throw new Error("SABR audio format is missing.");
+
+				mediaSource = new MediaSource();
+				objectUrl = URL.createObjectURL(mediaSource);
+				videoEl.src = objectUrl;
+				await new Promise<void>((resolve) => {
+					mediaSource?.addEventListener("sourceopen", () => resolve(), {
+						once: true,
+					});
+				});
+				if (cancelled() || !mediaSource) return;
+
+				const sourceBuffer = mediaSource.addSourceBuffer(mime);
+				if (videoInfo.basic_info.duration) {
+					mediaSource.duration = videoInfo.basic_info.duration;
+				}
+
+				reader =
+					audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+				let started = false;
+				while (!cancelled()) {
+					const { value, done } = await reader.read();
+					if (done) break;
+					if (!value || value.byteLength === 0) continue;
+					await appendToSourceBuffer(sourceBuffer, value);
+					if (cancelled()) break;
+					if (!started) {
+						started = true;
+						deck.ready = true;
+						if (options.autoPlay) {
+							// A deck reused after an older fade may still be dimmed.
+							videoEl.volume = volumeRef.current;
+							videoEl.play().catch((error) => {
+								// Ignore AbortError: play() interrupted by a pause.
+								if ((error as Error).name !== "AbortError") {
+									console.error("[PlayerContext] Auto-playback failed:", error);
+								}
+							});
+						}
+						options.onReady?.();
+					}
+				}
+
+				// Without an explicit endOfStream() the MediaSource never reports
+				// the end of the track, so the element never fires `ended` and
+				// playback just stalls at the last sample.
+				if (!cancelled() && mediaSource?.readyState === "open") {
+					try {
+						mediaSource.endOfStream();
+					} catch (error) {
+						console.warn("[PlayerContext] endOfStream failed:", error);
+					}
+				}
+			} catch (error) {
+				if (!cancelled()) {
+					console.error("[PlayerContext] Load video error:", error);
+					deck.videoId = null;
+					deck.ready = false;
+				}
+			}
+		},
+		[teardownDeck],
+	);
+
+	// Load the current track onto the active deck whenever playback state
+	// points at a track that deck does not already have mounted. A crossfade
+	// promotion mounted its track on the inactive deck beforehand, so this
+	// guard also keeps the handover from re-loading it.
+	useEffect(() => {
+		if (!videoInfo || !innertube) return;
+		const deck = decksRef.current[activeDeckRef.current];
+		if (!deck || deck.videoId === videoInfo.basic_info.id) return;
+		void mountTrack(deck, { videoInfo, innertube }, { autoPlay: true });
+	}, [videoInfo, innertube, mountTrack]);
+
+	/** Stops any in-flight crossfade and frees the preloaded deck. */
+	const abortCrossfade = useCallback(() => {
+		const state = crossfadeRef.current;
+		if (!state) return;
+		crossfadeRef.current = null;
+		if (crossfadeRafRef.current !== null) {
+			cancelAnimationFrame(crossfadeRafRef.current);
+			crossfadeRafRef.current = null;
+		}
+		// The fade may have dimmed the still-playing deck; restore its level.
+		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
+		if (activeEl) activeEl.volume = volumeRef.current;
+		teardownDeck(decksRef.current[state.deckIndex]);
+	}, [teardownDeck]);
+
+	/**
+	 * Hands playback from the fading track to the preloaded one: flips the
+	 * active deck, advances the queue (promoting an autoplay track when the
+	 * fade reaches into the radio), and frees the old deck.
+	 */
+	const commitCrossfade = useCallback(
+		(state: CrossfadeState) => {
+			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
+			if (crossfadeRef.current !== state || !state.result || !nextEl) return;
+			crossfadeRef.current = null;
+			if (crossfadeRafRef.current !== null) {
+				cancelAnimationFrame(crossfadeRafRef.current);
+				crossfadeRafRef.current = null;
+			}
+
+			const oldDeck = decksRef.current[activeDeckRef.current];
+			activeDeckRef.current = state.deckIndex;
+			// Repoint the shared media ref so progress, watch-history and the
+			// OS media session follow the element that is now audible.
+			videoElementRef.current = nextEl;
+			nextEl.volume = volumeRef.current;
+
+			setHistory((prev) => [...prev, state.fromSong]);
+			setCurrentIndex((index) => index + 1);
+			if (state.promote) {
+				setQueueState((prev) => [...prev, state.nextSong]);
+				setAutoplayTracks((prev) => prev.slice(1));
+			}
+
+			const basic = state.result.videoInfo.basic_info;
+			const thumbnail = pickArtwork(state.nextSong, basic);
+			setCurrentSong(
+				thumbnail ? { ...state.nextSong, thumbnail } : state.nextSong,
+			);
+			setVideoInfo(state.result.videoInfo);
+			setInnertube(state.result.innertube);
+			setIsPlaying(true);
+
+			// The old track is done; free its stream and media element.
+			teardownDeck(oldDeck);
+		},
+		[teardownDeck],
+	);
+
+	/**
+	 * Runs the actual overlap: the preloaded deck starts at zero volume and
+	 * the two are ramped with equal-power curves over the overlap length.
+	 * The ramp follows the audio clock, so throttled frames in a background
+	 * window still reach the handover; rAF only smooths the visible steps.
+	 */
+	const startFade = useCallback(
+		(state: CrossfadeState) => {
+			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
+			const currentEl = decksRef.current[activeDeckRef.current]?.ref.current;
+			if (!nextEl || !currentEl || !state.result || state.phase !== "preload") {
+				return;
+			}
+			state.phase = "fading";
+
+			// If the preload landed late, shorten the fade so it still ends
+			// roughly where the track does instead of trailing into silence.
+			const remaining = Number.isFinite(currentEl.duration)
+				? Math.max(currentEl.duration - currentEl.currentTime, 0.5)
+				: state.seconds;
+			const fadeSeconds = Math.max(Math.min(state.seconds, remaining), 0.1);
+			const fadeStartTime = currentEl.currentTime;
+
+			nextEl.volume = 0;
+			nextEl.play().catch((error) => {
+				if ((error as Error).name === "AbortError") return;
+				console.warn("[PlayerContext] Crossfade playback failed:", error);
+				if (crossfadeRef.current === state) abortCrossfade();
+			});
+
+			const advance = () => {
+				if (crossfadeRef.current !== state) return;
+				// Progress comes from the audio clock, not wall time, so the
+				// ramp stays aligned even if the app is throttled in the
+				// background between steps.
+				const elapsed = currentEl.currentTime - fadeStartTime;
+				const t = Math.min(1, Math.max(0, elapsed / fadeSeconds));
+				const volume = volumeRef.current;
+				currentEl.volume = volume * Math.cos((t * Math.PI) / 2);
+				nextEl.volume = volume * Math.sin((t * Math.PI) / 2);
+				if (t >= 1) {
+					commitCrossfade(state);
+					return;
+				}
+				crossfadeRafRef.current = requestAnimationFrame(advance);
+			};
+			state.advance = advance;
+			advance();
+		},
+		[abortCrossfade, commitCrossfade],
+	);
+
+	/**
+	 * Buffers `nextSong` on the idle deck so it is ready to fade in. Called
+	 * once the active track enters the preload window; everything is torn
+	 * down again if the fade never happens (skip, seek, pause, queue edit).
+	 */
+	const armCrossfade = useCallback(
+		async (
+			nextSong: Song,
+			promote: boolean,
+			seconds: number,
+			fromSong: Song,
+		) => {
+			if (crossfadeRef.current) return;
+			const deckIndex = activeDeckRef.current === 0 ? 1 : 0;
+			const deck = decksRef.current[deckIndex];
+			if (!deck || !isVideoId(nextSong.id)) return;
+
+			const state: CrossfadeState = {
+				deckIndex,
+				fromSong,
+				nextSong,
+				phase: "preload",
+				promote,
+				result: null,
+				seconds,
+				advance: null,
+			};
+			crossfadeRef.current = state;
+
+			try {
+				const result = await getSongStream(nextSong.id);
+				if (crossfadeRef.current !== state) return;
+				state.result = {
+					videoInfo: result.videoInfo,
+					innertube: result.innertube,
+				};
+				await mountTrack(deck, state.result, {
+					autoPlay: false,
+					onReady: () => updateCrossfadeRef.current(),
+				});
+				// If the track is already inside the fade window, start now;
+				// otherwise the scheduler fires when the window opens.
+				if (crossfadeRef.current === state) updateCrossfadeRef.current();
+			} catch (error) {
+				// Leave the state in place on failure: the scheduler then
+				// stops retrying the same fetch on every timeupdate, and the
+				// track's end falls back to the normal load path.
+				console.error("[PlayerContext] Crossfade preload failed:", error);
+			}
+		},
+		[mountTrack],
+	);
+
+	/**
+	 * Crossfade scheduler, called on every timeupdate of the active deck and
+	 * whenever playback, the queue or the settings change. Preloads the
+	 * upcoming song once the track nears its end, starts the fade inside the
+	 * window, and aborts everything when the target changes.
+	 */
+	const updateCrossfade = useCallback(() => {
+		const seconds = settings.crossfade
+			? clampCrossfadeSeconds(settings.crossfadeSeconds)
+			: 0;
+		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
+		if (!seconds || !isPlaying || !currentSong || !activeEl) {
+			abortCrossfade();
+			return;
+		}
+
+		// The song that will play next, mirroring next(): queue first, then
+		// the autoplay radio (whose first track gets promoted to the queue).
+		const queuedNext =
+			currentIndex < queue.length - 1 ? queue[currentIndex + 1] : null;
+		const nextSong =
+			queuedNext ?? (settings.autoplay ? (autoplayTracks[0] ?? null) : null);
+
+		const state = crossfadeRef.current;
+		// The queue changed under an armed crossfade; re-evaluate from scratch.
+		if (state && (!nextSong || nextSong.id !== state.nextSong.id)) {
+			abortCrossfade();
+		}
+
+		const duration = activeEl.duration;
+		if (!Number.isFinite(duration) || duration <= 0) return;
+		const remaining = duration - activeEl.currentTime;
+
+		if (!nextSong) return;
+		if (remaining > seconds + CROSSFADE_PRELOAD_LEAD_SECONDS) {
+			if (crossfadeRef.current) abortCrossfade();
+			return;
+		}
+
+		const armed = crossfadeRef.current;
+		if (!armed) {
+			void armCrossfade(nextSong, queuedNext === null, seconds, currentSong);
+			return;
+		}
+		// rAF is paused while the window is hidden; timeupdate (which keeps
+		// firing during background audio playback) drives the fade then.
+		if (armed.phase === "fading") {
+			armed.advance?.();
+			return;
+		}
+		const deck = decksRef.current[armed.deckIndex];
+		if (deck?.ready && armed.result && remaining <= seconds) {
+			// Respect a length change made while the preload was buffering.
+			armed.seconds = seconds;
+			startFade(armed);
+		}
+	}, [
+		settings.crossfade,
+		settings.crossfadeSeconds,
+		settings.autoplay,
+		isPlaying,
+		currentSong,
+		currentIndex,
+		queue,
+		autoplayTracks,
+		abortCrossfade,
+		armCrossfade,
+		startFade,
+	]);
+	updateCrossfadeRef.current = updateCrossfade;
+
+	// Attach the scheduler to the active deck; re-attaching when the song,
+	// queue or settings change also re-evaluates the crossfade immediately.
+	useEffect(() => {
+		updateCrossfade();
+		const videoEl = decksRef.current[activeDeckRef.current]?.ref.current;
+		if (!videoEl) return;
+		const onTimeUpdate = () => updateCrossfade();
+		const onSeeking = () => abortCrossfade();
+		videoEl.addEventListener("timeupdate", onTimeUpdate);
+		videoEl.addEventListener("seeking", onSeeking);
+		videoEl.addEventListener("seeked", onTimeUpdate);
+		return () => {
+			videoEl.removeEventListener("timeupdate", onTimeUpdate);
+			videoEl.removeEventListener("seeking", onSeeking);
+			videoEl.removeEventListener("seeked", onTimeUpdate);
 		};
-	}, [videoInfo, innertube]);
+	}, [updateCrossfade, abortCrossfade]);
 
 	// Watch-time pings: report the played ranges while listening so the entry
 	// in YouTube's watch history keeps its resume position. The media element
@@ -431,16 +861,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	// Mirror the element's real playback state back into React: OS/headset
 	// media keys pause the element directly, bypassing setIsPlaying — without
 	// this the UI shows "playing" while audio is paused and the play button
-	// needs two clicks to resume.
+	// needs two clicks to resume. Only the active deck counts: the idle one
+	// is paused and torn down around crossfades and must not flip the UI.
 	useEffect(() => {
-		const videoEl = videoElementRef.current;
-		if (!videoEl) return;
-		const sync = () => setIsPlaying(!videoEl.paused);
-		videoEl.addEventListener("play", sync);
-		videoEl.addEventListener("pause", sync);
+		const elements = [deckARef.current, deckBRef.current].filter(
+			(el): el is HTMLVideoElement => el !== null,
+		);
+		const sync = (event: Event) => {
+			const el = event.currentTarget as HTMLVideoElement;
+			if (el !== videoElementRef.current) return;
+			setIsPlaying(!el.paused);
+		};
+		for (const el of elements) {
+			el.addEventListener("play", sync);
+			el.addEventListener("pause", sync);
+		}
 		return () => {
-			videoEl.removeEventListener("play", sync);
-			videoEl.removeEventListener("pause", sync);
+			for (const el of elements) {
+				el.removeEventListener("play", sync);
+				el.removeEventListener("pause", sync);
+			}
 		};
 	}, []);
 
@@ -457,64 +897,58 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		_setVolume(Math.min(MAX_VOLUME, Math.max(0, next)));
 	}, []);
 
-	const playSong = useCallback(async (song: Song) => {
-		setIsPlaying(false);
-		setCurrentSong(song);
-		setVideoInfo(null);
-		setInnertube(null);
+	const playSong = useCallback(
+		async (song: Song) => {
+			// Any queued crossfade targets the old track; drop it.
+			abortCrossfade();
+			const request = ++loadRequestRef.current;
+			setIsPlaying(false);
+			setCurrentSong(song);
+			setVideoInfo(null);
+			setInnertube(null);
 
-		try {
-			if (!isVideoId(song.id)) {
-				throw new Error(
-					`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
-				);
-			}
-			const result = await getSongStream(song.id);
-			if (result) {
-				// Debug: dump everything YouTube returned for this song
-				console.log(
-					"[YuMusic] song info:",
-					JSON.parse(JSON.stringify(result.videoInfo.basic_info ?? {})),
-				);
-				console.log(
-					"[YuMusic] streaming data:",
-					JSON.parse(JSON.stringify(result.videoInfo.streaming_data ?? {})),
-				);
-				setVideoInfo(result.videoInfo);
-				setInnertube(result.innertube);
-				setIsPlaying(true);
-
-				// Upgrade the artwork from the player response. YT Music's square
-				// cover (googleusercontent) is kept — it is the clean artwork,
-				// and swapping in the 16:9 video frame re-frames it visibly when
-				// the new image lands. Other sources take the biggest variant,
-				// center-cut to a square for music (googleusercontent URLs get
-				// a server-side crop, ytimg ones are cropped by the square
-				// containers' object-fit).
-				const basic = result.videoInfo.basic_info;
-				const best = biggestThumb(basic.thumbnail);
-				if (best) {
-					setCurrentSong((prev) => {
-						if (!prev || prev.id !== basic.id) return prev;
-						const thumbnail = /googleusercontent\.com|ggpht\.com/.test(
-							prev.thumbnail,
-						)
-							? hiResThumb(prev.thumbnail, 1024)
-							: basic.category === "Music"
-								? hiResThumb(best.url)
-								: best.url;
-						return { ...prev, thumbnail };
-					});
+			try {
+				if (!isVideoId(song.id)) {
+					throw new Error(
+						`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
+					);
 				}
+				const result = await getSongStream(song.id);
+				// A newer play request superseded this one while it loaded.
+				if (request !== loadRequestRef.current) return;
+				if (result) {
+					// Debug: dump everything YouTube returned for this song
+					console.log(
+						"[YuMusic] song info:",
+						JSON.parse(JSON.stringify(result.videoInfo.basic_info ?? {})),
+					);
+					console.log(
+						"[YuMusic] streaming data:",
+						JSON.parse(JSON.stringify(result.videoInfo.streaming_data ?? {})),
+					);
+					setVideoInfo(result.videoInfo);
+					setInnertube(result.innertube);
+					setIsPlaying(true);
+
+					// Upgrade the artwork from the player response (see pickArtwork).
+					const basic = result.videoInfo.basic_info;
+					const thumbnail = pickArtwork(song, basic);
+					if (thumbnail) {
+						setCurrentSong((prev) =>
+							prev && prev.id === basic.id ? { ...prev, thumbnail } : prev,
+						);
+					}
+				}
+			} catch (error) {
+				console.error(
+					"[PlayerContext] Failed to play song:",
+					error,
+					error instanceof Error ? error.stack : undefined,
+				);
 			}
-		} catch (error) {
-			console.error(
-				"[PlayerContext] Failed to play song:",
-				error,
-				error instanceof Error ? error.stack : undefined,
-			);
-		}
-	}, []);
+		},
+		[abortCrossfade],
+	);
 
 	// Feed the shared listening-session tracker: one tick per second while
 	// playing. It defines the grace period both the watch-history ping and
@@ -684,6 +1118,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		autoplayTracks,
 	]);
 
+	/**
+	 * Natural end of the audible deck: normally advance, but a running fade
+	 * owns the transition (its commit switches decks), and the idle deck must
+	 * never advance anything when its buffered stream ends.
+	 */
+	const handleEnded = useCallback(
+		(deckIndex: number) => {
+			if (deckIndex !== activeDeckRef.current) return;
+			const state = crossfadeRef.current;
+			if (state?.phase === "fading") {
+				// The fade follows the audio clock, so if the track ran out
+				// first (or the ramp was throttled), finish the handover now
+				// instead of stalling on a paused rAF.
+				commitCrossfade(state);
+				return;
+			}
+			void next();
+		},
+		[commitCrossfade, next],
+	);
+
+	// The provider owns both decks; free their streams when it goes away.
+	useEffect(() => {
+		return () => {
+			abortCrossfade();
+			for (const deck of decksRef.current) teardownDeck(deck);
+		};
+	}, [abortCrossfade, teardownDeck]);
+
 	const previous = useCallback(async () => {
 		// Try to go back in queue first
 		if (currentIndex > 0) {
@@ -847,14 +1310,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				<PlayerVolumeContext.Provider value={volumeValue}>
 					<QueueSheetContext.Provider value={queueSheetRef}>
 						{children}
-						{/* Persistent hidden video element - must always be mounted so Shaka can attach to it */}
+						{/* Two hidden media decks — one plays, the idle one buffers
+						    the next track so a crossfade can overlap the two. Both
+						    must always be mounted so streams can attach. */}
 						<video
 							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
-							onEnded={() => {
-								void next();
-							}}
+							onEnded={() => handleEnded(0)}
 							playsInline
-							ref={videoElementRef}
+							ref={deckARef}
+						/>
+						<video
+							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+							onEnded={() => handleEnded(1)}
+							playsInline
+							ref={deckBRef}
 						/>
 					</QueueSheetContext.Provider>
 				</PlayerVolumeContext.Provider>

@@ -7,6 +7,20 @@ import {
 
 export type TitleMode = "both" | "original" | "translation";
 
+/** Crossfade length bounds, in seconds. */
+export const CROSSFADE_MIN_SECONDS = 1;
+export const CROSSFADE_MAX_SECONDS = 12;
+export const CROSSFADE_DEFAULT_SECONDS = 3;
+
+/** Keeps a stored crossfade length usable even if localStorage was edited. */
+export function clampCrossfadeSeconds(value: unknown): number {
+	const seconds = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(seconds)) return CROSSFADE_DEFAULT_SECONDS;
+	return Math.round(
+		Math.min(CROSSFADE_MAX_SECONDS, Math.max(CROSSFADE_MIN_SECONDS, seconds)),
+	);
+}
+
 export interface Settings {
 	romanizeLyrics: boolean;
 	discordRpc: boolean;
@@ -24,6 +38,10 @@ export interface Settings {
 	hideTodaysBiggestHits: boolean;
 	/** Keep playing similar songs when the queue ends. */
 	autoplay: boolean;
+	/** Fade the end of a song into the start of the next one. */
+	crossfade: boolean;
+	/** Crossfade overlap length in seconds (clamped to the CROSSFADE_* bounds). */
+	crossfadeSeconds: number;
 	/** Report played songs (with progress) to the YouTube watch history. */
 	watchHistory: boolean;
 	/** Show extra debug/copy actions in song context menus. */
@@ -33,9 +51,9 @@ export interface Settings {
 const SETTINGS_KEY = "yumusic:settings:v1";
 const SETTINGS_EVENT = "yumusic:settings-changed";
 const DEFAULTS: Settings = {
-	romanizeLyrics: false,
+	romanizeLyrics: true,
 	discordRpc: false,
-	titleMode: "both",
+	titleMode: "original",
 	cleanTitles: true,
 	listenbrainz: false,
 	listenbrainzToken: "",
@@ -44,6 +62,8 @@ const DEFAULTS: Settings = {
 	lrclibLooseMatch: true,
 	hideTodaysBiggestHits: true,
 	autoplay: true,
+	crossfade: true,
+	crossfadeSeconds: CROSSFADE_DEFAULT_SECONDS,
 	watchHistory: true,
 	developerMode: false,
 };
@@ -57,6 +77,7 @@ export function getSettings(): Settings {
 			...DEFAULTS,
 			...parsed,
 			lyricsProviderOrder: normalizeProviderOrder(parsed.lyricsProviderOrder),
+			crossfadeSeconds: clampCrossfadeSeconds(parsed.crossfadeSeconds),
 		};
 	} catch {
 		return { ...DEFAULTS };
