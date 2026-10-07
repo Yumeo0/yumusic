@@ -4,7 +4,9 @@ import {
 	ArrowUpDown,
 	ArrowUpRight,
 	Check,
+	Download,
 	Ellipsis,
+	Loader2,
 	Music2,
 	Pencil,
 	Pin,
@@ -18,6 +20,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import { EqualizerBars } from "@/components/player/waveform";
 import { ConfirmDeletePlaylistDialog } from "@/components/playlist/confirm-delete-playlist-dialog";
 import {
@@ -27,11 +30,18 @@ import {
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import {
+	syncDownloadedPlaylist,
+	togglePlaylistDownload,
+	useDownloads,
+	usePlaylistDownloaded,
+} from "@/lib/downloads/downloads";
 import { shareLink } from "@/lib/services/share";
 import {
 	reconcilePinnedPlaylists,
@@ -106,8 +116,11 @@ export function PlaylistDetails() {
 	const [sort, setSort] = useState<PlaylistSort>("newest");
 	const displayTitle = useDisplayTitle();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
+	const downloads = useDownloads();
 	const [editOpen, setEditOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
+	const downloadJob = downloads.jobs.get(id ?? "");
+	const downloaded = usePlaylistDownloaded(id ?? "");
 
 	// Stable handlers for the memoized track rows: the latest visible list is
 	// read through a ref, so row props stay identical across batch appends.
@@ -134,6 +147,7 @@ export function PlaylistDetails() {
 		) {
 			setPlaylist({ ...cached.data, id });
 			setLoading(false);
+			syncDownloadedPlaylist(id, cached.data.title, cached.data.songs);
 			return;
 		}
 
@@ -181,11 +195,13 @@ export function PlaylistDetails() {
 				complete: !("has_continuation" in data && data.has_continuation),
 				editable: !albumMode && isEditablePlaylist(data),
 			};
-			setPlaylist((prev) =>
-				prev?.id === id
-					? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
-					: view,
-			);
+			// With content already on screen (stale cache or a force refresh),
+			// applying the first page would shrink the list to it until the
+			// continuation pages catch up — a refresh visibly flashed partial
+			// song counts. Keep the old list and swap it in once the pass ends.
+			if (!hasContent) {
+				setPlaylist(view);
+			}
 			setLoading(false);
 
 			// Load remaining pages, appending as they arrive (playlists only —
@@ -200,17 +216,36 @@ export function PlaylistDetails() {
 					current = continuation;
 					const batch = collectSongs(current.items ?? [], rowFallback);
 					view.songs = [...view.songs, ...batch];
-					setPlaylist((prev) =>
-						prev?.id === id
-							? { ...view, songs: [...prev.songs, ...batch] }
-							: { ...view, songs: [...view.songs] },
-					);
+					if (!hasContent) {
+						setPlaylist((prev) =>
+							prev?.id === id
+								? { ...view, songs: [...prev.songs, ...batch] }
+								: { ...view, songs: [...view.songs] },
+						);
+					}
 				}
 				view.complete = !current.has_continuation;
 				setLoadingMore(false);
 			}
 
-			writeCache(cacheKey, view);
+			if (hasContent) {
+				// The refresh pass finished: apply the fresh list, keeping the
+				// previous row objects where nothing changed.
+				setPlaylist((prev) =>
+					prev?.id === id
+						? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
+						: view,
+				);
+			}
+
+			// A kept-downloaded playlist picks up newly added songs here.
+			syncDownloadedPlaylist(id, view.title, view.songs);
+			// Never downgrade a complete cache to a partial one: when the
+			// continuation pass broke, the previous full list is more useful
+			// (and it keeps the cache usable on the next visit).
+			if (view.complete || !cached?.data.complete) {
+				writeCache(cacheKey, view);
+			}
 		} catch (err) {
 			console.error("Error fetching playlist:", err);
 			// Whatever is already on screen beats an error screen
@@ -410,15 +445,59 @@ export function PlaylistDetails() {
 		<div className="mx-auto w-full max-w-7xl px-6 pt-6 sm:px-10 sm:pt-10">
 			<div className="flex items-center justify-between">
 				<BackButton onClick={onBack} />
-				<button
-					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
-					disabled={refreshing}
-					onClick={() => fetchPlaylist(true)}
-					title="Refresh playlist"
-					type="button"
-				>
-					<RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-				</button>
+				<div className="flex items-center gap-1">
+					{downloadJob ? (
+						<button
+							className="grid size-9 place-items-center rounded-full text-muted-foreground"
+							disabled
+							title={
+								downloadJob.total > 0
+									? `Downloading ${downloadJob.done}/${downloadJob.total}`
+									: "Preparing download…"
+							}
+							type="button"
+						>
+							<Loader2 className="size-4 animate-spin" />
+						</button>
+					) : (
+						<button
+							className={cn(
+								"grid size-9 place-items-center rounded-full transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground",
+								downloaded ? "text-primary" : "text-muted-foreground",
+							)}
+							onClick={() =>
+								togglePlaylistDownload(
+									id ?? "",
+									playlist.title,
+									loadingMore ? undefined : songs,
+								)
+							}
+							title={
+								downloaded
+									? "Stop keeping downloaded"
+									: isAlbumId(id ?? "")
+										? "Download album"
+										: "Download playlist"
+							}
+							type="button"
+						>
+							{downloaded ? (
+								<PlaylistDownloadOffIcon className="size-4" />
+							) : (
+								<Download className="size-4" />
+							)}
+						</button>
+					)}
+					<button
+						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
+						disabled={refreshing}
+						onClick={() => fetchPlaylist(true)}
+						title="Refresh playlist"
+						type="button"
+					>
+						<RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
+					</button>
+				</div>
 			</div>
 
 			{/* Header — cover on top, identity + icon actions below, centered */}
@@ -770,10 +849,13 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 						</p>
 					</div>
 
-					{/* Duration */}
-					<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
-						{song.duration}
-					</span>
+					{/* Downloaded marker + duration */}
+					<div className="flex items-center gap-2 pr-2">
+						<DownloadedBadge songId={song.id} />
+						<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+							{song.duration}
+						</span>
+					</div>
 				</button>
 			</SwipeToQueue>
 		</SongContextMenu>

@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import {
@@ -259,11 +260,14 @@ export function QueuePanel() {
 												<ArtistLinks song={song} />
 											</p>
 										</div>
-										{song.duration && (
-											<span className="pr-1 font-mono text-[10px] text-muted-foreground/60 tabular-nums">
-												{song.duration}
-											</span>
-										)}
+										<div className="flex items-center gap-2 pr-1">
+											<DownloadedBadge songId={song.id} />
+											{song.duration && (
+												<span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
+													{song.duration}
+												</span>
+											)}
+										</div>
 									</button>
 								</SongContextMenu>
 							);

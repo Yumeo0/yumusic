@@ -1,15 +1,22 @@
 import { ContextMenu } from "@base-ui/react/context-menu";
 import {
-	type LucideIcon,
+	Download,
+	Loader2,
 	Pencil,
 	Pin,
 	Share2,
 	Shuffle,
 	Trash2,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ComponentType, type ReactNode, useState } from "react";
+import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import {
+	togglePlaylistDownload,
+	useDownloads,
+	usePlaylistDownloaded,
+} from "@/lib/downloads/downloads";
 import { shareLink } from "@/lib/services/share";
 import {
 	readCachedPlaylistSongs,
@@ -41,17 +48,22 @@ function MenuItem({
 	icon: Icon,
 	label,
 	onClick,
+	disabled = false,
+	iconClassName,
 }: {
-	icon: LucideIcon;
+	icon: ComponentType<{ className?: string }>;
 	label: string;
 	onClick: () => void;
+	disabled?: boolean;
+	iconClassName?: string;
 }) {
 	return (
 		<ContextMenu.Item
-			className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+			className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-60 data-highlighted:bg-foreground/8"
+			disabled={disabled}
 			onClick={onClick}
 		>
-			<Icon className="size-4 text-muted-foreground" />
+			<Icon className={cn("size-4 text-muted-foreground", iconClassName)} />
 			{label}
 		</ContextMenu.Item>
 	);
@@ -79,11 +91,14 @@ export function PlaylistContextMenu({
 	children: ReactNode;
 }) {
 	const { addToQueue, play } = usePlayer();
+	const downloads = useDownloads();
 	const [busy, setBusy] = useState(false);
 	const [confirmOpen, setConfirmOpen] = useState(false);
 	const rawId = playlist.id.startsWith("VL")
 		? playlist.id.slice(2)
 		: playlist.id;
+	const downloadJob = downloads.jobs.get(playlist.id);
+	const downloaded = usePlaylistDownloaded(playlist.id);
 
 	const playShuffled = (tracks: Song[]) => {
 		const queue = shuffleSongs(tracks);
@@ -154,6 +169,39 @@ export function PlaylistContextMenu({
 								label="Shuffle play"
 								onClick={shufflePlay}
 							/>
+							{downloadJob ? (
+								<MenuItem
+									disabled
+									icon={Loader2}
+									iconClassName="animate-spin"
+									label={
+										downloadJob.total > 0
+											? `Downloading ${downloadJob.done}/${downloadJob.total}`
+											: "Preparing download…"
+									}
+									onClick={() => undefined}
+								/>
+							) : downloaded ? (
+								<MenuItem
+									icon={PlaylistDownloadOffIcon}
+									label={`Stop downloading ${isAlbumId(playlist.id) ? "album" : "playlist"}`}
+									onClick={() =>
+										togglePlaylistDownload(playlist.id, playlist.title, songs)
+									}
+								/>
+							) : (
+								<MenuItem
+									icon={Download}
+									label={
+										isAlbumId(playlist.id)
+											? "Download album"
+											: "Download playlist"
+									}
+									onClick={() =>
+										togglePlaylistDownload(playlist.id, playlist.title, songs)
+									}
+								/>
+							)}
 							<MenuItem
 								icon={Pin}
 								label={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}

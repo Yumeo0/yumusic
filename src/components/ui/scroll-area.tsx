@@ -4,9 +4,10 @@ import { cn } from "@/lib/utils/utils";
 
 function ScrollArea({
 	className,
+	viewportClassName,
 	children,
 	...props
-}: ScrollAreaPrimitive.Root.Props) {
+}: ScrollAreaPrimitive.Root.Props & { viewportClassName?: string }) {
 	return (
 		<ScrollAreaPrimitive.Root
 			className={cn("relative", className)}
@@ -14,7 +15,10 @@ function ScrollArea({
 			{...props}
 		>
 			<ScrollAreaPrimitive.Viewport
-				className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+				className={cn(
+					"focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1",
+					viewportClassName,
+				)}
 				data-slot="scroll-area-viewport"
 			>
 				{children}
@@ -33,7 +37,13 @@ function ScrollBar({
 	return (
 		<ScrollAreaPrimitive.Scrollbar
 			className={cn(
-				"data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent data-vertical:h-full data-vertical:w-2 data-vertical:border-l data-vertical:border-l-transparent flex touch-none p-px transition-colors select-none",
+				"flex touch-none p-px transition-colors select-none",
+				// Keyed off the prop, not `data-vertical`: Base UI renders
+				// `data-orientation`, so attribute variants never matched and
+				// the bar collapsed to a zero-width sliver.
+				orientation === "horizontal"
+					? "h-2.5 flex-col border-t border-t-transparent"
+					: "w-2 h-full border-l border-l-transparent",
 				className,
 			)}
 			data-orientation={orientation}

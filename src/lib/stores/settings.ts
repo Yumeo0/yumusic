@@ -42,6 +42,11 @@ export interface Settings {
 	crossfade: boolean;
 	/** Crossfade overlap length in seconds (clamped to the CROSSFADE_* bounds). */
 	crossfadeSeconds: number;
+	/**
+	 * Playlists kept downloaded: whenever their songs are loaded, tracks that
+	 * are not stored yet are queued automatically.
+	 */
+	downloadedPlaylists: string[];
 	/** Report played songs (with progress) to the YouTube watch history. */
 	watchHistory: boolean;
 	/** Show extra debug/copy actions in song context menus. */
@@ -64,6 +69,7 @@ const DEFAULTS: Settings = {
 	autoplay: true,
 	crossfade: true,
 	crossfadeSeconds: CROSSFADE_DEFAULT_SECONDS,
+	downloadedPlaylists: [],
 	watchHistory: true,
 	developerMode: false,
 };
@@ -78,6 +84,11 @@ export function getSettings(): Settings {
 			...parsed,
 			lyricsProviderOrder: normalizeProviderOrder(parsed.lyricsProviderOrder),
 			crossfadeSeconds: clampCrossfadeSeconds(parsed.crossfadeSeconds),
+			downloadedPlaylists: Array.isArray(parsed.downloadedPlaylists)
+				? parsed.downloadedPlaylists.filter(
+						(id): id is string => typeof id === "string",
+					)
+				: [],
 		};
 	} catch {
 		return { ...DEFAULTS };

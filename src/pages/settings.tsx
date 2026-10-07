@@ -5,13 +5,16 @@ import {
 	Eye,
 	EyeOff,
 	GripVertical,
+	HardDrive,
 	LogIn,
 	LogOut,
 	Trash2,
 } from "lucide-react";
 import { type CSSProperties, type DragEvent, useEffect, useState } from "react";
 import { UpdatesSection } from "@/components/app/updates";
+import { StorageManagerDialog } from "@/components/settings/storage-manager-dialog";
 import { Input } from "@/components/ui/input";
+import { useDownloads } from "@/lib/downloads/downloads";
 import {
 	LYRICS_KIND_LABELS,
 	LYRICS_PROVIDERS,
@@ -26,7 +29,7 @@ import {
 	useSettings,
 } from "@/lib/stores/settings";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { cn } from "@/lib/utils/utils";
+import { cn, formatBytes } from "@/lib/utils/utils";
 
 const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
 const PROVIDER_KINDS = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.kinds]));
@@ -46,7 +49,9 @@ export default function SettingsPage({
 	userProfile,
 }: SettingsPageProps) {
 	const [settings, update] = useSettings();
+	const downloads = useDownloads();
 	const [cleared, setCleared] = useState(false);
+	const [storageOpen, setStorageOpen] = useState(false);
 	const [showToken, setShowToken] = useState(false);
 	const [dragProvider, setDragProvider] = useState<LyricsProviderId | null>(
 		null,
@@ -756,6 +761,26 @@ export default function SettingsPage({
 							{cleared ? "Cleared" : "Clear"}
 						</button>
 					</div>
+					<div className="flex items-center justify-between gap-6 p-4">
+						<div className="min-w-0">
+							<p className="text-sm font-medium">Downloads</p>
+							<p className="mt-0.5 text-xs text-muted-foreground">
+								Songs saved on this device for offline playback. Open the
+								storage manager to remove them.
+							</p>
+						</div>
+						<button
+							className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-foreground/12 px-4 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:border-primary/40 hover:text-foreground"
+							onClick={() => setStorageOpen(true)}
+							type="button"
+						>
+							<HardDrive className="size-4" />
+							Manage
+							{downloads.totalBytes > 0
+								? ` · ${formatBytes(downloads.totalBytes)}`
+								: ""}
+						</button>
+					</div>
 				</div>
 			</section>
 
@@ -796,6 +821,8 @@ export default function SettingsPage({
 					</div>
 				</div>
 			</section>
+
+			<StorageManagerDialog onOpenChange={setStorageOpen} open={storageOpen} />
 		</div>
 	);
 }

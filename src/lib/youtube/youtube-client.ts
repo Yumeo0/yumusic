@@ -879,17 +879,32 @@ async function fetchTimedLyrics(browseId: string): Promise<LrcLine[] | null> {
 	return lines;
 }
 
+const CONTINUATION_ATTEMPTS = 3;
+const CONTINUATION_BACKOFF_MS = 400;
+
+/**
+ * Loads the next page of a playlist. Transient timeouts or throttling would
+ * otherwise leave long playlists stuck half-loaded (and their cache marked
+ * incomplete), so retry a couple of times with a small backoff.
+ */
 export async function loadPlaylistContinuation(playlist: Playlist) {
 	if (!playlist.has_continuation) {
 		return null;
 	}
-	try {
-		const continuation = await playlist.getContinuation();
-		return continuation;
-	} catch (error) {
-		console.error("Failed to load playlist continuation:", error);
-		return null;
+	for (let attempt = 1; attempt <= CONTINUATION_ATTEMPTS; attempt++) {
+		try {
+			return await playlist.getContinuation();
+		} catch (error) {
+			if (attempt === CONTINUATION_ATTEMPTS) {
+				console.error("Failed to load playlist continuation:", error);
+				return null;
+			}
+			await new Promise((resolve) =>
+				setTimeout(resolve, CONTINUATION_BACKOFF_MS * attempt),
+			);
+		}
 	}
+	return null;
 }
 
 export async function getSongStream(videoId: string) {

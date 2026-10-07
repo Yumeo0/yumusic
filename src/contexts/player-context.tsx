@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { SabrStream } from "googlevideo/sabr-stream";
 import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
 import {
@@ -13,6 +14,10 @@ import {
 } from "react";
 import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
+import {
+	type DownloadEntry,
+	getDownloadEntry,
+} from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import { MAX_VOLUME } from "@/lib/utils/hooks";
@@ -246,6 +251,8 @@ interface CrossfadeState {
 	deckIndex: number;
 	/** Stream metadata once the preload has finished fetching. */
 	result: LoadedStream | null;
+	/** Set instead of `result` when the next song plays from a stored file. */
+	localEntry: DownloadEntry | null;
 	/** Overlap length in seconds, captured when the preload was armed. */
 	seconds: number;
 	/** Next song comes from the autoplay radio and gets promoted to the queue. */
@@ -346,7 +353,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		const videoEl = deck.ref.current;
 		if (videoEl) {
 			videoEl.pause();
-			if (videoEl.src.startsWith("blob:")) {
+			if (videoEl.src) {
 				videoEl.removeAttribute("src");
 				videoEl.load();
 			}
@@ -517,6 +524,87 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[teardownDeck],
 	);
 
+	/**
+	 * Mounts a downloaded audio file onto a deck. Resolves `true` once the
+	 * file has metadata (preloads) or playback began (normal loads), and
+	 * `false` when the stored file cannot be read, so callers can fall back
+	 * to streaming it instead.
+	 */
+	const mountLocalTrack = useCallback(
+		(
+			deck: Deck,
+			song: Song,
+			entry: DownloadEntry,
+			options: MountOptions,
+		): Promise<boolean> => {
+			const videoEl = deck.ref.current;
+			if (!videoEl) return Promise.resolve(false);
+
+			teardownDeck(deck);
+			deck.generation += 1;
+			const generation = deck.generation;
+			deck.videoId = song.id;
+			if (deck === decksRef.current[activeDeckRef.current]) {
+				videoElementRef.current = videoEl;
+			}
+
+			return new Promise<boolean>((resolve) => {
+				let settled = false;
+				const finish = (mounted: boolean) => {
+					if (settled) return;
+					settled = true;
+					videoEl.removeEventListener("error", onError);
+					resolve(mounted);
+				};
+				const onError = () => {
+					const mediaError = videoEl.error;
+					console.warn(
+						"[PlayerContext] Downloaded file failed to play; keeping it for a later retry:",
+						entry.path,
+						videoEl.src,
+						mediaError
+							? `media error code ${mediaError.code}`
+							: "no media error",
+					);
+					if (deck.generation === generation) {
+						deck.videoId = null;
+						deck.ready = false;
+					}
+					finish(false);
+				};
+
+				videoEl.addEventListener("error", onError, { once: true });
+
+				const onLoaded = () => {
+					if (deck.generation !== generation) return;
+					deck.ready = true;
+					options.onReady?.();
+				};
+				if (videoEl.readyState >= 1) onLoaded();
+				else
+					videoEl.addEventListener("loadedmetadata", onLoaded, { once: true });
+
+				videoEl.volume = volumeRef.current;
+				videoEl.src = convertFileSrc(entry.path);
+				videoEl.load();
+				if (options.autoPlay) {
+					videoEl
+						.play()
+						.then(() => finish(true))
+						.catch((error) => {
+							// Pauses and newer loads interrupt play(); only real
+							// media failures should trigger the streaming fallback.
+							if ((error as Error).name === "AbortError") finish(true);
+							else onError();
+						});
+				} else {
+					finish(true);
+				}
+			});
+		},
+		[teardownDeck],
+	);
+
 	// Load the current track onto the active deck whenever playback state
 	// points at a track that deck does not already have mounted. A crossfade
 	// promotion mounted its track on the inactive deck beforehand, so this
@@ -551,7 +639,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const commitCrossfade = useCallback(
 		(state: CrossfadeState) => {
 			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
-			if (crossfadeRef.current !== state || !state.result || !nextEl) return;
+			if (
+				crossfadeRef.current !== state ||
+				(!state.result && !state.localEntry) ||
+				!nextEl
+			) {
+				return;
+			}
 			crossfadeRef.current = null;
 			if (crossfadeRafRef.current !== null) {
 				cancelAnimationFrame(crossfadeRafRef.current);
@@ -572,13 +666,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setAutoplayTracks((prev) => prev.slice(1));
 			}
 
-			const basic = state.result.videoInfo.basic_info;
-			const thumbnail = pickArtwork(state.nextSong, basic);
+			// A stored file carries its own artwork; a streamed preload gets
+			// the artwork upgraded from the player response.
+			const thumbnail = state.result
+				? pickArtwork(state.nextSong, state.result.videoInfo.basic_info)
+				: (state.localEntry?.thumbnail ?? null);
 			setCurrentSong(
 				thumbnail ? { ...state.nextSong, thumbnail } : state.nextSong,
 			);
-			setVideoInfo(state.result.videoInfo);
-			setInnertube(state.result.innertube);
+			if (state.result) {
+				setVideoInfo(state.result.videoInfo);
+				setInnertube(state.result.innertube);
+			} else {
+				setVideoInfo(null);
+				setInnertube(null);
+			}
 			setIsPlaying(true);
 
 			// The old track is done; free its stream and media element.
@@ -597,7 +699,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		(state: CrossfadeState) => {
 			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
 			const currentEl = decksRef.current[activeDeckRef.current]?.ref.current;
-			if (!nextEl || !currentEl || !state.result || state.phase !== "preload") {
+			if (
+				!nextEl ||
+				!currentEl ||
+				(!state.result && !state.localEntry) ||
+				state.phase !== "preload"
+			) {
 				return;
 			}
 			state.phase = "fading";
@@ -654,19 +761,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (crossfadeRef.current) return;
 			const deckIndex = activeDeckRef.current === 0 ? 1 : 0;
 			const deck = decksRef.current[deckIndex];
-			if (!deck || !isVideoId(nextSong.id)) return;
+			if (!deck) return;
+			// Stored files skip the stream session entirely.
+			const localEntry = getDownloadEntry(nextSong.id) ?? null;
+			if (!localEntry && !isVideoId(nextSong.id)) return;
 
 			const state: CrossfadeState = {
+				advance: null,
 				deckIndex,
 				fromSong,
+				localEntry,
 				nextSong,
 				phase: "preload",
 				promote,
 				result: null,
 				seconds,
-				advance: null,
 			};
 			crossfadeRef.current = state;
+
+			if (localEntry) {
+				// The idle deck just needs the file's metadata; the scheduler
+				// starts the fade once the window opens.
+				void mountLocalTrack(deck, nextSong, localEntry, {
+					autoPlay: false,
+					onReady: () => updateCrossfadeRef.current(),
+				});
+				return;
+			}
 
 			try {
 				const result = await getSongStream(nextSong.id);
@@ -689,7 +810,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				console.error("[PlayerContext] Crossfade preload failed:", error);
 			}
 		},
-		[mountTrack],
+		[mountLocalTrack, mountTrack],
 	);
 
 	/**
@@ -743,7 +864,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			return;
 		}
 		const deck = decksRef.current[armed.deckIndex];
-		if (deck?.ready && armed.result && remaining <= seconds) {
+		if (
+			deck?.ready &&
+			(armed.result || armed.localEntry) &&
+			remaining <= seconds
+		) {
 			// Respect a length change made while the preload was buffering.
 			armed.seconds = seconds;
 			startFade(armed);
@@ -907,6 +1032,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setVideoInfo(null);
 			setInnertube(null);
 
+			// A stored file plays straight from disk — no stream session, and
+			// no watch-history pings (there is no playback tracker for it).
+			const localEntry = getDownloadEntry(song.id);
+			if (localEntry) {
+				const deck = decksRef.current[activeDeckRef.current];
+				const mounted = deck
+					? await mountLocalTrack(deck, song, localEntry, { autoPlay: true })
+					: false;
+				if (request !== loadRequestRef.current) return;
+				if (mounted) {
+					setIsPlaying(true);
+					return;
+				}
+				// Stream this play instead. The stored file is deliberately
+				// kept: deleting it here made kept-downloaded playlists
+				// re-download every track on the next visit (mountLocalTrack
+				// already logged why it failed). Removal stays a user action.
+			}
+
 			try {
 				if (!isVideoId(song.id)) {
 					throw new Error(
@@ -947,7 +1091,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				);
 			}
 		},
-		[abortCrossfade],
+		[abortCrossfade, mountLocalTrack],
 	);
 
 	// Feed the shared listening-session tracker: one tick per second while

@@ -1,6 +1,8 @@
 import { ContextMenu } from "@base-ui/react/context-menu";
 import {
 	Braces,
+	CircleX,
+	Download,
 	FileText,
 	Fingerprint,
 	Image as ImageIcon,
@@ -17,6 +19,12 @@ import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import {
+	cancelDownload,
+	downloadSong,
+	removeDownloads,
+	useDownloads,
+} from "@/lib/downloads/downloads";
 import { shareLink } from "@/lib/services/share";
 import { useSettings } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
@@ -90,10 +98,14 @@ export function SongContextMenu({
 	const { addToQueue, play, playNext, removeFromQueueAt, queue, currentSong } =
 		usePlayer();
 	const [settings] = useSettings();
+	const downloads = useDownloads();
 	const [playlistSong, setPlaylistSong] = useState<Song | null>(null);
 	const navigate = useNavigate();
 
 	if (!song) return <>{children}</>;
+
+	const downloadEntry = downloads.entries.get(song.id);
+	const downloadStatus = downloads.statuses.get(song.id);
 
 	return (
 		<>
@@ -133,6 +145,36 @@ export function SongContextMenu({
 								label="Add to playlist"
 								onClick={() => setPlaylistSong(song)}
 							/>
+							{downloadEntry ? (
+								<MenuItem
+									icon={Trash2}
+									label="Remove download"
+									onClick={() => void removeDownloads([song.id])}
+								/>
+							) : downloadStatus &&
+								(downloadStatus.phase === "downloading" ||
+									downloadStatus.phase === "queued") ? (
+								<MenuItem
+									icon={CircleX}
+									label={
+										downloadStatus.phase === "downloading" &&
+										downloadStatus.progress !== null
+											? `Cancel download (${Math.round(downloadStatus.progress * 100)}%)`
+											: "Cancel download"
+									}
+									onClick={() => cancelDownload(song.id)}
+								/>
+							) : (
+								<MenuItem
+									icon={Download}
+									label={
+										downloadStatus?.phase === "error"
+											? "Retry download"
+											: "Download"
+									}
+									onClick={() => downloadSong(song)}
+								/>
+							)}
 							<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
 							{song.artistId && (
 								<MenuItem

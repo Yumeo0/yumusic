@@ -7,6 +7,7 @@ import {
 	SkipForward,
 } from "lucide-react";
 import { type RefObject, useRef } from "react";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
@@ -106,14 +107,17 @@ export function Player() {
 						</div>
 						<div className="min-w-0" data-mini-title>
 							<h3
-								className="animate-track-in truncate text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
+								className="animate-track-in flex items-center gap-1.5 text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
 								data-mini-title-line
 								key={`t-${currentSong.id}`}
 							>
-								<SongTitle
-									artist={currentSong.artist}
-									title={currentSong.title}
-								/>
+								<span className="min-w-0 truncate">
+									<SongTitle
+										artist={currentSong.artist}
+										title={currentSong.title}
+									/>
+								</span>
+								<DownloadedBadge songId={currentSong.id} />
 							</h3>
 							<p
 								className="animate-track-in truncate text-xs text-muted-foreground"

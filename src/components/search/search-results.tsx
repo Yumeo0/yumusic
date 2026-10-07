@@ -3,6 +3,7 @@ import { YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
@@ -155,13 +156,16 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 											<ArtistLinks song={song} />
 										</p>
 									</div>
-									{isCurrent && isPlaying ? (
-										<EqualizerBars className="mr-1 size-3.5 text-primary" />
-									) : (
-										<span className="pr-1 font-mono text-xs text-muted-foreground/70 tabular-nums">
-											{video.duration?.text}
-										</span>
-									)}
+									<div className="flex items-center gap-2 pr-1">
+										<DownloadedBadge songId={song.id} />
+										{isCurrent && isPlaying ? (
+											<EqualizerBars className="size-3.5 text-primary" />
+										) : (
+											<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+												{video.duration?.text}
+											</span>
+										)}
+									</div>
 								</button>
 							</SwipeToQueue>
 						</SongContextMenu>

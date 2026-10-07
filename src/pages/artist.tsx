@@ -12,6 +12,7 @@ import { YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
@@ -374,9 +375,12 @@ export default function ArtistPage() {
 													<ArtistLinks song={song} />
 												</p>
 											</div>
-											<span className="pr-2 font-mono text-xs text-muted-foreground/70 tabular-nums">
-												{song.duration}
-											</span>
+											<div className="flex items-center gap-2 pr-2">
+												<DownloadedBadge songId={song.id} />
+												<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+													{song.duration}
+												</span>
+											</div>
 										</button>
 									</SwipeToQueue>
 								</SongContextMenu>

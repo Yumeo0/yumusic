@@ -80,6 +80,17 @@
 	--animate-char-wave: char-wave 0.5s ease-in-out both;
 	--animate-dot-fill: dot-fill 1.8s ease-in-out infinite;
 	--animate-dot-wave: dot-wave 1.8s ease-in-out infinite;
+	--animate-download-slide: download-slide 1.3s ease-in-out infinite;
+
+	@keyframes download-slide {
+		0% {
+			transform: translateX(-110%);
+		}
+		72%,
+		100% {
+			transform: translateX(300%);
+		}
+	}
 
 	@keyframes char-wave {
 		0%,

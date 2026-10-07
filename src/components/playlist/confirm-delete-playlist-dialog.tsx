@@ -1,6 +1,7 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
+import { unsubscribeDownloadedPlaylist } from "@/lib/downloads/downloads";
 import { removePlaylistFromCaches } from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
 import { deletePlaylist } from "@/lib/youtube/youtube-client";
@@ -30,6 +31,7 @@ export function ConfirmDeletePlaylistDialog({
 		try {
 			await deletePlaylist(playlistId);
 			removePlaylistFromCaches(playlistId);
+			unsubscribeDownloadedPlaylist(playlistId);
 			if (isPinned) onTogglePinned();
 			onOpenChange(false);
 			showToast("Playlist deleted");

@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
@@ -248,12 +249,15 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 					</span>
 				)}
 			</div>
-			<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
-				{item.kind === "song" ? (
-					<SongTitle artist={item.song.artist} title={item.song.title} />
-				) : (
-					title
-				)}
+			<h3 className="mt-2.5 flex items-center gap-1.5 text-sm font-medium transition-colors group-hover:text-primary">
+				<span className="line-clamp-1 min-w-0">
+					{item.kind === "song" ? (
+						<SongTitle artist={item.song.artist} title={item.song.title} />
+					) : (
+						title
+					)}
+				</span>
+				{item.kind === "song" && <DownloadedBadge songId={item.song.id} />}
 			</h3>
 			<p
 				className={cn(

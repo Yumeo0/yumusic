@@ -23,6 +23,7 @@ import { Titlebar } from "./components/app/titlebar";
 import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
 import { UserMenu } from "./components/app/user-menu";
+import { DownloadQueueButton } from "./components/downloads/download-queue";
 import { Player } from "./components/player/player";
 import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
@@ -31,6 +32,7 @@ import {
 	usePlayer,
 	usePlayerControls,
 } from "./contexts/player-context";
+import { hydrateDownloads } from "./lib/downloads/downloads";
 import {
 	useNowPlayingMotion,
 	useNowPlayingSwipe,
@@ -48,7 +50,11 @@ import {
 	reconcilePinnedPlaylists,
 	usePinnedPlaylists,
 } from "./lib/stores/pinned";
-import { LIBRARY_CACHE_KEY, readCache } from "./lib/stores/playlist-cache";
+import {
+	LIBRARY_CACHE_KEY,
+	pruneStaleCacheVersions,
+	readCache,
+} from "./lib/stores/playlist-cache";
 import { useSettings } from "./lib/stores/settings";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
@@ -610,6 +616,14 @@ function AppShell({
 	const { pinned, unpin } = usePinnedPlaylists();
 	const { currentSong } = usePlayer();
 
+	// Load the stored downloads so the player can play them from disk, and
+	// drop caches from older app versions (they survive upgrades and would
+	// otherwise keep occupying localStorage quota until writes start failing).
+	useEffect(() => {
+		pruneStaleCacheVersions();
+		void hydrateDownloads();
+	}, []);
+
 	// Pinned entries store their cover URL as it was when pinned; heal it from
 	// the cached library on startup so a dead URL (older versions saved tiny
 	// raw variants that no longer resolve) doesn't leave the sidebar artwork
@@ -734,6 +748,13 @@ function AppShell({
 								</div>
 							</div>
 						)}
+
+						{/* Download queue — lives at the bottom of the rail */}
+						<div className="mt-auto pt-3 pb-4">
+							<div className="border-t border-foreground/6 pt-3">
+								<DownloadQueueButton />
+							</div>
+						</div>
 					</div>
 				</aside>
 
@@ -773,6 +794,13 @@ function AppShell({
 				<Toaster />
 			</div>
 			<MobileNav />
+			{/* Mobile has no sidebar: the active download queue floats top-right */}
+			<DownloadQueueButton
+				align="end"
+				className="fixed top-[calc(var(--safe-area-top)+0.5rem)] right-3 z-40 md:hidden"
+				compact
+				side="bottom"
+			/>
 		</>
 	);
 }

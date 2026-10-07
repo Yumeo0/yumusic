@@ -48,13 +48,75 @@ export function readCache<T>(key: string): CacheEntry<T> | null {
 }
 
 export function writeCache<T>(key: string, data: T) {
+	const payload = JSON.stringify({
+		timestamp: Date.now(),
+		data,
+	} satisfies CacheEntry<T>);
 	try {
-		localStorage.setItem(
-			key,
-			JSON.stringify({ timestamp: Date.now(), data } satisfies CacheEntry<T>),
-		);
+		localStorage.setItem(key, payload);
+		return;
 	} catch {
-		// quota exceeded — cache is best-effort
+		// Quota exceeded. Playlist caches are the big consumers, so evict the
+		// oldest ones and retry; otherwise the write silently disappears and
+		// the playlist refetches on every visit forever.
+		for (let attempt = 0; attempt < 3; attempt++) {
+			if (!evictOldestPlaylistCache(key)) break;
+			try {
+				localStorage.setItem(key, payload);
+				return;
+			} catch {
+				// still no room — evict another
+			}
+		}
+		console.warn(`[cache] could not store ${key} (storage full?)`);
+	}
+}
+
+/** Removes the least recently written playlist cache (except `keep`). */
+function evictOldestPlaylistCache(keep: string): boolean {
+	const candidates: Array<{ key: string; timestamp: number }> = [];
+	try {
+		for (let index = 0; index < localStorage.length; index++) {
+			const key = localStorage.key(index);
+			if (!key?.startsWith(PLAYLIST_CACHE_PREFIX) || key === keep) continue;
+			const cached = readCache<unknown>(key);
+			candidates.push({ key, timestamp: cached?.timestamp ?? 0 });
+		}
+		if (candidates.length === 0) return false;
+		candidates.sort((a, b) => a.timestamp - b.timestamp);
+		localStorage.removeItem(candidates[0].key);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Drops caches written by older app versions. Version bumps change the key
+ * prefix, so without this every upgrade leaves its old playlist libraries in
+ * localStorage, slowly filling the quota until new writes fail.
+ */
+export function pruneStaleCacheVersions() {
+	try {
+		const stale: string[] = [];
+		for (let index = 0; index < localStorage.length; index++) {
+			const key = localStorage.key(index);
+			if (!key) continue;
+			if (
+				key.startsWith("yumusic:playlist:") &&
+				!key.startsWith(PLAYLIST_CACHE_PREFIX)
+			) {
+				stale.push(key);
+			} else if (
+				key.startsWith("yumusic:library:") &&
+				key !== LIBRARY_CACHE_KEY
+			) {
+				stale.push(key);
+			}
+		}
+		for (const key of stale) localStorage.removeItem(key);
+	} catch {
+		// best-effort
 	}
 }
 

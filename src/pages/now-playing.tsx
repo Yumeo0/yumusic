@@ -22,6 +22,7 @@ import { LyricsPanel } from "@/components/lyrics/lyrics";
 import { VolumeControl } from "@/components/player/volume-control";
 import { ProgressBar } from "@/components/player/waveform";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
@@ -683,10 +684,13 @@ function TrackHeading({ song, className }: { song: Song; className?: string }) {
 				style={morphStyle("--np-title")}
 			>
 				<h1
-					className="animate-track-in truncate text-2xl font-bold tracking-tight sm:text-3xl"
+					className="animate-track-in flex items-center justify-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"
 					key={`title-${song.id}`}
 				>
-					<SongTitle artist={song.artist} title={song.title} />
+					<span className="min-w-0 truncate">
+						<SongTitle artist={song.artist} title={song.title} />
+					</span>
+					<DownloadedBadge songId={song.id} />
 				</h1>
 			</div>
 			<div
@@ -952,11 +956,14 @@ function QueueRow({
 						<ArtistLinks song={song} />
 					</p>
 				</div>
-				{song.duration && (
-					<span className="pr-1 font-mono text-[10px] text-muted-foreground/70">
-						{song.duration}
-					</span>
-				)}
+				<div className="flex items-center gap-2 pr-1">
+					<DownloadedBadge songId={song.id} />
+					{song.duration && (
+						<span className="font-mono text-[10px] text-muted-foreground/70">
+							{song.duration}
+						</span>
+					)}
+				</div>
 			</button>
 		</SongContextMenu>
 	);

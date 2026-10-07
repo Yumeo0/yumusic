@@ -104,3 +104,11 @@ export function biggestThumb(
 	}
 	return best;
 }
+
+/** Human-readable file size (binary units, one decimal for MB/GB). */
+export function formatBytes(bytes: number): string {
+	if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+	if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+	if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+	return `${bytes} B`;
+}

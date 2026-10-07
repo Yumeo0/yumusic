@@ -1,4 +1,5 @@
 mod discord;
+mod downloads;
 mod media_controls;
 mod proxy;
 
@@ -225,6 +226,12 @@ pub fn run() {
 			logout,
 			discord::set_discord_activity,
 			discord::clear_discord_activity,
+			downloads::download_begin,
+			downloads::download_append,
+			downloads::download_finish,
+			downloads::download_abort,
+			downloads::downloads_list,
+			downloads::downloads_remove,
 			media_controls::update_media_session
 		])
 		.build(tauri::generate_context!())
