@@ -830,9 +830,24 @@ export function cleanUpTitle(title: string): string {
 		}
 		out = stripDecorations(out, coverContext);
 		out = stripCreditTail(out);
+		out = collapseRepeatedHalves(out);
 		if (out === before) break;
 	}
 	return out.trim() === "" ? title : out.trim();
+}
+
+/**
+ * Collapses a title stylized as the same name twice — "WataAme Pop - Wata
+ * Ame Pop" → "WataAme Pop". The halves must fold to the same text (case,
+ * spacing and punctuation ignored), so real "Artist - Song" pairs stay.
+ */
+function collapseRepeatedHalves(title: string): string {
+	const match = title.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
+	if (!match) return title;
+	const left = match[1].trim();
+	const right = match[2].trim();
+	if (left.length < 2 || right.length < 2) return title;
+	return foldName(left) === foldName(right) ? left : title;
 }
 
 /**

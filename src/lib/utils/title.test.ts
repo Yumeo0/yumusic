@@ -186,6 +186,15 @@ describe("noise, credit and decoration tails", () => {
 		]);
 	});
 
+	test("repeated title halves collapse to one", () => {
+		expect(main("WataAme Pop - Wata Ame Pop")).toBe("WataAme Pop");
+		expect(main("WataAme Pop - Wata Ame Pop", "Tsunomaki Watame")).toBe(
+			"WataAme Pop",
+		);
+		// Real "Artist - Song" pairs are untouched.
+		expect(cleanUpTitle("Da Tweekaz - Moana")).toBe("Da Tweekaz - Moana");
+	});
+
 	test("vocal credit splits off as a feature", () => {
 		const parts = formatTitleParts(
 			"Take Over (Vocal.湊あくあ)[Dyako Remix]",

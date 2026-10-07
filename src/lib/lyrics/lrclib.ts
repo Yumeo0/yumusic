@@ -1,3 +1,4 @@
+import { proxiedFetch, USER_AGENT } from "../utils/tauri";
 import { cleanSearchTitle } from "../utils/title";
 
 export interface LrcLine {
@@ -67,9 +68,17 @@ export interface LrclibLyrics {
 }
 
 interface LrclibRecord {
+	id: number;
+	name: string;
+	trackName: string;
+	artistName: string;
+	albumName: string;
 	duration: number;
-	syncedLyrics?: string | null;
-	plainLyrics?: string | null;
+	instrumental: boolean;
+	hasWordSync: boolean;
+	syncedLyrics: string | null;
+	plainLyrics: string | null;
+	lyricsfile: string;
 }
 
 /** Plain text for a record: its plainLyrics, else the timed lines stripped. */
@@ -112,7 +121,7 @@ async function bestRecord(
 	durationSec: number,
 	tolerance: number,
 ): Promise<LrclibRecord | null> {
-	const res = await fetch(url);
+	const res = await proxiedFetch(url, { "User-Agent": USER_AGENT });
 	if (!res.ok) return null;
 	const results = (await res.json()) as LrclibRecord[];
 	const candidates = results.filter(
