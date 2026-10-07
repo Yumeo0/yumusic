@@ -172,6 +172,20 @@ describe("noise, credit and decoration tails", () => {
 		]);
 	});
 
+	test("feat list before the song separator keeps the song in the title", () => {
+		const parts = formatTitleParts(
+			"Shawn Wasabi + YDG feat. YUNG GEMMY - Burnt Rice (Aiobahn & Jh-Anu Remix) [PASS PogChamp!]",
+			"original",
+			true,
+			"Nitsuga5124",
+		);
+		expect(parts.main).toBe("Shawn Wasabi + YDG - Burnt Rice");
+		expect(parts.feats).toEqual(["YUNG GEMMY"]);
+		expect(parts.credits).toEqual([
+			{ tag: "remix", author: "Aiobahn & Jh-Anu" },
+		]);
+	});
+
 	test("vocal credit splits off as a feature", () => {
 		const parts = formatTitleParts(
 			"Take Over (Vocal.湊あくあ)[Dyako Remix]",

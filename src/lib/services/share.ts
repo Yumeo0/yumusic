@@ -1,8 +1,12 @@
+import type { Song } from "@/contexts/player-context";
 import { showToast } from "../stores/toast";
+import { IS_MOBILE } from "../utils/tauri";
 
 /**
- * Opens the native share sheet when the platform provides one (Android), and
- * falls back to copying the link. Dismissing the sheet copies nothing.
+ * Shares through the native sheet on mobile (Android/iOS). On desktop — and
+ * anywhere the platform has no proper sheet — the link is copied to the
+ * clipboard instead, so no OS share menu pops up. Dismissing the sheet copies
+ * nothing.
  */
 export async function shareLink({
 	title,
@@ -15,7 +19,7 @@ export async function shareLink({
 	url: string;
 	toast?: string;
 }) {
-	if (typeof navigator.share === "function") {
+	if (IS_MOBILE && typeof navigator.share === "function") {
 		try {
 			await navigator.share({ title, text, url });
 			return;
@@ -29,4 +33,13 @@ export async function shareLink({
 	} catch {
 		showToast("Could not copy link");
 	}
+}
+
+/** Shares a song's YouTube Music link (native sheet or clipboard). */
+export function shareSong(song: Song) {
+	return shareLink({
+		title: song.title,
+		text: `${song.artist} — ${song.title}`,
+		url: `https://music.youtube.com/watch?v=${song.id}`,
+	});
 }

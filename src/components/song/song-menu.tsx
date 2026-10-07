@@ -25,7 +25,7 @@ import {
 	removeDownloads,
 	useDownloads,
 } from "@/lib/downloads/downloads";
-import { shareLink } from "@/lib/services/share";
+import { shareSong } from "@/lib/services/share";
 import { type Settings, useSettings } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
 import {
@@ -37,15 +37,6 @@ import {
 import { cn, formatDuration, parseDuration } from "@/lib/utils/utils";
 import { fetchSongDescription } from "@/lib/youtube/song-description";
 import { AddToPlaylistDialog } from "./add-to-playlist-dialog";
-
-/** Copy the song's YouTube Music link, or open the native share sheet. */
-function shareSong(song: Song) {
-	void shareLink({
-		title: song.title,
-		text: `${song.artist} — ${song.title}`,
-		url: `https://music.youtube.com/watch?v=${song.id}`,
-	});
-}
 
 /** Copies text to the clipboard and reports the result as a toast. */
 async function copyText(text: string, label: string) {

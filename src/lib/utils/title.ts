@@ -209,13 +209,15 @@ const VOCAL_CREDIT =
 
 /**
  * Splits a "feat. A, B & C" / "ft. A" / "(feat. A, B & C)" / "(Vocal.A)"
- * tail off the title.
+ * tail off the title. In the "Artist feat. A - Song" shape the dash separates
+ * the artists from the song, so only the feat names come off and the song
+ * rejoins the main title ("Artist - Song").
  */
 export function splitFeaturedTitle(title: string): {
 	main: string;
 	feats: string[];
 } {
-	for (const pattern of [FEAT_BRACKETED, VOCAL_CREDIT, FEAT_TAIL]) {
+	for (const pattern of [FEAT_BRACKETED, VOCAL_CREDIT]) {
 		const match = title.match(pattern);
 		if (!match) continue;
 		const feats = splitArtistList(match[1]);
@@ -223,7 +225,29 @@ export function splitFeaturedTitle(title: string): {
 			return { main: title.slice(0, match.index).trim(), feats };
 		}
 	}
+	const match = title.match(FEAT_TAIL);
+	if (match) {
+		const { names, song } = splitFeatTail(match[1]);
+		const feats = splitArtistList(names);
+		if (feats.length > 0) {
+			const prefix = title.slice(0, match.index).trim();
+			const main = song ? [prefix, song].filter(Boolean).join(" - ") : prefix;
+			return { main, feats };
+		}
+	}
 	return { main: title, feats: [] };
+}
+
+/**
+ * The feat names and song title of a raw "A & B - Song" feat tail. A spaced
+ * dash is the separator; a glued one stays part of a name ("Jay-Z"), and
+ * bracketed tails are owned by the patterns above.
+ */
+function splitFeatTail(tail: string): { names: string; song?: string } {
+	if (/[()（）[\]【】]/u.test(tail)) return { names: tail };
+	const match = tail.match(/^(.{1,60}?)\s+[-–—]\s+(.+)$/u);
+	if (!match) return { names: tail };
+	return { names: match[1].trim(), song: match[2].trim() };
 }
 
 /** Splits a featured-artist list on commas, Japanese commas and " & ". */

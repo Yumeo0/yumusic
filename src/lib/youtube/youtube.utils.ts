@@ -18,31 +18,65 @@ export function isValidYouTubeUrl(url: string): boolean {
 }
 
 /**
- * Extracts the video ID from a YouTube URL
- * @param url - The YouTube URL to extract the video ID from
- * @returns The video ID if found, null otherwise
+ * Parses a pasted URL, retrying without a scheme — share sheets and some apps
+ * hand out "youtu.be/…" / "youtube.com/watch?v=…" without "https://".
+ */
+function parseUrlLoose(input: string): URL | null {
+	const text = input.trim();
+	try {
+		return new URL(text);
+	} catch {
+		try {
+			return new URL(`https://${text}`);
+		} catch {
+			return null;
+		}
+	}
+}
+
+/** First path segment that is a valid video id ("/ID", "/ID?t=1"). */
+function firstVideoId(pathname: string): string | null {
+	const segment = pathname.split("/").find(Boolean);
+	return isVideoId(segment) ? segment : null;
+}
+
+/**
+ * Extracts the video ID from a YouTube URL. Accepts watch links (`?v=`),
+ * youtu.be short links, and the shorts/live/embed paths; input without a
+ * scheme is tolerated. Anything that isn't a YouTube host (or carries no
+ * valid 11-character id) returns null.
  */
 export function extractVideoId(url: string): string | null {
-	try {
-		const urlObj = new URL(url);
-
-		// Handle youtu.be short URLs
-		if (urlObj.hostname === "youtu.be") {
-			return urlObj.pathname.slice(1);
-		}
-
-		// Handle standard YouTube and YouTube Music URLs
-		if (
-			urlObj.hostname.includes("youtube.com") ||
-			urlObj.hostname.includes("music.youtube.com")
-		) {
-			return urlObj.searchParams.get("v");
-		}
-
-		return null;
-	} catch {
-		return null;
+	const parsed = parseUrlLoose(url);
+	if (!parsed) return null;
+	const host = parsed.hostname.toLowerCase().replace(/^(?:www|m)\./, "");
+	if (host === "youtu.be") return firstVideoId(parsed.pathname);
+	if (host !== "youtube.com" && host !== "music.youtube.com") return null;
+	const fromQuery = parsed.searchParams.get("v");
+	if (isVideoId(fromQuery)) return fromQuery;
+	const [path, id] = parsed.pathname.split("/").filter(Boolean);
+	if (path === "shorts" || path === "live" || path === "embed") {
+		return isVideoId(id) ? id : null;
 	}
+	return null;
+}
+
+/** A link inside pasted text; trailing prose punctuation is trimmed after. */
+const URL_PATTERN = /https?:\/\/[^\s<>"']+/gi;
+
+/**
+ * Video ID of the first YouTube link in pasted text — the text may be a bare
+ * link or a message that contains one. Returns null when no YouTube link with
+ * a valid ID is present.
+ */
+export function findVideoId(text: string): string | null {
+	const direct = extractVideoId(text);
+	if (direct) return direct;
+	for (const url of text.match(URL_PATTERN) ?? []) {
+		const id = extractVideoId(url.replace(/[),.;!?]+$/, ""));
+		if (id) return id;
+	}
+	return null;
 }
 
 /**

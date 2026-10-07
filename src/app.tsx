@@ -27,6 +27,7 @@ import { DownloadQueueButton } from "./components/downloads/download-queue";
 import { Player } from "./components/player/player";
 import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
+import { LinkPreviewDialog } from "./components/song/link-preview-dialog";
 import {
 	PlayerProvider,
 	usePlayer,
@@ -792,6 +793,7 @@ function AppShell({
 				<QueuePanel />
 				<Player />
 				<Toaster />
+				<LinkPreviewDialog />
 			</div>
 			<MobileNav />
 			{/* Mobile has no sidebar: the active download queue floats top-right */}
