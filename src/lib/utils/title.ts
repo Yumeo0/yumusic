@@ -43,6 +43,13 @@ function applyMode(main: string, mode: TitleMode): string {
  */
 const CHANNEL_NAME = /^(.+?)\s+Ch(?:annel)?(?:\.\s*|\s+)(.+)$/iu;
 
+/**
+ * The same channel form with the marker glued to the name —
+ * "Towa Ch.Tokoyami Towa". A glued "Ch." is a decorator even when both
+ * halves are Latin; the spaced "Charlie Ch. Brown" keeps its middle initial.
+ */
+const CHANNEL_NAME_GLUED = /^(.+?)\s+Ch(?:annel)?\.(\S.*)$/iu;
+
 /** Trailing channel marker: "…channel", "…Ch.", "…ちゃんねる", "…チャンネル". */
 const CHANNEL_MARKER = /(?:channel|ch\.|ちゃんねる|チャンネル)$/iu;
 
@@ -68,6 +75,15 @@ function normalizeArtistName(name: string): string | null {
 		const suffix = channel[2].trim();
 		if (LATIN_ONLY.test(prefix) && NON_LATIN.test(suffix)) return suffix;
 		if (NON_LATIN.test(prefix) && LATIN_ONLY.test(suffix)) return prefix;
+		// With both halves Latin, a channel decorator shows as a glued
+		// marker ("Towa Ch.Tokoyami Towa" keeps the name after it) or a
+		// lowercase group tag ("Nanashi Mumei Ch. hololive-EN" keeps the
+		// name before it); the spaced "Charlie Ch. Brown" keeps its middle
+		// initial.
+		if (LATIN_ONLY.test(prefix) && LATIN_ONLY.test(suffix)) {
+			if (CHANNEL_NAME_GLUED.test(name)) return suffix;
+			if (/^\p{Ll}/u.test(suffix)) return prefix;
+		}
 	}
 	// Bare trailing marker: "カグラナナchannel" → "カグラナナ".
 	const trailing = name.match(CHANNEL_MARKER);
@@ -180,13 +196,22 @@ const FEAT_BRACKETED =
 const FEAT_TAIL = /(?<!\p{L})(?:feat(?:uring)?|ft)\.?\s*(.+)$/iu;
 
 /**
- * Splits a "feat. A, B & C" / "ft. A" / "(feat. A, B & C)" tail off the title.
+ * "(Vocal.湊あくあ)" / "(歌：ななかぐら)" — a parenthesized vocal credit, the
+ * featured performer of remix/cover titles like
+ * "Take Over (Vocal.湊あくあ)[Dyako Remix]".
+ */
+const VOCAL_CREDIT =
+	/\s*[（[(]\s*(?:vocal|vo|歌)\s*[.:：・]\s*([^）\])]{1,60}?)\s*[）\])]\s*$/iu;
+
+/**
+ * Splits a "feat. A, B & C" / "ft. A" / "(feat. A, B & C)" / "(Vocal.A)"
+ * tail off the title.
  */
 export function splitFeaturedTitle(title: string): {
 	main: string;
 	feats: string[];
 } {
-	for (const pattern of [FEAT_BRACKETED, FEAT_TAIL]) {
+	for (const pattern of [FEAT_BRACKETED, VOCAL_CREDIT, FEAT_TAIL]) {
 		const match = title.match(pattern);
 		if (!match) continue;
 		const feats = splitArtistList(match[1]);
@@ -218,18 +243,72 @@ const COVER_MARKER =
 	String.raw`\s*(?:\w+\s+)?cover(?:ed)?(?:\s+(?:by\s+.{1,60}?|version|ver\.?))?` +
 	BRACKET_CLOSE;
 
-/** Splits a cover-credit artist list on slashes, commas and ampersands. */
+/** A bare bracketed cover marker: "(Cover)", "【covered】" (no qualifiers). */
+const COVER_BRACKET =
+	String.raw`\s*` +
+	BRACKET_OPEN +
+	String.raw`\s*cover(?:ed)?\s*` +
+	BRACKET_CLOSE;
+
+/** Trailing "(cover)"/"（カバー）" marker on one entry of a credit list. */
+const CREDIT_MARKER_SUFFIX =
+	/\s*[(（]\s*(?:cover(?:ed)?|カバー|[歌弾踊叩]ってみた)\s*[)）]\s*$/iu;
+
+/**
+ * Whether a split credit entry is a marker or descriptor rather than a name —
+ * "歌ってみた", "少し演奏してみた" ("played a little"), "カバー", "cover",
+ * "１人で" ("solo").
+ */
+function isMarkerEntry(entry: string): boolean {
+	const name = entry.trim();
+	if (name === "") return true;
+	if (/^(?:cover(?:ed|s)?|カバー)$/iu.test(name)) return true;
+	if (/(?:って|して)みた$/u.test(name)) return true;
+	return /^(?:１人|1人|一人|ひとり|独り|ソロ)(?:で)?$/u.test(name);
+}
+
+/**
+ * Splits a cover-credit artist list on slashes, commas and ampersands, drops
+ * a per-entry cover marker ("桃鈴ねね(cover)" → "桃鈴ねね") and keeps only the
+ * actual names of mixed marker lists ("歌ってみた/ときのそら" → "ときのそら").
+ */
 function splitCoverArtists(raw: string): string[] {
 	return raw
 		.split(/\s*[，,、]\s*|\s*[/／]\s*|\s*＆\s*|\s+&\s+|\s*[×✕]\s*/u)
-		.map((name) => name.trim())
-		.filter((name) => name !== "" && name.length <= 60);
+		.map((name) => name.replace(CREDIT_MARKER_SUFFIX, "").trim())
+		.filter((name) => name !== "" && name.length <= 60 && !isMarkerEntry(name));
+}
+
+/**
+ * "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』主題歌"
+ * — a leading "A×B×C" performer list with the song title quoted after it.
+ * Matches through the closing quote.
+ */
+const LEADING_PERFORMER_QUOTE =
+	/^([^「『]{1,80}?[×✕][^「『]{0,60}?)\s*[「『](.+?)[」』]/u;
+
+/**
+ * The performers and song title of the leading-list shape (see
+ * LEADING_PERFORMER_QUOTE), or null when the title doesn't use it.
+ */
+export function splitLeadingPerformers(title: string): {
+	performers: string[];
+	title: string;
+} | null {
+	const match = title.match(LEADING_PERFORMER_QUOTE);
+	if (!match) return null;
+	const performers = splitCoverArtists(match[1]);
+	if (performers.length < 2) return null;
+	return { performers, title: match[2].trim() };
 }
 
 /** Patterns whose capture is the performer list of a cover credit. */
 const COVER_CREDIT_PATTERNS: RegExp[] = [
 	// "(covered by X)" / "【cover by X】"
 	/[(（【[]\s*cover(?:ed)?\s+by\s+([^)）】\]]{1,80}?)\s*[)）】\]]/iu,
+	// "… (Cover) / VESPERBELL ヨミ" — the marker followed by the performers
+	// after a slash.
+	new RegExp(COVER_BRACKET + String.raw`\s*[/／]\s*([^【[]+).*$`, "iu"),
 	// "covered by X" tail, up to a trailing tag bracket
 	/(?<![\p{L}(（【[])\s*cover(?:ed)?\s+by\s*([^【[]+).*$/iu,
 	// "… /Cover <artist list>" tail
@@ -261,10 +340,11 @@ const TRAILING_TAG_LIST =
 	/\s*[【『「《〈≪]\s*([^【『「《〈≪】』」》〉≫]+?)\s*[】』」》〉≫]\s*$/u;
 
 /**
- * Pulls the performer names out of a cover credit — "covered by A & B",
- * "(cover by A)", "… /Cover A/B", "…【A×B】" — so the artist row can list
- * them. Requiring two names in a trailing bracket keeps single channel/group
- * tags ("【FUWAMOCO】") out.
+ * Pulls the extra performer names out of the title — a cover credit
+ * ("covered by A & B", "(cover by A)", "… /Cover A/B", "…(Cover) / A",
+ * "…【A×B】") or a leading "A×B「Song」" artist list — so the artist row can
+ * list them. Requiring two names in a trailing bracket keeps single
+ * channel/group tags ("【FUWAMOCO】") out.
  */
 function extractCoverArtists(title: string, artist?: string): string[] {
 	for (const pattern of COVER_CREDIT_PATTERNS) {
@@ -273,14 +353,17 @@ function extractCoverArtists(title: string, artist?: string): string[] {
 		const artists = splitCoverArtists(match[1]);
 		if (artists.length > 0) return artists;
 	}
+	// "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV" — the leading list names
+	// the track's performers.
+	const leading = splitLeadingPerformers(title);
+	if (leading) return leading.performers;
 	const list = title.match(TRAILING_TAG_LIST);
 	if (list) {
 		const artists = splitCoverArtists(list[1]);
 		if (artists.length >= 2) return artists;
 	}
 	// "Artist - Song (cover)" is a prefix credit, not a performer list.
-	const primary = artist?.trim();
-	if (!primary || !title.toLowerCase().startsWith(primary.toLowerCase())) {
+	if (!titleCreditsArtist(title, artist)) {
 		const dash = title.match(DASH_COVER_CREDIT);
 		if (dash) {
 			const artists = splitCoverArtists(dash[1]);
@@ -288,6 +371,48 @@ function extractCoverArtists(title: string, artist?: string): string[] {
 		}
 	}
 	return [];
+}
+
+/**
+ * Whether the title leads with the artist's name — matched in full or by the
+ * artist's leading word, since titles credit "Bao The Whale" as "Bao - Song".
+ */
+function titleCreditsArtist(title: string, artist?: string): boolean {
+	const primary = artist?.trim();
+	if (!primary || primary.length > 60) return false;
+	const folded = title.toLowerCase();
+	if (folded.startsWith(primary.toLowerCase())) return true;
+	const lead = primary.split(/\s+/)[0]?.toLowerCase();
+	// A word boundary keeps lookalikes ("Baofu - …") out.
+	return (
+		lead !== undefined &&
+		lead.length >= 3 &&
+		(folded.startsWith(`${lead} `) || folded.startsWith(`${lead}-`))
+	);
+}
+
+/**
+ * Strips credit authors the artist row already shows: when every name of a
+ * pill author ("ときのそら & ホロライブ") is among the parsed cover performers,
+ * the pill drops back to a plain "Cover".
+ */
+function dropRedundantAuthors(
+	credits: TitleCredit[],
+	coverArtists: string[],
+): TitleCredit[] {
+	if (coverArtists.length === 0) return credits;
+	const known = new Set(coverArtists.map((name) => name.toLowerCase()));
+	return credits.map((credit) => {
+		if (!credit.author) return credit;
+		const names = credit.author
+			.split(/\s*&\s*|\s*,\s*/u)
+			.map((name) => name.trim())
+			.filter(Boolean);
+		return names.length > 0 &&
+			names.every((name) => known.has(name.toLowerCase()))
+			? { tag: credit.tag }
+			: credit;
+	});
 }
 
 /**
@@ -312,8 +437,12 @@ export function formatTitleParts(
 	if (clean) {
 		coverArtists = extractCoverArtists(title, artist);
 		const extracted = extractCredits(title);
-		credits = extracted.credits;
+		credits = dropRedundantAuthors(extracted.credits, coverArtists);
 		title = extracted.title;
+		// "Bao - girls like me don't cry (cover)": shed an artist prefix
+		// before the cover cleanup would mistake the song for the performer
+		// ("Song - Performer (cover)" shape).
+		title = stripArtistPrefix(title, artist, credits);
 		title = cleanUpTitle(title);
 		title = stripArtistPrefix(title, artist, credits);
 		title = stripArtistSuffix(title, artist);
@@ -368,7 +497,18 @@ export function stripArtistPrefix(
 ): string {
 	const primary = artist?.trim();
 	if (!primary || primary.length > 60) return title;
-	if (!title.toLowerCase().startsWith(primary.toLowerCase())) return title;
+	// The title may credit the artist by a short form: the decorator-stripped
+	// name ("Kobo Kanaeru Ch. hololive" → "Kobo Kanaeru - Overdose") or the
+	// artist's leading word ("Bao The Whale" → "Bao - girls like me don't cry").
+	const candidates = [primary];
+	const decorated = formatArtistName(primary);
+	if (decorated && decorated !== primary) candidates.push(decorated);
+	const lead = primary.split(/\s+/)[0];
+	if (lead && lead !== primary && lead.length >= 3) candidates.push(lead);
+	const matched = candidates.find((name) =>
+		title.toLowerCase().startsWith(name.toLowerCase()),
+	);
+	if (!matched) return title;
 
 	// Names that may lead the title as credits: the primary artist plus
 	// every name found inside the extracted credit authors.
@@ -387,7 +527,7 @@ export function stripArtistPrefix(
 	let out = title;
 	// "<artist> - Song" convention.
 	out = out
-		.replace(new RegExp(`^${escapeRegExp(primary)}\\s*[-–—]\\s*`, "i"), "")
+		.replace(new RegExp(`^${escapeRegExp(matched)}\\s*[-–—]\\s*`, "i"), "")
 		.trim();
 	// "<artist>, <name>, & <name>, Song" credit list convention.
 	for (;;) {
@@ -471,6 +611,13 @@ const BARE_COVER_MARKER =
 	/\s*[歌弾踊叩]ってみた(?:\s*ver(?:sion)?\.?\s*\S{1,60})?\s*$/iu;
 
 const TITLE_NOISE: NoiseRule[] = [
+	// "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』
+	// 主題歌" → "Hookah, whoo! …" — the quoted song title replaces the
+	// leading performer list; the MV marker and slash credit peel afterwards.
+	{
+		pattern: LEADING_PERFORMER_QUOTE,
+		replacement: "$2 ",
+	},
 	// "美人局 (covered by 藍月なくる)" → "美人局" (also full-width brackets)
 	new RegExp(
 		String.raw`\s*` +
@@ -552,15 +699,46 @@ const TITLE_NOISE: NoiseRule[] = [
 		),
 		replacement: "$1",
 	},
-	// "Night Dancer (cover)" → "Night Dancer"
-	new RegExp(
-		String.raw`\s*` +
-			BRACKET_OPEN +
-			String.raw`\s*cover(?:ed)?\s*` +
-			BRACKET_CLOSE +
-			String.raw`\s*$`,
-		"i",
-	),
+	// "SPECIALZ - King Gnu (Cover) / VESPERBELL ヨミ" → "SPECIALZ" — the
+	// "Song - OriginalArtist (Cover) / Performer" form: the dash credit and
+	// the slash performers both belong to the cover, not the title.
+	{
+		pattern: new RegExp(
+			String.raw`^(.{1,80}?)\s+[-–—]\s+[^-–—/／]{1,60}?` +
+				COVER_BRACKET +
+				String.raw`\s*[/／]\s*[^【[]+.*$`,
+			"iu",
+		),
+		replacement: "$1",
+	},
+	// "月陽 -ツキアカリ-  みきとP (Cover) / VESPERBELL" → "月陽 -ツキアカリ-"
+	// — the dash-separated form without a space before the dash: a non-Latin
+	// name right after a trailing dash is the original artist.
+	{
+		pattern: new RegExp(
+			String.raw`^(.{1,80}?[-–—])\s+\S*[^\s\p{Script=Latin}\p{N}\p{P}\p{S}]\S*` +
+				COVER_BRACKET +
+				String.raw`\s*[/／]\s*[^【[]+.*$`,
+			"iu",
+		),
+		replacement: "$1",
+	},
+	// "Night Dancer (cover)" / "残酷な天使のテーゼ (Cover) / 花譜" → song
+	// only — the marker with an optional slash-credited performer list.
+	new RegExp(COVER_BRACKET + String.raw`\s*(?:[/／]\s*[^【[]+.*)?$`, "i"),
+	// "モエチャッカファイア (弌誠) ／ダズビー COVER" → "モエチャッカファイア"
+	// — the parenthesized name right before a slash cover credit names the
+	// original, not the cover. Feature/version parens are left to later rules.
+	{
+		pattern: new RegExp(
+			String.raw`^(.{1,80}?)\s*[(（]` +
+				String.raw`(?!\s*(?:feat|ft|ver|version|remix|inst|instrumental|cover(?:ed)?|official|mv|m\/v|pv|lyrics?|from)\b)` +
+				String.raw`[^()（）]{1,40}[)）]\s*[/／]\s*[^/／]{1,60}?` +
+				String.raw`\s*(?:cover(?:ed)?|カバー|[歌弾踊叩]ってみた)\s*$`,
+			"iu",
+		),
+		replacement: "$1",
+	},
 	// "デーモンロード/ Kanaria 【オリジナルMV】cover" → bare trailing word,
 	// only right after a CJK bracket/script so "Take Cover" survives
 	/(?<=[)）\]】』」》〉≫]|\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana})\s*\bcover(?:ed|s)?\s*$/iu,
@@ -687,7 +865,10 @@ const SOLE_TAG_BRACKET = new RegExp(
 // "MV", "Music Video", … — only after a boundary so "ЯMV" survives.
 const VIDEO_MARKER_TAIL =
 	/(?<=[\s)）\]】』〉」\-–—/|｜·・]|^)\s*(?:M\/V|MV|Music\s+Video|Official\s+(?:Music\s+)?Video)\s*$/i;
-const SEPARATOR_TAIL = /\s*[-–—/|｜·・／]\s*$/;
+// A trailing separator left dangling by an earlier peel ("Song -", "Song /")
+// is dropped, but a dash that closes a dash-wrapped run glued to the title
+// ("月陽 -ツキアカリ-") stays: a peel never leaves that shape behind.
+const SEPARATOR_TAIL = /(?<![-–—][^\s]{1,30})[-–—/|｜·・／]\s*$/;
 
 /** Leading decorative tag brackets carrying video/cover keywords. */
 const LEADING_TAG_BRACKET =
@@ -854,15 +1035,23 @@ const QUALIFIER_WORDS =
 function creditFromContent(content: string): TitleCredit | null {
 	for (const tag of Object.keys(TAG_PATTERNS) as TitleTag[]) {
 		if (!TAG_PATTERNS[tag].test(content)) continue;
-		const author = content
+		const remainder = content
 			.replace(TAG_PATTERNS[tag], "")
 			.replace(/\bby\b/i, "")
 			.replace(/\bver(?:sion)?\.?/i, "")
 			.trim()
-			.replace(/^[\s\-–—:：·・]+|[\s\-–—:：·・]+$/g, "");
-		if (!author || author.length > 40 || QUALIFIER_WORDS.test(author)) {
-			return null;
-		}
+			.replace(/^[\s\-–—:：·・/／]+|[\s\-–—:：·・/／]+$/g, "");
+		if (!remainder || remainder.length > 60) return null;
+		// "Cover/１人で" / "歌ってみた/少し演奏してみた/ときのそら/ホロライブ":
+		// keep name segments only. Marker-only remains yield no author — the
+		// generic Cover pill still shows via detectTitleTags.
+		const names = remainder
+			.split(/\s*(?:[/／、,，]|\s+&\s+|&)\s*/u)
+			.map((name) => name.trim())
+			.filter((name) => name !== "" && !isMarkerEntry(name));
+		if (names.length === 0 || QUALIFIER_WORDS.test(names[0])) return null;
+		const author = joinArtists(names);
+		if (author.length > 40) return null;
 		return { tag, author };
 	}
 	return null;

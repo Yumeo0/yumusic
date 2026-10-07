@@ -50,39 +50,39 @@ beforeEach(installLocalStorageStub);
 
 describe("writeCache quota recovery", () => {
 	test("evicts the oldest playlist cache and stores the new one", () => {
-		const targetKey = "yumusic:playlist:v10:target";
+		const targetKey = "yumusic:playlist:v11:target";
 		// Measure what one entry of this shape costs, then set the limit so the
 		// target can only fit after something is evicted.
-		const probeKey = "yumusic:playlist:v10:probe";
+		const probeKey = "yumusic:playlist:v11:probe";
 		writeCache(probeKey, { payload: "x".repeat(10) });
 		const probeBytes = targetKey.length + (store.get(probeKey)?.length ?? 0);
 		store.delete(probeKey);
 
-		seedEntry("yumusic:playlist:v10:old", 1);
-		seedEntry("yumusic:playlist:v10:newer", 2);
+		seedEntry("yumusic:playlist:v11:old", 1);
+		seedEntry("yumusic:playlist:v11:newer", 2);
 		seedEntry("yumusic:library:v7", 0);
 		limit = usedBytes() + probeBytes - 1;
 
 		writeCache(targetKey, { payload: "x".repeat(10) });
 
 		expect(store.has(targetKey)).toBe(true);
-		expect(store.has("yumusic:playlist:v10:old")).toBe(false);
-		expect(store.has("yumusic:playlist:v10:newer")).toBe(true);
+		expect(store.has("yumusic:playlist:v11:old")).toBe(false);
+		expect(store.has("yumusic:playlist:v11:newer")).toBe(true);
 		// The library cache is small and load-bearing; never evicted.
 		expect(store.has("yumusic:library:v7")).toBe(true);
 	});
 
 	test("gives up quietly when nothing can be evicted", () => {
 		limit = 10;
-		writeCache("yumusic:playlist:v10:huge", { payload: "x".repeat(100) });
-		expect(store.has("yumusic:playlist:v10:huge")).toBe(false);
+		writeCache("yumusic:playlist:v11:huge", { payload: "x".repeat(100) });
+		expect(store.has("yumusic:playlist:v11:huge")).toBe(false);
 	});
 });
 
 describe("pruneStaleCacheVersions", () => {
 	test("drops caches from older versions only", () => {
 		seedEntry("yumusic:playlist:v9:abc", 1);
-		seedEntry("yumusic:playlist:v10:abc", 1);
+		seedEntry("yumusic:playlist:v11:abc", 1);
 		seedEntry("yumusic:library:v6", 1);
 		seedEntry("yumusic:library:v7", 1);
 		store.set("yumusic:pinned", "[]");
@@ -90,7 +90,7 @@ describe("pruneStaleCacheVersions", () => {
 		pruneStaleCacheVersions();
 
 		expect(store.has("yumusic:playlist:v9:abc")).toBe(false);
-		expect(store.has("yumusic:playlist:v10:abc")).toBe(true);
+		expect(store.has("yumusic:playlist:v11:abc")).toBe(true);
 		expect(store.has("yumusic:library:v6")).toBe(false);
 		expect(store.has("yumusic:library:v7")).toBe(true);
 		expect(store.has("yumusic:pinned")).toBe(true);

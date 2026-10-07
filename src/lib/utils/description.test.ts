@@ -35,6 +35,42 @@ describe("parseDescriptionCredits", () => {
 		});
 	});
 
+	test("theme-song lines outrank product-sheet title keys", () => {
+		expect(
+			parseDescriptionCredits(
+				"主題歌「Hookah, whoo!」\n歌：藍月なくる\n\n＜製品情報＞\nタイトル：　　Hookah Haze（フーカーヘイズ）",
+			),
+		).toEqual({ title: "Hookah, whoo!", artist: "藍月なくる" });
+		expect(parseDescriptionCredits("テーマソング：Hookah, whoo!")?.title).toBe(
+			"Hookah, whoo!",
+		);
+	});
+
+	test("reads a work-by-artist prose line against the uploader title", () => {
+		const description = "Eine Kleine Nachtmusik by Wolfgang Amadeus Mozart";
+		expect(
+			parseDescriptionCredits(description, "Eine Kleine Nachtmusik - Mozart"),
+		).toEqual({
+			title: "Eine Kleine Nachtmusik",
+			artist: "Wolfgang Amadeus Mozart",
+		});
+		// Without a matching uploader title the prose is not a credit.
+		expect(parseDescriptionCredits(description)).toBeNull();
+		expect(parseDescriptionCredits(description, "Some Other Song")).toBeNull();
+		// Production chatter stays out, even when a word overlaps.
+		expect(
+			parseDescriptionCredits("Mixed by Someone", "Mixed Signals - Artist"),
+		).toBeNull();
+	});
+
+	test("collects every performer line, for collabs", () => {
+		expect(
+			parseDescriptionCredits(
+				"Vocal：獅白ぼたん\n @ShishiroBotan \nVocal：角巻わため\nhttps://twitter.com/tsunomakiwatame",
+			)?.artist,
+		).toBe("獅白ぼたん, 角巻わため");
+	});
+
 	test("drops the original-work note from the song title", () => {
 		expect(
 			parseDescriptionCredits("Song: X (Original: Hatsune Miku)")?.title,
@@ -90,6 +126,30 @@ describe("applySongDescription", () => {
 		expect(updated.description).toContain("Singer: Nameless");
 	});
 
+	test("keeps title performers when the description replaces the title", () => {
+		const updated = applySongDescription(
+			song({
+				title:
+					"藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』主題歌",
+				artist: "アニプレックス チャンネル",
+				artistId: "UC14QT5j2nQI8lKBCGtrrBQA",
+				artists: [
+					{
+						name: "アニプレックス チャンネル",
+						id: "UC14QT5j2nQI8lKBCGtrrBQA",
+					},
+				],
+			}),
+			"主題歌「Hookah, whoo!」\n歌：藍月なくる\n\nタイトル：　　Hookah Haze（フーカーヘイズ）",
+		);
+		expect(updated.title).toBe("Hookah, whoo!");
+		expect(updated.artists?.map((artist) => artist.name)).toEqual([
+			"藍月なくる",
+			"DECO*27",
+			"tepe",
+		]);
+	});
+
 	test("keeps the channel artist for production credit rolls", () => {
 		const updated = applySongDescription(
 			song({
@@ -108,6 +168,106 @@ describe("applySongDescription", () => {
 		expect(updated.title).toBe("HOP HOP");
 		expect(updated.artist).toBe("Azur Lane Official - Yostar");
 		expect(updated.artistId).toBe("UCPeJaqP6WgxUVDcpYkXZKMQ");
+	});
+
+	test("adopts a multi-name vocal credit the title doesn't mention", () => {
+		const updated = applySongDescription(
+			song({
+				title: "リップシンク - Lip‐Sync",
+				artist: "La+ Darknesss",
+				artistId: "UCd5jlP-h6jXEU0TKFRNdIng",
+				artists: [{ name: "La+ Darknesss", id: "UCd5jlP-h6jXEU0TKFRNdIng" }],
+			}),
+			"Vocal: 紫咲シオン × ラプラス・ダークネス\n@MurasakiShion @LaplusDarknesss\nLyrics & Music: DECO*27",
+		);
+		expect(updated.title).toBe("リップシンク - Lip‐Sync");
+		expect(updated.artist).toBe("紫咲シオン, ラプラス・ダークネス");
+		expect(updated.artists).toEqual([
+			{ name: "紫咲シオン" },
+			{ name: "ラプラス・ダークネス", id: "UCd5jlP-h6jXEU0TKFRNdIng" },
+		]);
+	});
+
+	test("carries stored ids over through handles and profile links", () => {
+		// PAKU: each vocal line carries its own link; both vocalists are
+		// adopted and the stored Watame id moves to 角巻わため.
+		const paku = applySongDescription(
+			song({
+				title: "PAKU / 角巻わため×獅白ぼたん(Cover)",
+				artist: "Tsunomaki Watame",
+				artistId: "UCX2NCyh8ipCoydn1iKWyM_Q",
+				artists: [{ name: "Tsunomaki Watame", id: "UCX2NCyh8ipCoydn1iKWyM_Q" }],
+			}),
+			"Vocal：獅白ぼたん\n @ShishiroBotan \nVocal：角巻わため\nhttps://twitter.com/tsunomakiwatame",
+		);
+		expect(paku.artists).toEqual([
+			{ name: "獅白ぼたん" },
+			{ name: "角巻わため", id: "UCX2NCyh8ipCoydn1iKWyM_Q" },
+		]);
+
+		// 妄想アスパルテーム: the twitter link sits on the credit line itself.
+		const aspa = applySongDescription(
+			song({
+				title: "妄想アスパルテーム／湊あくあ (cover)",
+				artist: "Minato Aqua",
+				artistId: "UC1opHUrw8rvnsadT-iGp7Cg",
+				artists: [{ name: "Minato Aqua", id: "UC1opHUrw8rvnsadT-iGp7Cg" }],
+			}),
+			"♡Vocal：湊あくあ　https://twitter.com/minatoaqua",
+		);
+		expect(aspa.artists).toEqual([
+			{ name: "湊あくあ", id: "UC1opHUrw8rvnsadT-iGp7Cg" },
+		]);
+	});
+
+	test("reads labelled channel links under a credit line", () => {
+		// ギラギラ: the stored entity id moves through the twitter slug.
+		const updated = applySongDescription(
+			song({
+				title: "ギラギラ - Ado / 町田ちま(Cover)",
+				artist: "Machita Chima",
+				artistId: "UCeiwyXe4tpmuq7IYBLeb8aw",
+				artists: [{ name: "Machita Chima", id: "UCeiwyXe4tpmuq7IYBLeb8aw" }],
+			}),
+			[
+				"◆Vocal：町田ちま",
+				"[YouTube] https://www.youtube.com/channel/UCo7TRj3cS-f_1D9ZDmuTsjw",
+				"[Twitter] https://twitter.com/chima_machita23",
+			].join("\n"),
+		);
+		expect(updated.artists).toEqual([
+			{ name: "町田ちま", id: "UCeiwyXe4tpmuq7IYBLeb8aw" },
+		]);
+
+		// Without a stored id, the channel URL links the name directly.
+		const linked = applySongDescription(
+			song({
+				title: "ギラギラ - Ado / 町田ちま(Cover)",
+				artist: "町田ちま",
+				artists: [{ name: "町田ちま" }],
+			}),
+			"◆Vocal：町田ちま\n[YouTube] https://www.youtube.com/channel/UCo7TRj3cS-f_1D9ZDmuTsjw",
+		);
+		expect(linked.artists).toEqual([
+			{ name: "町田ちま", id: "UCo7TRj3cS-f_1D9ZDmuTsjw" },
+		]);
+	});
+
+	test("adopts a composer from a work-by-artist prose line", () => {
+		const updated = applySongDescription(
+			song({
+				title: "Eine Kleine Nachtmusik - Mozart",
+				artist: "AllClassicalMusic",
+				artistId: "UCMLnGKHk2Gi_vq82IhSgHkQ",
+				artists: [
+					{ name: "AllClassicalMusic", id: "UCMLnGKHk2Gi_vq82IhSgHkQ" },
+				],
+			}),
+			"Eine Kleine Nachtmusik by Wolfgang Amadeus Mozart",
+		);
+		expect(updated.title).toBe("Eine Kleine Nachtmusik");
+		expect(updated.artist).toBe("Wolfgang Amadeus Mozart");
+		expect(updated.artists).toEqual([{ name: "Wolfgang Amadeus Mozart" }]);
 	});
 
 	test("keeps the channel id when the description names the same artist", () => {
@@ -157,6 +317,29 @@ describe("titleNeedsDescription", () => {
 		expect(titleNeedsDescription(song())).toBe(true);
 	});
 
+	test("flags a leading performer list the channel does not explain", () => {
+		expect(
+			titleNeedsDescription(
+				song({
+					title:
+						"藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』主題歌",
+					artist: "アニプレックス チャンネル",
+					artists: [{ name: "アニプレックス チャンネル" }],
+				}),
+			),
+		).toBe(true);
+		// A channel that is one of the listed performers needs no lookup.
+		expect(
+			titleNeedsDescription(
+				song({
+					title: "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV",
+					artist: "藍月なくる",
+					artists: [{ name: "藍月なくる" }],
+				}),
+			),
+		).toBe(false);
+	});
+
 	test("ignores credits that match a known artist", () => {
 		expect(
 			titleNeedsDescription(
@@ -179,7 +362,7 @@ describe("titleNeedsDescription", () => {
 		).toBe(false);
 	});
 
-	test("flags channel-decorated credits the prefix pipeline cannot strip", () => {
+	test("ignores channel-decorated credits the prefix pipeline strips", () => {
 		expect(
 			titleNeedsDescription(
 				song({
@@ -188,7 +371,7 @@ describe("titleNeedsDescription", () => {
 					artists: [{ name: "Kobo Kanaeru Ch. hololive" }],
 				}),
 			),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	test("ignores dual titles and version/feat tails", () => {

@@ -1,5 +1,5 @@
 import { ArrowUpRight, Disc3, ListMusic } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
@@ -19,6 +19,7 @@ import {
 	hiResThumb,
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
+import { enrichSongsWithDescriptions } from "@/lib/youtube/song-description";
 import {
 	artistIdOf,
 	artistListOf,
@@ -271,18 +272,48 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 	);
 }
 
+/** Every playable song in the feed, for the description prefetch. */
+function feedSongs(sections: FeedSection[]): Song[] {
+	return sections.flatMap((section) =>
+		section.items.flatMap((item) => (item.kind === "song" ? [item.song] : [])),
+	);
+}
+
+/** Replaces one song wherever it appears in the feed. */
+function withUpdatedSong(
+	sections: FeedSection[],
+	updated: Song,
+): FeedSection[] {
+	return sections.map((section) => ({
+		...section,
+		items: section.items.map((item) =>
+			item.kind === "song" && item.song.id === updated.id
+				? { ...item, song: updated }
+				: item,
+		),
+	}));
+}
+
 /**
  * Recommended tracks, playlists, albums and artists from the YouTube Music
  * home feed, rendered as horizontally scrollable rows. Renders nothing while
  * signed out.
  */
 export function HomeFeed() {
-	const { play } = usePlayer();
+	const { play, currentSong } = usePlayer();
 	const navigate = useNavigate();
 	const [settings] = useSettings();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const [sections, setSections] = useState<FeedSection[] | null>(null);
 	const [failed, setFailed] = useState(false);
+	// Description prefetch: uploader descriptions carry the real song credits
+	// ("Singer: X / Song: Y") and resolve the ambiguous titles the raw
+	// pipeline leaves alone. Rows update as each description lands.
+	const enrichCancelRef = useRef<(() => void) | null>(null);
+	// Read at prefetch start; whatever is playing gets its description from
+	// the player response, so fetching it here would be a duplicate request.
+	const playingIdRef = useRef(currentSong?.id);
+	playingIdRef.current = currentSong?.id;
 
 	const removeFeedItem = (id: string) =>
 		setSections((prev) =>
@@ -328,6 +359,16 @@ export function HomeFeed() {
 				if (cancelled) return;
 				setSections(out);
 				setFailed(out.length === 0);
+				const playingId = playingIdRef.current;
+				enrichCancelRef.current = enrichSongsWithDescriptions(
+					feedSongs(out),
+					(updated) => {
+						setSections((prev) =>
+							prev ? withUpdatedSong(prev, updated) : prev,
+						);
+					},
+					playingId ? new Set([playingId]) : undefined,
+				);
 			} catch (error) {
 				console.warn("[HomeFeed] failed to load recommendations:", error);
 				if (cancelled) return;
@@ -337,6 +378,7 @@ export function HomeFeed() {
 		})();
 		return () => {
 			cancelled = true;
+			enrichCancelRef.current?.();
 		};
 	}, []);
 

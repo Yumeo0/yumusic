@@ -12,12 +12,14 @@ export const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // localized (e.g. Japanese) auto-playlist name.
 export const LIBRARY_CACHE_KEY = "yumusic:library:v7";
 
+// v11: cached tracks carry the description-resolved artists' channel ids
+// (v10 could cache adopted artists without their channel links);
 // v10: playlist covers resolve to the largest variant (v9 and earlier could
 // cache a tiny custom-cover variant);
 // v9: album tracks inherit the header artist (v8 cached "Unknown Artist");
 // v8: cached playlists carry a reliable editable flag so own playlists offer
 // "Remove from playlist" (v7 could cache a false negative).
-export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v10:";
+export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v11:";
 
 /** Plain-data snapshot of a playlist (JSON-safe for persistence). */
 export interface PlaylistView {

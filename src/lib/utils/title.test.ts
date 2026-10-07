@@ -144,9 +144,43 @@ describe("noise, credit and decoration tails", () => {
 		]);
 	});
 
+	test("vocal credit splits off as a feature", () => {
+		const parts = formatTitleParts(
+			"Take Over (Vocal.湊あくあ)[Dyako Remix]",
+			"original",
+			true,
+			"Dyako",
+		);
+		expect(parts.main).toBe("Take Over");
+		expect(parts.feats).toEqual(["湊あくあ"]);
+		expect(parts.credits).toEqual([{ tag: "remix", author: "Dyako" }]);
+		expect(
+			formatTitleParts("Song (歌：ななかぐら)", "original", true).feats,
+		).toEqual(["ななかぐら"]);
+	});
+
 	test("artist - song with video marker cleans both", () => {
 		expect(main("YOASOBI - アイドル (Official Video)", "YOASOBI")).toBe(
 			"アイドル",
+		);
+	});
+
+	test("artist - song with (cover) keeps the song", () => {
+		const parts = formatTitleParts(
+			"Bao - girls like me don't cry (cover)",
+			"original",
+			true,
+			"Bao The Whale",
+		);
+		expect(parts.main).toBe("girls like me don't cry");
+		// The uploader's short name is the artist, not a cover performer.
+		expect(parts.coverArtists).toEqual([]);
+		expect(parts.credits).toEqual([]);
+	});
+
+	test("channel-decorated artist prefix is stripped", () => {
+		expect(main("Kobo Kanaeru - Overdose", "Kobo Kanaeru Ch. hololive")).toBe(
+			"Overdose",
 		);
 	});
 
@@ -184,6 +218,12 @@ describe("artist name romaji tails", () => {
 		);
 		expect(formatArtistName("カグラナナchannel")).toBe("カグラナナ");
 		expect(formatArtistName("Kanade Ch. 音乃瀬奏 ‐ ReGLOSS")).toBe("音乃瀬奏");
+		// A glued marker is a decorator even when both halves are Latin.
+		expect(formatArtistName("Towa Ch.Tokoyami Towa")).toBe("Tokoyami Towa");
+		// A lowercase group tag marks the decorator with both halves Latin.
+		expect(formatArtistName("Nanashi Mumei Ch. hololive-EN")).toBe(
+			"Nanashi Mumei",
+		);
 		expect(
 			mergeArtistNames(
 				[{ name: "Kanade Ch. 音乃瀬奏 ‐ ReGLOSS", id: "UC1" }],
@@ -298,6 +338,106 @@ describe("cover markers and artist credit tails", () => {
 	test("song titles containing a cover word are kept", () => {
 		expect(main("Artist - Take Cover")).toBe("Artist - Take Cover");
 		expect(main("Under Cover")).toBe("Under Cover");
+	});
+
+	test("cover marker with slash-credited performers", () => {
+		const title = "月陽 -ツキアカリ-  みきとP (Cover) / VESPERBELL";
+		const parts = formatTitleParts(title, "original", true, "VESPERBELL");
+		expect(parts.main).toBe("月陽 -ツキアカリ-");
+		expect(parts.coverArtists).toEqual(["VESPERBELL"]);
+		// The tail parses even without artist metadata to anchor on.
+		expect(main(title)).toBe("月陽 -ツキアカリ-");
+		expect(main(title.toLowerCase())).toBe("月陽 -ツキアカリ-");
+	});
+
+	test("dash-credited original artist with slash-credited performers", () => {
+		const parts = formatTitleParts(
+			"SPECIALZ - King Gnu (Cover) / VESPERBELL ヨミ",
+			"original",
+			true,
+			"VESPERBELL ヨミ",
+		);
+		expect(parts.main).toBe("SPECIALZ");
+		expect(parts.coverArtists).toEqual(["VESPERBELL ヨミ"]);
+		expect(main("天樂 - ゆうゆ (Cover) / VESPERBELL")).toBe("天樂");
+	});
+
+	test("plain cover marker with slash-credited performer", () => {
+		const parts = formatTitleParts(
+			"残酷な天使のテーゼ (Cover) / 花譜",
+			"original",
+			true,
+			"花譜",
+		);
+		expect(parts.main).toBe("残酷な天使のテーゼ");
+		expect(parts.coverArtists).toEqual(["花譜"]);
+		// A Latin title must keep its last word: it is not a name credit.
+		expect(main("A Cruel Angel's Thesis (Cover) / 花譜")).toBe(
+			"A Cruel Angel's Thesis",
+		);
+		// A CJK title with an internal space is not an artist prefix either.
+		expect(main("残酷な 天使のテーゼ (Cover) / 花譜")).toBe(
+			"残酷な 天使のテーゼ",
+		);
+	});
+
+	test("a reading dash closing the title is kept", () => {
+		expect(cleanUpTitle("月陽 -ツキアカリ-")).toBe("月陽 -ツキアカリ-");
+	});
+
+	test("original-artist paren before a slash cover credit", () => {
+		expect(main("モエチャッカファイア (弌誠) ／ダズビー COVER")).toBe(
+			"モエチャッカファイア",
+		);
+		expect(main("Song (Original) / Performer COVER")).toBe("Song");
+		// A non-name paren (feature/version) stays: it is not the original.
+		expect(cleanUpTitle("Song (feat. X) / Performer COVER")).toBe(
+			"Song (feat. X) / Performer COVER",
+		);
+	});
+
+	test("leading performer list with the song title quoted", () => {
+		const title =
+			"藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』主題歌";
+		const parts = formatTitleParts(
+			title,
+			"original",
+			true,
+			"アニプレックス チャンネル",
+		);
+		expect(parts.main).toBe("Hookah, whoo!");
+		expect(parts.coverArtists).toEqual(["藍月なくる", "DECO*27", "tepe"]);
+		// The shape parses without artist metadata too.
+		expect(main(title)).toBe("Hookah, whoo!");
+	});
+
+	test("trailing tag bracket with a marker on the performer", () => {
+		const title =
+			"【歌ってみた】私、アイドル宣言【ホロライブ/桃鈴ねね(cover)】";
+		const parts = formatTitleParts(title, "original", true, "Nene Ch.桃鈴ねね");
+		expect(parts.main).toBe("私、アイドル宣言");
+		expect(parts.coverArtists).toEqual(["ホロライブ", "桃鈴ねね"]);
+	});
+
+	test("marker lists in brackets are filtered", () => {
+		const title =
+			"【Cover/１人で】光の旋律【歌ってみた/少し演奏してみた/ときのそら/ホロライブ】";
+		const parts = formatTitleParts(title, "original", true, "TOKINOSORA");
+		expect(parts.main).toBe("光の旋律");
+		expect(parts.coverArtists).toEqual(["ときのそら", "ホロライブ"]);
+		// The performers already sit in the artist row; the pill stays plain.
+		expect(parts.credits).toEqual([{ tag: "cover" }]);
+	});
+
+	test("cover pill drops an author already in the artist row", () => {
+		const parts = formatTitleParts(
+			"Song (covered by 藍月なくる)",
+			"original",
+			true,
+		);
+		expect(parts.main).toBe("Song");
+		expect(parts.coverArtists).toEqual(["藍月なくる"]);
+		expect(parts.credits).toEqual([{ tag: "cover" }]);
 	});
 
 	test("english cover marker and ver. performer tail", () => {

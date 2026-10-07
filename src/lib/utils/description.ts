@@ -1,5 +1,10 @@
 import type { Song } from "@/contexts/player-context";
-import { formatArtistName, splitDualTitle } from "./title";
+import {
+	formatArtistName,
+	formatTitleParts,
+	splitDualTitle,
+	splitLeadingPerformers,
+} from "./title";
 
 /**
  * Structured credits some uploaders put in the video description —
@@ -11,7 +16,7 @@ import { formatArtistName, splitDualTitle } from "./title";
 export interface DescriptionCredits {
 	/** The song's actual title, from a "Song:"/"Title:"/"曲名:" line. */
 	title?: string;
-	/** The performing artist, from a "Singer:"/"Vocals:"/"歌:" line. */
+	/** The performers, from every "Singer:"/"Vocals:"/"歌:" line. */
 	artist?: string;
 }
 
@@ -56,6 +61,36 @@ const ARTIST_KEYS = new Set([
 ]);
 
 /**
+ * "主題歌「Hookah, whoo!」" / "主題歌：Hookah, whoo!" / "テーマソング：X" —
+ * an explicit theme-song line. It outranks generic keys like "タイトル:",
+ * which product sheets use for the game/anime title instead of the song.
+ */
+const THEME_SONG_QUOTED =
+	/^\s*[\p{P}\p{S}]*\s*(?:主題歌|テーマソング|テーマ曲)\s*[：:]?\s*[「『]([^」』]+)[」』]/u;
+const THEME_SONG_PLAIN =
+	/^\s*[\p{P}\p{S}]*\s*(?:主題歌|テーマソング|テーマ曲)\s*[：:]\s*(.+?)\s*$/u;
+
+/** A "Key: Value" credit line (ASCII or full-width colon). */
+const CREDIT_LINE =
+	/^\s*[\p{P}\p{S}]*\s*([\p{L}\p{N}][\p{L}\p{N} .&()]{0,23})\s*[:：]\s*(.+)$/u;
+
+/** Key of a credit line, normalized for the known-key sets. */
+function creditLineKey(key: string): string {
+	return key.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * "<work> by <artist>" prose credit line, e.g. "Eine Kleine Nachtmusik by
+ * Wolfgang Amadeus Mozart". Split at the last "by" so works containing the
+ * word ("Stand by Me by …") still resolve.
+ */
+const PROSE_CREDIT = /^(.{2,80})\s+by\s+(.{2,80})$/iu;
+
+/** Leading production-role words that make a "by" line part of a credit roll. */
+const PRODUCTION_WORK =
+	/^(?:mixed|mastered|arranged|composed|written|produced|directed|illustrated|performed|recorded|vocals?|singer|lyrics?|music|inst(?:rumental)?|movie|video|edited?|artwork|photo|design|cover(?:ed)?)\b/i;
+
+/**
  * Longest accepted credit value. Longer values are prose ("Director: join us
  * on…") rather than a name or song title.
  */
@@ -93,27 +128,74 @@ function cleanValue(raw: string): string | null {
 
 /**
  * Pulls the structured song credits out of a video description. Reads
- * "Key: Value" lines (ASCII or full-width colon) and keeps the first known
- * title/performer field; production credits ("Director:", "MV:", …) are
- * ignored. Returns null when no recognized credit is present.
+ * "Key: Value" lines (ASCII or full-width colon), keeps the first known title
+ * field and every known performer field; production credits ("Director:",
+ * "MV:", …) are ignored. An explicit theme-song line ("主題歌「X」") outranks
+ * the generic title keys, whose product-sheet use ("タイトル:" of the game)
+ * would otherwise name the wrong title. With the uploader title at hand, a
+ * "<work> by <artist>" prose line that matches it is used as a fallback
+ * ("Work - Composer" titles). Returns null when no recognized credit is
+ * present.
  */
 export function parseDescriptionCredits(
 	description: string | null | undefined,
+	uploaderTitle?: string,
 ): DescriptionCredits | null {
 	if (!description) return null;
 	const credits: DescriptionCredits = {};
-	for (const line of description.split(/\r?\n/)) {
-		const match = line.match(
-			/^\s*[\p{P}\p{S}]*\s*([\p{L}\p{N}][\p{L}\p{N} .&()]{0,23})\s*[:：]\s*(.+)$/u,
-		);
+	const artists: string[] = [];
+	const seenArtists = new Set<string>();
+	const lines = description.split(/\r?\n/);
+	for (const line of lines) {
+		const theme = line.match(THEME_SONG_QUOTED) ?? line.match(THEME_SONG_PLAIN);
+		if (!theme) continue;
+		const value = cleanValue(theme[1]);
+		if (!value) continue;
+		credits.title = stripOriginalNote(value);
+		break;
+	}
+	for (const line of lines) {
+		const match = line.match(CREDIT_LINE);
 		if (!match) continue;
-		const key = match[1].trim().toLowerCase().replace(/\s+/g, " ");
+		const key = creditLineKey(match[1]);
 		const value = cleanValue(match[2]);
 		if (!value) continue;
 		if (credits.title === undefined && TITLE_KEYS.has(key)) {
 			credits.title = stripOriginalNote(value);
-		} else if (credits.artist === undefined && ARTIST_KEYS.has(key)) {
-			credits.artist = value;
+		} else if (ARTIST_KEYS.has(key)) {
+			// Every performer line is kept: collabs credit each vocalist on
+			// its own line ("Vocal：獅白ぼたん" / "Vocal：角巻わため").
+			for (const name of splitArtistNames(value)) {
+				const seen = formatArtistName(name).toLowerCase();
+				if (seenArtists.has(seen)) continue;
+				seenArtists.add(seen);
+				artists.push(name);
+			}
+		}
+	}
+	if (artists.length > 0) credits.artist = artists.join(", ");
+	// "Eine Kleine Nachtmusik by Wolfgang Amadeus Mozart" — a prose credit
+	// line whose work appears in the uploader title resolves "Work -
+	// Composer" titles when nothing structured is present. Production
+	// chatter ("Mixed by…") and unrelated works are ignored.
+	if (
+		credits.title === undefined &&
+		credits.artist === undefined &&
+		uploaderTitle
+	) {
+		const folded = uploaderTitle.toLowerCase();
+		for (const line of lines) {
+			const prose = line.match(PROSE_CREDIT);
+			if (!prose) continue;
+			const work = cleanValue(prose[1]);
+			const artist = cleanValue(prose[2]);
+			if (!work || !artist) continue;
+			if (PRODUCTION_WORK.test(work)) continue;
+			if (CREDIT_TAIL.test(artist)) continue;
+			if (!folded.includes(work.toLowerCase())) continue;
+			credits.title = work;
+			credits.artist = artist;
+			break;
 		}
 	}
 	return credits.title !== undefined || credits.artist !== undefined
@@ -132,10 +214,19 @@ function splitArtistNames(raw: string): string[] {
 
 /** Whether the title credits the parsed artist ("Nameless - Song"). */
 function artistMentionedInTitle(title: string, artist: string): boolean {
-	const folded = title.toLowerCase();
+	const foldedTitle = title.toLowerCase();
+	const titleWords = new Set(
+		foldedTitle.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
+	);
 	return splitArtistNames(artist).some((name) => {
 		const needle = name.toLowerCase();
-		return needle.length >= 2 && folded.includes(needle);
+		if (needle.length >= 2 && foldedTitle.includes(needle)) return true;
+		// "Eine Kleine Nachtmusik - Mozart" credits the description's full
+		// "Wolfgang Amadeus Mozart" through a single name part.
+		return name
+			.toLowerCase()
+			.split(/\s+/)
+			.some((part) => part.length >= 4 && titleWords.has(part));
 	});
 }
 
@@ -152,13 +243,138 @@ function sameArtistName(a: string, b: string): boolean {
 	);
 }
 
+/** A line carrying links/handles next to, at most, bracketed labels. */
+function isLinkLine(line: string): boolean {
+	return extractLinkTokens(line).length > 0 && stripLinks(line).trim() === "";
+}
+
+/** The line with its URLs, @handles and bracketed labels removed. */
+function stripLinks(line: string): string {
+	return line
+		.replace(/https?:\/\/\S+/giu, " ")
+		.replace(/(?<![\p{L}\p{N}])@[\w.-]+/gu, " ")
+		.replace(
+			/[[(（【［『「][^[\]()（）【】［］『』「」]{0,30}[\]）)】］』」]/gu,
+			" ",
+		);
+}
+
+/**
+ * The @handles, profile slugs and channel ids a line carries
+ * (twitter/x/instagram/YouTube).
+ */
+function extractLinkTokens(line: string): string[] {
+	const tokens = new Set<string>();
+	for (const match of line.matchAll(/(?<![\p{L}\p{N}])@([\w.-]{2,30})/gu)) {
+		tokens.add(match[1]);
+	}
+	for (const match of line.matchAll(
+		/(?<![\w.@])(?:twitter|x|instagram)\.com\/([\w.-]{2,30})/giu,
+	)) {
+		tokens.add(match[1]);
+	}
+	for (const match of line.matchAll(/youtube\.com\/@([\w.-]{2,30})/giu)) {
+		tokens.add(match[1]);
+	}
+	for (const match of line.matchAll(
+		/youtube\.com\/channel\/(UC[\w-]{22})/giu,
+	)) {
+		tokens.add(match[1]);
+	}
+	return [...tokens];
+}
+
+/** Folds a name or handle for comparison, reading "+" as "plus". */
+function linkKey(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/\+/g, "plus")
+		.replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Whether a stored artist name corresponds to a handle or profile slug. */
+function linkMatchesName(name: string, token: string): boolean {
+	const link = linkKey(token);
+	if (!link) return false;
+	if (linkKey(name) === link) return true;
+	// "Shion Murasaki" ↔ "MurasakiShion": every word of the name appears.
+	const words = name
+		.toLowerCase()
+		.split(/[\s._-]+/)
+		.map(linkKey)
+		.filter((word) => word.length >= 2);
+	return words.length >= 2 && words.every((word) => link.includes(word));
+}
+
+/**
+ * Channel ids for the description's performer names, resolved through the
+ * @handles, profile links and channel URLs uploaders put next to a credit
+ * line: the stored "La+ Darknesss" matches "@LaplusDarknesss" under "Vocal:
+ * 紫咲シオン × ラプラス・ダークネス", so its id moves to ラプラス・ダークネス,
+ * "Minato Aqua" matches the "twitter.com/minatoaqua" link on the
+ * "Vocal：湊あくあ" line, and a "[YouTube] …/channel/UC…" link under
+ * "Vocal：町田ちま" links the name directly. Stored-artist matches win over
+ * channel URLs.
+ */
+function linkedArtistIds(song: Song, description: string): Map<string, string> {
+	const ids = new Map<string, string>();
+	const stored = (
+		song.artists?.length
+			? song.artists
+			: song.artist
+				? [{ name: song.artist, id: song.artistId }]
+				: []
+	).filter((artist) => artist.name && artist.id);
+	const lines = description.split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const match = lines[i].match(CREDIT_LINE);
+		if (!match || !ARTIST_KEYS.has(creditLineKey(match[1]))) continue;
+		const value = cleanValue(match[2]);
+		if (!value) continue;
+		const names = splitArtistNames(value);
+		const links = extractLinkTokens(lines[i]);
+		// The credit's own links usually sit on the labelled lines below it
+		// ("[YouTube] https://…", "[Twitter] https://…").
+		for (let j = i + 1; j < lines.length && isLinkLine(lines[j]); j++) {
+			for (const token of extractLinkTokens(lines[j])) {
+				if (!links.includes(token)) links.push(token);
+			}
+		}
+		if (links.length === 0) continue;
+		// Pair names with links: one link per name, or one name carrying all
+		// of its links. Anything else is too ambiguous to attribute.
+		const pairs: Array<[string, string]> =
+			names.length === links.length
+				? names.map((name, index): [string, string] => [name, links[index]])
+				: names.length === 1
+					? links.map((link): [string, string] => [names[0], link])
+					: [];
+		for (const [name, link] of pairs) {
+			// A channel URL is the id itself; the stored artist's id (when its
+			// name matches a handle) takes precedence.
+			if (/^UC[\w-]{22}$/.test(link)) {
+				if (!ids.has(name)) ids.set(name, link);
+				continue;
+			}
+			const artist = stored.find((entry) => linkMatchesName(entry.name, link));
+			if (artist?.id) ids.set(name, artist.id);
+		}
+	}
+	return ids;
+}
+
 /**
  * Applies a video description to a song: stores the raw text and uses the
  * structured credits to correct the title and artist. The parsed performer is
  * adopted when the uploader title already credits them (the cover form
- * "Singer - Song") or when no real artist is known; production credit rolls
- * ("Vocals:" among many roles) leave the artist untouched. Returns the same
- * object when the description was already applied or adds nothing.
+ * "Singer - Song"), when no real artist is known, or when the credit lists
+ * several performers ("Vocal: A × B"); a lone "Vocals:" name in a production
+ * credit roll leaves the artist untouched. Stored channel ids follow their
+ * artist through the description's @handles and profile links ("La+
+ * Darknesss" ↔ "@LaplusDarknesss"). Performers parsed from the original
+ * title's credits ("A×B「Song」" lists, cover casts) carry over when the
+ * description replaces the title. Returns the same object when the
+ * description was already applied or adds nothing.
  */
 export function applySongDescription(
 	song: Song,
@@ -172,28 +388,62 @@ export function applySongDescription(
 			: full;
 	if (song.description === text) return song;
 	const next: Song = { ...song, description: text };
-	const credits = parseDescriptionCredits(full);
+	const credits = parseDescriptionCredits(full, song.title);
 	if (!credits) return next;
 	if (credits.title) next.title = credits.title;
-	if (
-		credits.artist &&
-		(artistMentionedInTitle(song.title, credits.artist) ||
-			isPlaceholderArtist(song.artist))
-	) {
+	if (credits.artist) {
 		const names = splitArtistNames(credits.artist);
-		if (names.length > 0) {
+		// Several performers ("Vocal: A × B") are the track's artists even
+		// when the title doesn't name them; a single name is adopted only
+		// when the title credits it or no real artist is known, so production
+		// credit rolls ("Vocals: vally.exe") keep the channel.
+		const adopt =
+			names.length >= 2 ||
+			artistMentionedInTitle(song.title, credits.artist) ||
+			isPlaceholderArtist(song.artist);
+		if (names.length > 0 && adopt) {
 			const existing: Array<{ name: string; id?: string }> = song.artists
 				?.length
 				? song.artists
 				: song.artist
 					? [{ name: song.artist, id: song.artistId }]
 					: [];
+			const linked = linkedArtistIds(song, full);
 			const artists = names.map((name): { name: string; id?: string } => {
 				const match = existing.find((artist) =>
 					sameArtistName(artist.name, name),
 				);
-				return match ? { name: match.name, id: match.id } : { name };
+				const resolved = match?.name ?? name;
+				// An exact match without an id still benefits from the
+				// description's channel links.
+				const id = match?.id ?? linked.get(name);
+				return id ? { name: resolved, id } : { name: resolved };
 			});
+			next.artists = artists;
+			next.artist = artists.map((artist) => artist.name).join(", ");
+			next.artistId = artists.find((artist) => artist.id)?.id;
+		}
+	}
+	// The display pipeline parses those extra performers from the title text
+	// at render time; once the title is replaced they would disappear.
+	if (credits.title && credits.title !== song.title) {
+		const fromTitle = formatTitleParts(
+			song.title,
+			"original",
+			true,
+			song.artist,
+		).coverArtists;
+		if (fromTitle.length > 0) {
+			const artists = next.artists?.length
+				? [...next.artists]
+				: song.artist
+					? [{ name: song.artist, id: song.artistId }]
+					: [];
+			for (const name of fromTitle) {
+				if (!artists.some((artist) => sameArtistName(artist.name, name))) {
+					artists.push({ name });
+				}
+			}
 			next.artists = artists;
 			next.artist = artists.map((artist) => artist.name).join(", ");
 			next.artistId = artists.find((artist) => artist.id)?.id;
@@ -220,6 +470,13 @@ function creditKey(name: string): string {
 		.replace(/[\s\p{P}\p{S}]+/gu, "");
 }
 
+/** Comparison keys of the artists already attached to a song. */
+function knownArtistKeys(song: Song): string[] {
+	return [song.artist, ...(song.artists ?? []).map((artist) => artist.name)]
+		.map(creditKey)
+		.filter((key) => key.length >= 2);
+}
+
 /**
  * Whether fetching this song's description could plausibly change its parsed
  * title/artist. The prefetch only spends a request on these; whatever is
@@ -227,11 +484,21 @@ function creditKey(name: string): string {
  *
  * The signal is a leading "Name - Song" / "Name / Song" credit whose name is
  * not one of the song's known artists — e.g. "Nameless - Milk Crown on
- * Sonnetica (Lyrics Romaji)" uploaded by "Doga". The regex pipeline cannot
+ * Sonnetica (Lyrics Romaji)" uploaded by "Doga" — or a leading "A×B「Song」"
+ * performer list the channel doesn't represent. The regex pipeline cannot
  * tell whether "Nameless" is the singer or part of the title, but the
  * description's "Singer:"/"Song:" lines can.
  */
 export function titleNeedsDescription(song: Song): boolean {
+	// "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV" uploaded by a label: the
+	// description's "歌:"/"Singer:" line names the actual performers.
+	const leading = splitLeadingPerformers(song.title);
+	if (leading) {
+		const knownKeys = knownArtistKeys(song);
+		return !leading.performers.some((name) =>
+			knownKeys.includes(creditKey(name)),
+		);
+	}
 	const match = song.title.match(LEADING_CREDIT);
 	if (!match) return false;
 	const left = match[1].trim();
@@ -247,9 +514,7 @@ export function titleNeedsDescription(song: Song): boolean {
 	// A side matching a known artist is already handled by the title
 	// pipeline: the prefix strip takes exact matches ("Artist - Song"), the
 	// suffix strip also accepts channel-decorated names ("song - Artist Ch.").
-	const knownKeys = [song.artist, ...(song.artists ?? []).map((a) => a.name)]
-		.map(creditKey)
-		.filter((key) => key.length >= 2);
+	const knownKeys = knownArtistKeys(song);
 	const leftKey = creditKey(left);
 	if (knownKeys.includes(leftKey)) return false;
 	const rightKey = creditKey(right);

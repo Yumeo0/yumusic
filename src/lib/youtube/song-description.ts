@@ -62,11 +62,20 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * Whether a description for this video was already fetched this session.
+ */
+export function hasSongDescription(videoId: string): boolean {
+	return resolved.has(videoId);
+}
+
+/**
  * Fetches descriptions for the given songs and reports every enriched song
  * through `onUpdate`. Only tracks whose title parsing is ambiguous are
- * considered (see `titleNeedsDescription`) — a description adds nothing to a
- * title that already parses cleanly. `skipIds` excludes tracks that will be
- * enriched by playback anyway (the currently playing song).
+ * fetched (see `titleNeedsDescription`) — a description adds nothing to a
+ * title that already parses cleanly. Songs whose description was already
+ * fetched this session are enriched from the cache without a request, so
+ * their credits reach every list they appear in. `skipIds` excludes tracks
+ * that will be enriched by playback anyway (the currently playing song).
  *
  * Runs in the background with a small concurrency limit; returns a function
  * that cancels the remaining fetches (in-flight ones keep running and stay
@@ -82,7 +91,7 @@ export function enrichSongsWithDescriptions(
 			isVideoId(song.id) &&
 			!song.description &&
 			!skipIds?.has(song.id) &&
-			titleNeedsDescription(song),
+			(titleNeedsDescription(song) || hasSongDescription(song.id)),
 	);
 	let cancelled = false;
 	const worker = async () => {
