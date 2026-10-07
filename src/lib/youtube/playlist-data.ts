@@ -1,5 +1,6 @@
 import { YTNodes } from "youtubei.js/web";
 import type { Song } from "@/contexts/player-context";
+import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
 import { artistListOf, isAlbumId, videoIdOf } from "./youtube.utils";
 import {
@@ -102,7 +103,14 @@ export function mergePlaylistSongs(previous: Song[], fetched: Song[]): Song[] {
 	}
 	return fetched.map((song) => {
 		const candidate = byId.get(song.id)?.shift();
-		return candidate && sameSong(candidate, song) ? candidate : song;
+		if (!candidate) return song;
+		// A description-enriched entry keeps its credits across a refresh: the
+		// fresh row has no description, so reapply the previous one to it
+		// instead of losing the parsed title/artist.
+		if (!song.description && candidate.description) {
+			return applySongDescription(song, candidate.description);
+		}
+		return sameSong(candidate, song) ? candidate : song;
 	});
 }
 

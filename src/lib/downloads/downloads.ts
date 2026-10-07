@@ -10,8 +10,10 @@ import {
 	useSettings,
 } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
+import { applySongDescription } from "@/lib/utils/description";
 import { botguardService } from "@/lib/youtube/botguard-service";
 import { loadPlaylistSongs } from "@/lib/youtube/playlist-data";
+import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { fetchFunction, getSongStream } from "@/lib/youtube/youtube-client";
 
 /**
@@ -31,6 +33,8 @@ export interface DownloadEntry {
 	artist: string;
 	duration: string | null;
 	thumbnail: string | null;
+	/** Uploader description, used to refine the title/artist on playback. */
+	description: string | null;
 	ext: string;
 	size: number;
 	/** Absolute file path, loaded through the Tauri asset protocol. */
@@ -250,6 +254,18 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		const videoInfo = result.videoInfo;
 		const streamingData = videoInfo.streaming_data;
 		if (!streamingData) throw new Error("streaming data is missing");
+		// Keep the uploader description with the stored song: playback uses it
+		// to refine the parsed title/artist, and it is saved in the index.
+		const description =
+			videoInfo.basic_info.short_description?.trim() ||
+			song.description ||
+			null;
+		if (description) rememberSongDescription(song.id, description);
+		// Store the resolved credits, so the downloads list and offline
+		// playback show the same title/artist as the streamed track.
+		const enriched = description
+			? applySongDescription(song, description)
+			: song;
 		const decipher = async (url?: string) =>
 			(await result.innertube.session.player?.decipher(url)) as string;
 		const client = result.innertube.session.context.client;
@@ -348,12 +364,13 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 
 		const entry = await invoke<DownloadEntry>("download_finish", {
 			metadata: {
-				artist: song.artist,
-				duration: song.duration ?? null,
+				artist: enriched.artist,
+				description,
+				duration: enriched.duration ?? null,
 				ext,
-				id: song.id,
-				thumbnail: song.thumbnail || null,
-				title: song.title,
+				id: enriched.id,
+				thumbnail: enriched.thumbnail || null,
+				title: enriched.title,
 			},
 			token,
 		});

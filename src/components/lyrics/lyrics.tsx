@@ -163,6 +163,14 @@ export function LyricsPanel({
 				<span className="text-xs font-medium text-muted-foreground">
 					Lyrics
 				</span>
+				{active && !active.confirmed && (
+					<span
+						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+						title="Matched by title alone — may be a different version of this song"
+					>
+						Loose match
+					</span>
+				)}
 				{available.length >= 2 && (
 					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/6 p-0.5">
 						{available.map((provider) => (

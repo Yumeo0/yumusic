@@ -149,6 +149,25 @@ export function removePlaylistFromCaches(id: string) {
 	}
 }
 
+/**
+ * Replaces cached songs matched by video id, e.g. after a description has
+ * resolved a track's title/artist. Playlists without a cache entry are left
+ * alone — there is nothing to patch.
+ */
+export function patchCachedPlaylistSongs(
+	id: string,
+	updates: ReadonlyMap<string, Song>,
+) {
+	if (updates.size === 0) return;
+	const key = PLAYLIST_CACHE_PREFIX + id;
+	const cached = readCache<PlaylistView>(key);
+	if (!cached) return;
+	writeCache(key, {
+		...cached.data,
+		songs: cached.data.songs.map((song) => updates.get(song.id) ?? song),
+	});
+}
+
 const LIBRARY_CHANGED_EVENT = "yumusic:library-changed";
 
 /** Drops the cached library list so mounted and future views refetch it. */

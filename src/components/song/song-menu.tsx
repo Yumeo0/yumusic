@@ -26,10 +26,16 @@ import {
 	useDownloads,
 } from "@/lib/downloads/downloads";
 import { shareLink } from "@/lib/services/share";
-import { useSettings } from "@/lib/stores/settings";
+import { type Settings, useSettings } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
-import { displayTitle } from "@/lib/utils/title";
-import { cn } from "@/lib/utils/utils";
+import {
+	detectTitleTags,
+	displayTitle,
+	formatArtistName,
+	formatTitleParts,
+} from "@/lib/utils/title";
+import { cn, formatDuration, parseDuration } from "@/lib/utils/utils";
+import { fetchSongDescription } from "@/lib/youtube/song-description";
 import { AddToPlaylistDialog } from "./add-to-playlist-dialog";
 
 /** Copy the song's YouTube Music link, or open the native share sheet. */
@@ -49,6 +55,55 @@ async function copyText(text: string, label: string) {
 	} catch {
 		showToast(`Could not copy ${label.toLowerCase()}`);
 	}
+}
+
+/**
+ * Copies the song as JSON for bug reports. Besides the raw fields it carries
+ * what the app derives from them — the YouTube Music link, length (label and
+ * seconds), the titles it displays (current mode and original language), the
+ * title parser's output (main title, feats, credits, cover artists), tags and
+ * the formatted artist name. The uploader description is included — fetched on
+ * demand when the song wasn't enriched yet, so pasted reports carry the same
+ * data the title parser sees.
+ */
+async function copySongData(
+	song: Song,
+	settings: Settings,
+	/** Player's length in seconds, when this is the current song. */
+	knownDuration = 0,
+) {
+	const description =
+		song.description ?? (await fetchSongDescription(song.id)) ?? undefined;
+	const seconds =
+		knownDuration > 0 ? knownDuration : parseDuration(song.duration);
+	const data = {
+		...song,
+		description,
+		url: `https://music.youtube.com/watch?v=${song.id}`,
+		length: seconds > 0 ? formatDuration(seconds) : undefined,
+		lengthSeconds: seconds > 0 ? Math.round(seconds) : undefined,
+		displayTitle: displayTitle(
+			song.title,
+			settings.titleMode,
+			settings.cleanTitles,
+			song.artist,
+		),
+		displayArtist: formatArtistName(song.artist),
+		originalTitle: displayTitle(
+			song.title,
+			"original",
+			settings.cleanTitles,
+			song.artist,
+		),
+		parsedTitle: formatTitleParts(
+			song.title,
+			"original",
+			settings.cleanTitles,
+			song.artist,
+		),
+		tags: detectTitleTags(song.title),
+	};
+	await copyText(JSON.stringify(data, null, 2), "Song data");
 }
 
 function MenuItem({
@@ -95,8 +150,15 @@ export function SongContextMenu({
 	children: ReactNode;
 	className?: string;
 }) {
-	const { addToQueue, play, playNext, removeFromQueueAt, queue, currentSong } =
-		usePlayer();
+	const {
+		addToQueue,
+		play,
+		playNext,
+		removeFromQueueAt,
+		queue,
+		currentSong,
+		duration: playerDuration,
+	} = usePlayer();
 	const [settings] = useSettings();
 	const downloads = useDownloads();
 	const [playlistSong, setPlaylistSong] = useState<Song | null>(null);
@@ -248,9 +310,10 @@ export function SongContextMenu({
 											icon={Braces}
 											label="Copy song data"
 											onClick={() =>
-												void copyText(
-													JSON.stringify(song, null, 2),
-													"Song data",
+												void copySongData(
+													song,
+													settings,
+													currentSong?.id === song.id ? playerDuration : 0,
 												)
 											}
 										/>

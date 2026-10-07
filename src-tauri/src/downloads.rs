@@ -18,6 +18,10 @@ pub struct DownloadEntry {
 	pub artist: String,
 	pub duration: Option<String>,
 	pub thumbnail: Option<String>,
+	/// Uploader description, used to refine the title/artist on playback.
+	/// Older indexes have no such field.
+	#[serde(default)]
+	pub description: Option<String>,
 	pub ext: String,
 	pub size: u64,
 	/// Absolute path of the audio file, loaded through the asset protocol.
@@ -34,6 +38,8 @@ pub struct DownloadMetadata {
 	pub artist: String,
 	pub duration: Option<String>,
 	pub thumbnail: Option<String>,
+	#[serde(default)]
+	pub description: Option<String>,
 	pub ext: String,
 }
 
@@ -199,6 +205,7 @@ pub async fn download_finish(
 		artist: metadata.artist,
 		duration: metadata.duration,
 		thumbnail: metadata.thumbnail,
+		description: metadata.description,
 		ext,
 		size,
 		path: final_path.to_string_lossy().into_owned(),
@@ -305,6 +312,7 @@ mod tests {
 			artist: "Artist".to_owned(),
 			duration: Some("3:00".to_owned()),
 			thumbnail: None,
+			description: Some("Singer: Artist".to_owned()),
 			ext: "webm".to_owned(),
 			size: 1234,
 			path: format!("/nonexistent/{id}.webm"),
@@ -338,7 +346,19 @@ mod tests {
 		let loaded = read_index(&root);
 		assert_eq!(loaded.len(), 2);
 		assert_eq!(loaded[0].id, "abc");
+		assert_eq!(loaded[0].description.as_deref(), Some("Singer: Artist"));
 		assert_eq!(loaded[1].size, 1234);
+		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn legacy_entries_without_a_description_still_load() {
+		let root = test_root("legacy");
+		let legacy = r#"[{"id":"abc","title":"Song","artist":"Artist","duration":null,"thumbnail":null,"ext":"webm","size":1,"path":"/nonexistent/abc.webm","downloadedAt":1}]"#;
+		fs::write(index_path(&root), legacy).unwrap();
+		let loaded = read_index(&root);
+		assert_eq!(loaded.len(), 1);
+		assert_eq!(loaded[0].description, None);
 		let _ = fs::remove_dir_all(&root);
 	}
 

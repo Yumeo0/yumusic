@@ -20,6 +20,7 @@ import {
 } from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
+import { applySongDescription } from "@/lib/utils/description";
 import { MAX_VOLUME } from "@/lib/utils/hooks";
 import {
 	biggestThumb,
@@ -28,6 +29,7 @@ import {
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
 import { botguardService } from "@/lib/youtube/botguard-service";
+import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	fetchFunction,
@@ -45,6 +47,8 @@ export interface Song {
 	artists?: Array<{ name: string; id?: string }>;
 	thumbnail: string;
 	duration?: string;
+	/** Uploader description; its credits refine the title and artist. */
+	description?: string;
 }
 
 /**
@@ -771,7 +775,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				deckIndex,
 				fromSong,
 				localEntry,
-				nextSong,
+				// A stored file carries the description saved with the download.
+				nextSong: localEntry?.description
+					? applySongDescription(nextSong, localEntry.description)
+					: nextSong,
 				phase: "preload",
 				promote,
 				result: null,
@@ -782,7 +789,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (localEntry) {
 				// The idle deck just needs the file's metadata; the scheduler
 				// starts the fade once the window opens.
-				void mountLocalTrack(deck, nextSong, localEntry, {
+				void mountLocalTrack(deck, state.nextSong, localEntry, {
 					autoPlay: false,
 					onReady: () => updateCrossfadeRef.current(),
 				});
@@ -790,8 +797,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			}
 
 			try {
-				const result = await getSongStream(nextSong.id);
+				const result = await getSongStream(state.nextSong.id);
 				if (crossfadeRef.current !== state) return;
+				// The player response carries the uploader description; keep it
+				// and let its credits refine the title/artist before the handover.
+				const description =
+					result.videoInfo.basic_info.short_description?.trim();
+				if (description) {
+					rememberSongDescription(state.nextSong.id, description);
+					state.nextSong = applySongDescription(state.nextSong, description);
+				}
 				state.result = {
 					videoInfo: result.videoInfo,
 					innertube: result.innertube,
@@ -1028,13 +1043,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			abortCrossfade();
 			const request = ++loadRequestRef.current;
 			setIsPlaying(false);
+			// A stored file carries the description saved with the download.
+			const localEntry = getDownloadEntry(song.id);
+			if (localEntry?.description) {
+				song = applySongDescription(song, localEntry.description);
+			}
 			setCurrentSong(song);
 			setVideoInfo(null);
 			setInnertube(null);
 
 			// A stored file plays straight from disk — no stream session, and
 			// no watch-history pings (there is no playback tracker for it).
-			const localEntry = getDownloadEntry(song.id);
 			if (localEntry) {
 				const deck = decksRef.current[activeDeckRef.current];
 				const mounted = deck
@@ -1074,8 +1093,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					setInnertube(result.innertube);
 					setIsPlaying(true);
 
-					// Upgrade the artwork from the player response (see pickArtwork).
+					// Store the uploader description and apply its credits to
+					// every copy of the track on screen (player, queue, radio).
 					const basic = result.videoInfo.basic_info;
+					const description = basic.short_description?.trim();
+					if (description) {
+						rememberSongDescription(song.id, description);
+						setCurrentSong((prev) =>
+							prev && prev.id === basic.id
+								? applySongDescription(prev, description)
+								: prev,
+						);
+						setQueueState((prev) =>
+							prev.map((entry) =>
+								entry.id === basic.id
+									? applySongDescription(entry, description)
+									: entry,
+							),
+						);
+						setAutoplayTracks((prev) =>
+							prev.map((entry) =>
+								entry.id === basic.id
+									? applySongDescription(entry, description)
+									: entry,
+							),
+						);
+					}
+
+					// Upgrade the artwork from the player response (see pickArtwork).
 					const thumbnail = pickArtwork(song, basic);
 					if (thumbnail) {
 						setCurrentSong((prev) =>
