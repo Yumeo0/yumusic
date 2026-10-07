@@ -460,15 +460,28 @@ export function formatTitleParts(
 	};
 }
 
-/** Single-string variant (e.g. Discord presence); feat tail stays inline. */
+/** Remix authors credited by the title ("… (Pat B remix)"), in credit order. */
+export function remixAuthors(credits: TitleCredit[]): string[] {
+	return credits.flatMap((credit) =>
+		credit.tag === "remix" && credit.author ? [credit.author] : [],
+	);
+}
+
+/**
+ * Single-string variant (e.g. Discord presence); the feat and remix tails
+ * stay inline.
+ */
 export function displayTitle(
 	title: string,
 	mode: TitleMode,
 	clean = false,
 	artist?: string,
 ): string {
-	const { main, feats } = formatTitleParts(title, mode, clean, artist);
-	return feats.length > 0 ? `${main} (feat. ${joinArtists(feats)})` : main;
+	const { main, feats, credits } = formatTitleParts(title, mode, clean, artist);
+	let out = feats.length > 0 ? `${main} (feat. ${joinArtists(feats)})` : main;
+	const remix = remixAuthors(credits);
+	if (remix.length > 0) out += ` (${joinArtists(remix)} remix)`;
+	return out;
 }
 
 /**
@@ -851,9 +864,9 @@ function stripGluedSlashCredit(title: string): string {
 
 /* ─── Decorative tails (MV markers, tag brackets, hashtags) ───── */
 
-/** Full-width decorative bracket pairs used as emphasis/tags. */
-const DECOR_OPEN = "【『「《〈≪";
-const DECOR_CLOSE = "】』」》〉≫";
+/** Decorative bracket pairs used as emphasis/tags (full-width and ASCII). */
+const DECOR_OPEN = String.raw`【『「《〈≪\[`;
+const DECOR_CLOSE = String.raw`】』」》〉≫\]`;
 
 const HASHTAG_TAIL = /(?:\s*#\S+)+\s*$/u;
 const TAG_TAIL = new RegExp(
@@ -1057,10 +1070,13 @@ function creditFromContent(content: string): TitleCredit | null {
 			.trim()
 			.replace(/^[\s\-–—:：·・/／]+|[\s\-–—:：·・/／]+$/g, "");
 		if (!remainder || remainder.length > 60) return null;
+		// "Caine & GPF's 200BPM Donk … Remix": the possessive names the
+		// remixer, the rest is the remix's own title.
+		const possessor = remainder.match(/^(.{2,40}?)[’']s\b/u)?.[1]?.trim();
 		// "Cover/１人で" / "歌ってみた/少し演奏してみた/ときのそら/ホロライブ":
 		// keep name segments only. Marker-only remains yield no author — the
 		// generic Cover pill still shows via detectTitleTags.
-		const names = remainder
+		const names = (possessor || remainder)
 			.split(/\s*(?:[/／、,，]|\s+&\s+|&)\s*/u)
 			.map((name) => name.trim())
 			.filter((name) => name !== "" && !isMarkerEntry(name));

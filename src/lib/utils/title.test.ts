@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
 	cleanUpTitle,
 	detectTitleTags,
+	displayTitle,
 	formatArtistName,
 	formatTitleParts,
 	mergeArtistNames,
+	remixAuthors,
 } from "./title";
 
 /** Main title as cleaned by the display pipeline (original mode). */
@@ -117,6 +119,32 @@ describe("noise, credit and decoration tails", () => {
 		expect(
 			cleanUpTitle("失楽園 - Paradise Lost -『 失楽園 』MV【 #VocDuo2026 】"),
 		).toBe("失楽園 - Paradise Lost");
+	});
+
+	test("remix bracket with possessive author and ascii video tail", () => {
+		const parts = formatTitleParts(
+			"Da Tweekaz - Moana (Caine & GPF's 200BPM Donk F**k Duck Piep Kick Remix) [Official Music Video]",
+			"original",
+			true,
+			"Greazy Puzzy Fuckerz",
+		);
+		expect(parts.main).toBe("Da Tweekaz - Moana");
+		expect(parts.credits).toEqual([{ tag: "remix", author: "Caine & GPF" }]);
+	});
+
+	test("remix author renders after the title", () => {
+		const title =
+			"Da Tweekaz - Moana (Caine & GPF's 200BPM Donk F**k Duck Piep Kick Remix) [Official Music Video]";
+		const parts = formatTitleParts(
+			title,
+			"original",
+			true,
+			"Greazy Puzzy Fuckerz",
+		);
+		expect(remixAuthors(parts.credits)).toEqual(["Caine & GPF"]);
+		expect(displayTitle(title, "original", true, "Greazy Puzzy Fuckerz")).toBe(
+			"Da Tweekaz - Moana (Caine & GPF remix)",
+		);
 	});
 
 	test("slash inside a name is not treated as credit", () => {

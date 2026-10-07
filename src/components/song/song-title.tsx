@@ -1,5 +1,7 @@
 import {
 	detectTitleTags,
+	joinArtists,
+	remixAuthors,
 	type TitleTag,
 	useFormatTitle,
 } from "@/lib/utils/title";
@@ -17,12 +19,11 @@ const TAG_LABELS: Record<TitleTag, string> = {
 
 /**
  * Song title with the "feat. A, B & C" tail split off (it is rendered in the
- * artist row by <ArtistLinks>), plus small pills for covers, remixes and
- * edits. Author-carrying credits ("(Pat B remix)", "[TOZA Edit]", "(cover
- * by …)") are pulled out of the title into their pill; generic keyword pills
- * only appear when the cleanup removed the marker from the title itself, so
- * "flos (Remix ver.)" isn't tagged while "… (Cover Version)" shows a Cover
- * pill.
+ * artist row by <ArtistLinks>) and the remixer as a muted "X remix" tail
+ * after the title — a remix never gets a pill of its own. Pills remain for
+ * covers and edits, showing their author when the credit carries one;
+ * generic keyword pills only appear when the cleanup removed the marker from
+ * the title itself, so "… (Cover Version)" shows a Cover pill.
  */
 export function SongTitle({
 	title,
@@ -33,6 +34,7 @@ export function SongTitle({
 }) {
 	const formatTitle = useFormatTitle();
 	const { main, credits } = formatTitle(title, artist);
+	const remix = joinArtists(remixAuthors(credits));
 	const generic = detectTitleTags(title).filter(
 		(tag) =>
 			!credits.some((credit) => credit.tag === tag) &&
@@ -41,11 +43,13 @@ export function SongTitle({
 	const pills: TitleTag[] = [
 		...credits.map((credit) => credit.tag),
 		...generic,
-	];
-	if (pills.length === 0) return <>{main}</>;
+	].filter((tag) => tag !== "remix");
+	if (pills.length === 0 && !remix) return <>{main}</>;
 	return (
 		<>
-			{main}{" "}
+			{main}
+			{remix && <span className="text-muted-foreground"> {remix} remix</span>}
+			{pills.length > 0 && " "}
 			{pills.map((pill, i) => (
 				<span
 					className="mr-0.5 inline-block rounded border border-foreground/15 px-1 align-middle font-mono text-[9px] leading-3.5 tracking-wider text-muted-foreground uppercase"
