@@ -130,6 +130,20 @@ describe("noise, credit and decoration tails", () => {
 		expect(parts.feats).toEqual(["A", "B"]);
 	});
 
+	test("ft. tail splits off and reveals trailing video-marker noise", () => {
+		const parts = formatTitleParts(
+			"HOP HOP (Music Video) - ft. Laffey II",
+			"original",
+			true,
+			"Azur Lane Official - Yostar",
+		);
+		expect(parts.main).toBe("HOP HOP");
+		expect(parts.feats).toEqual(["Laffey II"]);
+		expect(formatTitleParts("Song (ft. A)", "original", true).feats).toEqual([
+			"A",
+		]);
+	});
+
 	test("artist - song with video marker cleans both", () => {
 		expect(main("YOASOBI - アイドル (Official Video)", "YOASOBI")).toBe(
 			"アイドル",

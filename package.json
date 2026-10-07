@@ -7,7 +7,6 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"android": "bun scripts/android-dev.ts",
 		"release": "bun scripts/release.ts",
 		"build": "tsc --noEmit && vite build",
 		"preview": "vite preview",

@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# The Rust side resolves the app's Kotlin classes and some of their methods
+# by name over JNI (e.g. RustWebView.getCookies when the sign-in webview
+# loads). R8 cannot see those lookups, so without this rule release builds
+# rename/strip them and the app crashes with NoSuchMethodError.
+-keep class dev.yumeo.yumusic.** { *; }

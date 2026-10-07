@@ -202,7 +202,10 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 
 	return (
 		<button
-			className={cn("group w-44 shrink-0 text-left", isArtist && "text-center")}
+			className={cn(
+				"group w-32 shrink-0 text-left md:w-44",
+				isArtist && "text-center",
+			)}
 			onClick={onClick}
 			type="button"
 		>
@@ -345,9 +348,9 @@ export function HomeFeed() {
 									// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
 									key={`s-${row}-${i}`}
 								>
-									<div className="shimmer-surface aspect-square w-44 rounded-xl" />
-									<div className="shimmer-surface mt-2.5 h-4 w-32 rounded-md" />
-									<div className="shimmer-surface mt-2 h-3 w-24 rounded-md" />
+									<div className="shimmer-surface aspect-square w-32 rounded-xl md:w-44" />
+									<div className="shimmer-surface mt-2.5 h-4 w-24 rounded-md md:w-32" />
+									<div className="shimmer-surface mt-2 h-3 w-16 rounded-md md:w-24" />
 								</div>
 							))}
 						</div>

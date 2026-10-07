@@ -176,11 +176,11 @@ export function mergeArtistNames(
 }
 
 const FEAT_BRACKETED =
-	/\s*[（[(]\s*feat(?:uring)?\.?\s*([^）\])]+)[）\])]\s*$/iu;
-const FEAT_TAIL = /(?<!\p{L})feat(?:uring)?\.?\s*(.+)$/iu;
+	/\s*[（[(]\s*(?:feat(?:uring)?|ft)\.?\s*([^）\])]+)[）\])]\s*$/iu;
+const FEAT_TAIL = /(?<!\p{L})(?:feat(?:uring)?|ft)\.?\s*(.+)$/iu;
 
 /**
- * Splits a "feat. A, B & C" / "(feat. A, B & C)" tail off the title.
+ * Splits a "feat. A, B & C" / "ft. A" / "(feat. A, B & C)" tail off the title.
  */
 export function splitFeaturedTitle(title: string): {
 	main: string;
@@ -318,8 +318,16 @@ export function formatTitleParts(
 		title = stripArtistPrefix(title, artist, credits);
 		title = stripArtistSuffix(title, artist);
 	}
-	const { main, feats } = splitFeaturedTitle(title);
-	return { main: applyMode(main, mode), feats, credits, coverArtists };
+	// Re-clean the main title: noise hidden behind the feat tail
+	// ("HOP HOP (Music Video) - ft. X") only becomes a tail after the split.
+	const split = splitFeaturedTitle(title);
+	const main = clean ? cleanUpTitle(split.main) : split.main;
+	return {
+		main: applyMode(main, mode),
+		feats: split.feats,
+		credits,
+		coverArtists,
+	};
 }
 
 /** Single-string variant (e.g. Discord presence); feat tail stays inline. */
