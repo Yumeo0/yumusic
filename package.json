@@ -26,7 +26,7 @@
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"googlevideo": "github:LuanRT/googlevideo#44e360aa1be47298d51535454f899501cf29ce0c",
-		"lucide-react": "^1.51.0",
+		"lucide-react": "^1.52.0",
 		"lyric-romanizer": "^0.3.1",
 		"react": "^19.3.0",
 		"react-dom": "^19.3.0",
@@ -48,10 +48,10 @@
 		"@types/node": "^26.6.4",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
-		"@vitejs/plugin-react": "^6.1.1",
+		"@vitejs/plugin-react": "^6.1.2",
 		"tailwindcss": "^4.3.3",
 		"typescript": "~7.0.2",
-		"vite": "^8.3.2"
+		"vite": "^8.3.3"
 	},
 	"trustedDependencies": [
 		"googlevideo"

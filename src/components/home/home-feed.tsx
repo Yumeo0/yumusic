@@ -236,7 +236,7 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 					<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
 						<svg
 							aria-hidden
-							className="size-4 translate-x-[1px] fill-current"
+							className="size-4 translate-x-px fill-current"
 							viewBox="0 0 24 24"
 						>
 							<path d="M8 5.14v13.72c0 1.23 1.34 1.98 2.39 1.36l11.02-6.86a1.6 1.6 0 0 0 0-2.72L10.39 3.78C9.34 3.16 8 3.91 8 5.14Z" />
@@ -386,7 +386,7 @@ export function HomeFeed() {
 						<h2 className="text-sm font-medium text-muted-foreground">
 							{section.title}
 						</h2>
-						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+						<span className="h-px flex-1 bg-linear-to-r from-border to-transparent" />
 					</div>
 					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
 						{section.items.map((item, i) => {

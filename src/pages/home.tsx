@@ -33,7 +33,7 @@ export default function HomePage() {
 				<div className="group relative flex items-center">
 					<Search className="pointer-events-none absolute left-4.5 size-5 text-muted-foreground transition-colors group-focus-within:text-foreground" />
 					<input
-						className="h-13 w-full rounded-xl border border-foreground/12 bg-foreground/[0.04] pr-4 pl-12 text-base outline-none transition-colors duration-200 placeholder:text-muted-foreground/70 focus:border-primary/50 focus:bg-foreground/[0.06]"
+						className="h-13 w-full rounded-xl border border-foreground/12 bg-foreground/4 pr-4 pl-12 text-base outline-none transition-colors duration-200 placeholder:text-muted-foreground/70 focus:border-primary/50 focus:bg-foreground/6"
 						onChange={(e) => setSearchQuery(e.target.value)}
 						placeholder="Search songs, artists, videos…"
 						type="text"
