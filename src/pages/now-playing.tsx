@@ -917,6 +917,7 @@ function NowPlayingLyrics({
 			onSeekTime={onSeekTime}
 			songId={song.id}
 			title={song.title}
+			videoRef={videoElementRef}
 		/>
 	);
 }

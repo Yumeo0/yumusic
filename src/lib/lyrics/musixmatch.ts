@@ -1,5 +1,5 @@
 import { fetchFunction } from "../youtube/youtube-client";
-import type { LrcLine } from "./lrclib";
+import type { LrcLine, LrcWord } from "./lrclib";
 
 /**
  * Musixmatch provider using the mobile-app API (`apic-appmobile`), which —
@@ -167,22 +167,40 @@ function parseLrc(body: string): LrcLine[] {
 	return lines.sort((a, b) => a.time - b.time);
 }
 
-/** Collapses Musixmatch word-level richsync JSON into one entry per line. */
-function parseRichsync(body: string): LrcLine[] {
+/**
+ * Parses Musixmatch's `richsync` JSON — line text plus per-word timings
+ * (`o` is the word's offset in seconds within the line) — into timed lines
+ * carrying their words for karaoke highlighting.
+ */
+export function parseRichsync(body: string): LrcLine[] {
 	try {
 		const parsed = JSON.parse(body) as Array<{
 			ts?: string;
-			l?: Array<{ c?: string }>;
+			l?: Array<{ c?: string; o?: number }>;
 		}>;
 		if (!Array.isArray(parsed)) return [];
 		return parsed
-			.map((line) => ({
-				time: Number.parseFloat(line.ts ?? ""),
-				text: (line.l ?? [])
-					.map((word) => word.c ?? "")
-					.join("")
-					.trim(),
-			}))
+			.map((line) => {
+				const start = Number.parseFloat(line.ts ?? "");
+				const parts = line.l ?? [];
+				const words: LrcWord[] = [];
+				for (const word of parts) {
+					const text = word?.c ?? "";
+					if (!text) continue;
+					const offset =
+						typeof word.o === "number" && Number.isFinite(word.o) ? word.o : 0;
+					words.push({ time: start + offset, text });
+				}
+				const parsedLine: LrcLine = {
+					time: start,
+					text: parts
+						.map((word) => word.c ?? "")
+						.join("")
+						.trim(),
+				};
+				if (words.length > 0) parsedLine.words = words;
+				return parsedLine;
+			})
 			.filter((line) => line.text && Number.isFinite(line.time))
 			.sort((a, b) => a.time - b.time);
 	} catch {
@@ -273,18 +291,20 @@ export async function fetchMusixmatchSynced(
 			return null;
 		}
 
+		// Prefer the word-synced richsync when the app got one; the line-level
+		// subtitles remain the fallback.
+		const richsyncBody =
+			calls["track.richsync.get"]?.message?.body?.richsync?.richsync_body;
+		if (richsyncBody) {
+			const lines = parseRichsync(richsyncBody);
+			if (lines.length > 0) return lines;
+		}
+
 		const subtitleBody =
 			calls["track.subtitles.get"]?.message?.body?.subtitle_list?.[0]?.subtitle
 				?.subtitle_body;
 		if (subtitleBody) {
 			const lines = parseMxmSubtitle(subtitleBody);
-			if (lines.length > 0) return lines;
-		}
-
-		const richsyncBody =
-			calls["track.richsync.get"]?.message?.body?.richsync?.richsync_body;
-		if (richsyncBody) {
-			const lines = parseRichsync(richsyncBody);
 			if (lines.length > 0) return lines;
 		}
 

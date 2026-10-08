@@ -278,8 +278,9 @@ export default function SettingsPage({
 						<div className="min-w-0">
 							<p className="text-sm font-medium">Prefer synced lyrics</p>
 							<p className="mt-0.5 text-xs text-muted-foreground">
-								If the top provider only offers plain lyrics, use the
-								highest-priority provider that has time-aligned lyrics instead.
+								Word-synced lyrics are preferred over line-synced ones. If the
+								top provider only offers plain lyrics, use the highest-priority
+								provider that has time-aligned lyrics instead.
 							</p>
 						</div>
 						<button

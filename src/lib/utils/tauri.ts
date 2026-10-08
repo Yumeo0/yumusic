@@ -26,18 +26,22 @@ export const USER_AGENT = `YuMusic v${packageJson.version} (https://git.yumeo.de
 /**
  * Routes a request through the app's Tauri proxy. The proxy forwards the given
  * headers upstream from Rust — the only way to send headers the WebView
- * forbids from scripts, notably `User-Agent`. Outside Tauri the request goes
- * out directly (browser dev, where such headers cannot be set at all).
+ * forbids from scripts, notably `User-Agent`. The request method and abort
+ * signal pass through too, so bodyless POSTs work (request bodies are not
+ * supported). Outside Tauri the request goes out directly (browser dev, where
+ * such headers cannot be set at all).
  */
 export function proxiedFetch(
 	url: string,
 	headers: Record<string, string> = {},
+	init: Pick<RequestInit, "method" | "signal"> = {},
 ): Promise<Response> {
 	const target = new URL(url);
-	if (!isTauri()) return fetch(url, { headers });
+	if (!isTauri()) return fetch(url, { ...init, headers });
 	const proxied = new URL(`${PROXY_ORIGIN}${target.pathname}${target.search}`);
 	proxied.searchParams.set("__host", target.host);
 	return fetch(proxied, {
+		...init,
 		headers: { "X-Proxy-Headers": JSON.stringify(headers) },
 	});
 }

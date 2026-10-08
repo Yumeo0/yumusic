@@ -1,9 +1,28 @@
 import { AudioLines, MicVocal } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchSyncedLyrics, type LrcLine } from "@/lib/lyrics/lrclib";
 import {
+	type CSSProperties,
+	memo,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
+import {
+	fetchSyncedLyrics,
+	type LrcLine,
+	type LrcWord,
+} from "@/lib/lyrics/lrclib";
+import { fetchLrcRedLyrics } from "@/lib/lyrics/lrcred";
+import {
+	LYRICS_KIND_LABELS,
 	LYRICS_PROVIDERS,
+	type LyricsKind,
 	type LyricsProviderId,
+	lyricsKind,
+	pickProvider,
 } from "@/lib/lyrics/lyrics-providers";
 import { fetchMusixmatchSynced } from "@/lib/lyrics/musixmatch";
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
@@ -21,6 +40,8 @@ interface LyricsPanelProps {
 	/** Current playback time in seconds */
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
+	/** The playing media element — sampled per frame for the word fills. */
+	videoRef?: RefObject<HTMLVideoElement | null> | null;
 	className?: string;
 }
 
@@ -48,14 +69,22 @@ const PENDING_SOURCES: LyricsSources = {
 	musixmatch: undefined,
 	vocadb: undefined,
 	youtube: undefined,
+	lrcred: undefined,
+};
+
+/** Tooltips for the sync-kind badge in the header. */
+const KIND_TITLES: Record<LyricsKind, string> = {
+	plain: "No timing — shown as plain text",
+	synced: "Timed line by line",
+	word: "Every word is timed, karaoke-style",
 };
 
 /**
- * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch, and
- * YouTube Music's timed lyrics) plus static YouTube Music and VocaDB lyrics in
- * parallel, lets the user switch between the providers, optionally shows
- * romanization under each line, and falls back to a quiet placeholder when
- * nothing is available.
+ * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch,
+ * lrc.red, and YouTube Music's timed lyrics) plus static YouTube Music and
+ * VocaDB lyrics in parallel, lets the user switch between the providers,
+ * optionally shows romanization under each line, and falls back to a quiet
+ * placeholder when nothing is available.
  */
 export function LyricsPanel({
 	songId,
@@ -64,6 +93,7 @@ export function LyricsPanel({
 	duration,
 	currentTime,
 	onSeekTime,
+	videoRef,
 	className,
 }: LyricsPanelProps) {
 	const [sources, setSources] = useState<LyricsSources>(PENDING_SOURCES);
@@ -111,6 +141,11 @@ export function LyricsPanel({
 		settle("vocadb", fetchVocadbLyrics(title, artist, duration), (vocadb) =>
 			vocadb ? { synced: null, plain: vocadb, confirmed: true } : null,
 		);
+		settle(
+			"lrcred",
+			fetchLrcRedLyrics(title, artist, duration),
+			(lrcred) => lrcred,
+		);
 
 		return () => {
 			cancelled = true;
@@ -123,23 +158,12 @@ export function LyricsPanel({
 
 	// Pick the provider (respecting manual picks) among the sources that have
 	// arrived so far; re-runs as more land, so a better match that resolves
-	// later takes over. A confirmed match beats a loose one even when the
-	// loose provider has higher priority.
+	// later takes over. A confirmed match beats a loose one, word-synced
+	// lyrics beat line-synced ones; ties keep the priority order.
 	useEffect(() => {
-		const availableIds = order.filter((id) => sources[id]);
-		if (availableIds.length === 0) return;
-		if (manualView.current && availableIds.includes(view)) return;
-		// A provider with a confirmed synced match always wins over a loose
-		// match; otherwise "prefer synced" picks the first provider with synced
-		// lines, then falls back to priority order.
-		const confirmedSynced = availableIds.find(
-			(id) => sources[id]?.synced && sources[id]?.confirmed,
-		);
-		const chosen = preferSynced
-			? (confirmedSynced ??
-				availableIds.find((id) => sources[id]?.synced) ??
-				availableIds[0])
-			: (confirmedSynced ?? availableIds[0]);
+		const chosen = pickProvider(order, sources, preferSynced);
+		if (chosen === null) return;
+		if (manualView.current && sources[view]) return;
 		setView(chosen);
 	}, [sources, order, preferSynced, view]);
 
@@ -154,6 +178,7 @@ export function LyricsPanel({
 	// none) until the selection effect catches up.
 	const active = sources[view] ?? null;
 	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
+	const kind = active ? lyricsKind(active) : null;
 
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -163,6 +188,14 @@ export function LyricsPanel({
 				<span className="text-xs font-medium text-muted-foreground">
 					Lyrics
 				</span>
+				{kind && (
+					<span
+						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+						title={KIND_TITLES[kind]}
+					>
+						{LYRICS_KIND_LABELS[kind]}
+					</span>
+				)}
 				{active && !active.confirmed && (
 					<span
 						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
@@ -202,6 +235,7 @@ export function LyricsPanel({
 					lines={active.synced}
 					onSeekTime={onSeekTime}
 					romanize={romanize}
+					videoRef={videoRef}
 				/>
 			)}
 			{active && !active.synced && active.plain && (
@@ -222,12 +256,14 @@ function SyncedLines({
 	onSeekTime,
 	romanize,
 	attribution,
+	videoRef,
 }: {
 	lines: LrcLine[];
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	romanize: boolean;
 	attribution?: string;
+	videoRef?: RefObject<HTMLVideoElement | null> | null;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	// Visual anchor per line index: the line itself, or the dots row that
@@ -393,6 +429,24 @@ function SyncedLines({
 						);
 					}
 					const line = lines[seg.index];
+					if (line.words && line.words.length > 0) {
+						return (
+							<WordSyncLyricLine
+								activeTime={seg.index === activeIndex ? currentTime : undefined}
+								endTime={lines[seg.index + 1]?.time}
+								index={seg.index}
+								isActive={seg.index === activeIndex}
+								key={`lrc-${seg.index}`}
+								onRef={setAnchor}
+								onSeekTime={onSeekTime}
+								romanize={showRomaji}
+								romanizedText={romanized?.get(seg.index)}
+								time={line.time}
+								videoRef={videoRef}
+								words={line.words}
+							/>
+						);
+					}
 					return (
 						<LyricLine
 							index={seg.index}
@@ -469,6 +523,174 @@ const LyricLine = memo(function LyricLine({
 			{romanize && romanizedText && (
 				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
 					{romanizedText}
+				</span>
+			)}
+		</p>
+	);
+});
+
+/**
+ * The word line's playback position at display rate. The panel's
+ * `currentTime` prop only updates on `timeupdate` (~4Hz), which steps the
+ * fill; while the line is active the media element is sampled once per
+ * animation frame instead, so re-renders stay inside the line component.
+ * Returns undefined while the line is inactive (all words stay dim).
+ */
+function useLivePosition(
+	videoRef: RefObject<HTMLVideoElement | null> | null | undefined,
+	activeTime: number | undefined,
+): number | undefined {
+	const [position, setPosition] = useState(0);
+	const active = activeTime !== undefined;
+
+	useEffect(() => {
+		if (!active || !videoRef) return;
+		const videoEl = videoRef.current;
+		if (videoEl) setPosition(videoEl.currentTime);
+		let frame = requestAnimationFrame(function tick() {
+			const media = videoRef.current;
+			if (media) setPosition(media.currentTime);
+			frame = requestAnimationFrame(tick);
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [active, videoRef]);
+
+	// Without a media element, fall back to the prop clock.
+	if (!active) return undefined;
+	return videoRef ? position : activeTime;
+}
+
+/** Last-resort fill window for a word with no end and no following word. */
+const WORD_TAIL_SEC = 0.6;
+
+/** Karaoke fill of a span: lit up to `progress`, with a glow on the fill. */
+function fillStyle(progress: number, dim: number): CSSProperties {
+	return {
+		backgroundImage: `linear-gradient(to right, var(--foreground) ${
+			progress * 100
+		}%, color-mix(in oklab, var(--foreground) ${dim}%, transparent) ${
+			progress * 100
+		}%)`,
+		backgroundClip: "text",
+		WebkitBackgroundClip: "text",
+		color: "transparent",
+		WebkitTextFillColor: "transparent",
+		filter:
+			"drop-shadow(0 0 12px color-mix(in oklab, var(--primary) 35%, transparent))",
+	};
+}
+
+/**
+ * A word-synced lyric line: every word fills with the highlight from left to
+ * right while it is being sung (start → end time), upcoming words stay dim,
+ * finished words are lit — and the romanized reading below fills along with
+ * it. Only the active line receives a live position, so the other (often
+ * many) word lines keep the memoized rendering and don't re-render on every
+ * clock tick.
+ */
+const WordSyncLyricLine = memo(function WordSyncLyricLine({
+	words,
+	activeTime,
+	endTime,
+	time,
+	index,
+	isActive,
+	romanize,
+	romanizedText,
+	onSeekTime,
+	onRef,
+	videoRef,
+}: {
+	words: LrcWord[];
+	/** Playback position while this line is active; undefined otherwise. */
+	activeTime?: number;
+	/** The next line's start, bounding the fill of a final word without end. */
+	endTime?: number;
+	time: number;
+	index: number;
+	isActive: boolean;
+	romanize: boolean;
+	romanizedText?: string;
+	onSeekTime: (seconds: number) => void;
+	onRef: (index: number, el: HTMLParagraphElement | null) => void;
+	videoRef?: RefObject<HTMLVideoElement | null> | null;
+}) {
+	const position = useLivePosition(videoRef, activeTime);
+
+	// A word without an end lasts until the next one starts — the line's end
+	// for the final word, or a short tail when even that is unknown.
+	const ends = words.map(
+		(word, wi) =>
+			word.end ?? words[wi + 1]?.time ?? endTime ?? word.time + WORD_TAIL_SEC,
+	);
+
+	// The reading fills with the same timing, weighted by each chunk's text
+	// length: the fraction of the romaji that is sung at the current position.
+	let readingProgress = 0;
+	if (position !== undefined) {
+		const total = words.reduce((sum, word) => sum + word.text.trim().length, 0);
+		if (total > 0) {
+			let sung = 0;
+			for (let i = 0; i < words.length; i++) {
+				sung +=
+					wordProgress(words[i].time, ends[i], position) *
+					words[i].text.trim().length;
+			}
+			readingProgress = sung / total;
+		}
+	}
+
+	return (
+		<p
+			className={cn(
+				"cursor-pointer py-3 text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
+				!isActive && "text-foreground/25 hover:text-foreground/60",
+			)}
+			onClick={() => onSeekTime(time)}
+			ref={(el) => onRef(index, el)}
+		>
+			{words.map((word, wi) => {
+				const progress =
+					position === undefined
+						? 0
+						: wordProgress(word.time, ends[wi], position);
+				return (
+					<span
+						className={cn(
+							"relative inline",
+							progress <= 0 && "text-foreground/25",
+						)}
+						// biome-ignore lint/suspicious/noArrayIndexKey: positional word, times may repeat on synthetic syllabus
+						key={`w-${wi}`}
+						onClick={(event) => {
+							event.stopPropagation();
+							onSeekTime(word.time);
+						}}
+						style={progress > 0 ? fillStyle(progress, 25) : undefined}
+					>
+						{word.text}
+					</span>
+				);
+			})}
+			{romanize && romanizedText && (
+				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
+					{position === undefined
+						? romanizedText
+						: readingSegments(romanizedText, readingProgress).map((segment) =>
+								segment.sung === undefined ? (
+									segment.text
+								) : (
+									<span
+										className="relative inline"
+										key={`r-${segment.start}`}
+										style={
+											segment.sung > 0 ? fillStyle(segment.sung, 45) : undefined
+										}
+									>
+										{segment.text}
+									</span>
+								),
+							)}
 				</span>
 			)}
 		</p>
