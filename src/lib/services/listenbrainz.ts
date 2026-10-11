@@ -201,6 +201,30 @@ async function findArtistName(artistName: string): Promise<string | null> {
 const VERSION_QUALIFIER =
 	/\b(?:instrumental|off\s?vocal|offvocal|karaoke|acapella|a\s?cappella|backing\s?track|tv\s?size|tv\s?ver(?:sion)?|game\s?ver(?:sion)?|movie\s?ver(?:sion)?|short\s?ver(?:sion)?|remix|cover)\b/i;
 
+/**
+ * Whether the recording's artist credit names one of the wanted artists.
+ * Wanted names are split ("A & B", "A, B") and compared folded, so spacing
+ * and punctuation differences ("加猫 のか" / "加猫のか") don't matter, and a
+ * credit carrying decoration ("Apricot (Froot)") still matches "Apricot".
+ */
+function creditsArtist(rec: MbRecording, names: string[]): boolean {
+	const wanted = names
+		.flatMap((name) => name.split(/\s*[、，,]\s*|\s*&\s+/u))
+		.map(foldName)
+		.filter((name) => name !== "");
+	if (wanted.length === 0) return false;
+	return (rec["artist-credit"] ?? []).some((credit) => {
+		const credited = foldName(credit.name ?? credit.artist?.name ?? "");
+		if (credited === "") return false;
+		return wanted.some(
+			(name) =>
+				credited === name ||
+				(name.length >= 3 && credited.includes(name)) ||
+				(credited.length >= 3 && name.includes(credited)),
+		);
+	});
+}
+
 function recordingScore(
 	rec: MbRecording,
 	trackName: string,
@@ -228,10 +252,11 @@ function recordingScore(
  * MusicBrainz' canonical name first, and the recording is then searched with
  * that name (falling back to the given one). Results are cached in
  * localStorage (keyed by artist+track) so each track is looked up once.
- * Candidate selection scores title equality, qualifier penalties
- * (instrumental/karaoke/…), duration proximity and featured-artist credit
- * matches — the raw search ranking regularly prefers "… Instrumental"
- * entries.
+ * Candidate selection requires the recording to credit the track's artist —
+ * the title search also returns other artists' recordings, and an artist
+ * that isn't on MusicBrainz must yield no match — then scores title
+ * equality, qualifier penalties (instrumental/karaoke/…), featured-artist
+ * matches and duration proximity.
  */
 export async function findRecording(
 	trackName: string,
@@ -255,15 +280,37 @@ export async function findRecording(
 	try {
 		// The recording's artist credit only matches MusicBrainz' canonical
 		// name, so the queue credit is resolved first; the raw name stays as
-		// a fallback when the resolved one finds nothing.
-		const resolved = await findArtistName(artistName).catch(() => null);
+		// a fallback when the resolved one finds nothing. A failed lookup
+		// (MusicBrainz busy) is not a "no match": the miss must not be
+		// remembered, so the scrobble's own lookup retries.
+		let artistLookupFailed = false;
+		const resolved = await findArtistName(artistName).catch((error) => {
+			artistLookupFailed = true;
+			console.warn("[listenbrainz] artist lookup failed:", error);
+			return null;
+		});
 		const artistNames =
 			resolved && foldName(resolved) !== foldName(artistName)
 				? [resolved, artistName]
 				: [artistName];
+		/** Remembers a genuine "no match"; a half-finished lookup stays retryable. */
+		const rememberMiss = () => {
+			if (artistLookupFailed) return;
+			failedLookups.add(key);
+			memoryCache.set(key, null);
+		};
+		// Fielded queries are precise, but a title the catalog doesn't carry
+		// verbatim ("❥ バッドエンドメーカー") finds nothing; the unfielded
+		// "title artist" form is what the MusicBrainz search page itself
+		// uses, and extra tokens don't stop it from matching.
+		const queries = [
+			...artistNames.map(
+				(name) => `recording:"${trackName}" AND artist:"${name}"`,
+			),
+			`${trackName} ${artistNames[0]}`,
+		];
 		let recordings: MbRecording[] = [];
-		for (const name of artistNames) {
-			const query = `recording:"${trackName}" AND artist:"${name}"`;
+		for (const query of queries) {
 			const data = await mbRequest<{ recordings?: MbRecording[] }>(
 				`${MB_API}/recording?query=${encodeURIComponent(query)}&fmt=json&limit=5`,
 			);
@@ -271,13 +318,23 @@ export async function findRecording(
 			if (recordings.length > 0) break;
 		}
 		if (recordings.length === 0) {
-			failedLookups.add(key);
-			memoryCache.set(key, null);
+			rememberMiss();
 			return null;
 		}
-		let pick = recordings[0];
+		// A recording is only a match when it credits the track's artist: the
+		// title search also returns other artists' recordings of the same
+		// title (the original, another cover), and when the artist isn't on
+		// MusicBrainz at all, linking one of those attaches the wrong MBID.
+		const candidates = recordings.filter((rec) =>
+			creditsArtist(rec, artistNames),
+		);
+		if (candidates.length === 0) {
+			rememberMiss();
+			return null;
+		}
+		let pick = candidates[0];
 		let bestScore = -Number.MAX_SAFE_INTEGER;
-		for (const rec of recordings) {
+		for (const rec of candidates) {
 			let score = recordingScore(rec, trackName, durationSec);
 			if (featsLower.length > 0) {
 				const creditNames = (rec["artist-credit"] ?? [])
@@ -306,8 +363,10 @@ export async function findRecording(
 		writeCache(MBID_CACHE_KEY, cache);
 		return mbids;
 	} catch (error) {
+		// MusicBrainz busy/failed: resolve to null for this call, but don't
+		// remember a miss — the scrobble's own lookup, or the next play,
+		// retries instead of staying unlinked for the whole session.
 		console.warn("[listenbrainz] MusicBrainz lookup failed:", error);
-		failedLookups.add(key);
 		return null;
 	}
 }

@@ -7,6 +7,7 @@ import {
 	formatTitleParts,
 	mergeArtistNames,
 	remixAuthors,
+	scrobbleTitle,
 } from "./title";
 
 /** Main title as cleaned by the display pipeline (original mode). */
@@ -210,6 +211,20 @@ describe("noise, credit and decoration tails", () => {
 		).toEqual(["ななかぐら"]);
 	});
 
+	test("a role-bracketed vocal credit survives an artist-name collision", () => {
+		// The vocalist is also the track's artist here: "(Vocal.湊あくあ)" is
+		// a feature credit, not an artist suffix to strip.
+		const parts = formatTitleParts(
+			"Take Over (Vocal.湊あくあ)[Dyako Remix]",
+			"original",
+			true,
+			"湊あくあ",
+		);
+		expect(parts.main).toBe("Take Over");
+		expect(parts.feats).toEqual(["湊あくあ"]);
+		expect(parts.credits).toEqual([{ tag: "remix", author: "Dyako" }]);
+	});
+
 	test("artist - song with video marker cleans both", () => {
 		expect(main("YOASOBI - アイドル (Official Video)", "YOASOBI")).toBe(
 			"アイドル",
@@ -293,6 +308,8 @@ describe("artist name romaji tails", () => {
 		expect(formatArtistName("Elira Pendora 【NIJISANJI EN】")).toBe(
 			"Elira Pendora",
 		);
+		// Also parenthesized tags on Latin names ("Apricot (Froot)").
+		expect(formatArtistName("Apricot (Froot)")).toBe("Apricot");
 		// Role credits in brackets are kept: they name a person.
 		expect(formatArtistName("Ellen Joe (CV:Shion Wakayama)")).toBe(
 			"Ellen Joe (CV:Shion Wakayama)",
@@ -659,5 +676,33 @@ describe("VTuber cover title shapes", () => {
 		expect(mergeArtistNames([{ name: "Muto" }], parts.coverArtists)).toEqual([
 			{ name: "むﾄ", id: undefined },
 		]);
+	});
+});
+
+describe("scrobble titles", () => {
+	test("the submitted track name is the parsed title, credits kept", () => {
+		// The raw oEmbed/uploader title of a cover upload must not go out as-is.
+		expect(scrobbleTitle("p.h. / 猫又おかゆ(cover)", "Nekomata Okayu")).toEqual(
+			{
+				main: "p.h.",
+				feats: [],
+				trackName: "p.h.",
+			},
+		);
+		expect(
+			scrobbleTitle("モードク - Moodoku", "Sakamata Chloe").trackName,
+		).toBe("モードク");
+		expect(scrobbleTitle("Song (feat. A & B)", "Artist").trackName).toBe(
+			"Song (feat. A & B)",
+		);
+	});
+
+	test("cleaning applies regardless of the display preference", () => {
+		expect(scrobbleTitle("美人局 covered by 藍月なくる").trackName).toBe(
+			"美人局",
+		);
+		expect(
+			scrobbleTitle("【MV】怪物／KAIBUTSU (Cover)【FUWAMOCO】").trackName,
+		).toBe("怪物");
 	});
 });

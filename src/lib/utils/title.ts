@@ -520,6 +520,27 @@ export function cleanSearchTitle(title: string, artist?: string): string {
 	return formatTitleParts(title, "original", true, artist).main;
 }
 
+/**
+ * Scrobble metadata for a track: the title parsed like the display pipeline —
+ * always cleaned, since catalog metadata doesn't follow the display
+ * preference — with any feature credits kept in the submitted track name.
+ */
+export function scrobbleTitle(
+	title: string,
+	artist?: string,
+): { main: string; feats: string[]; trackName: string } {
+	const parts = formatTitleParts(title, "original", true, artist);
+	const main = parts.main || title.trim();
+	return {
+		main,
+		feats: parts.feats,
+		trackName:
+			parts.feats.length > 0
+				? `${main} (feat. ${joinArtists(parts.feats)})`
+				: main,
+	};
+}
+
 function escapeRegExp(text: string): string {
 	return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -626,6 +647,12 @@ function dropGroupTags(name: string): string {
 }
 
 /**
+ * A trailing credit segment carrying a role — "(Vocal.湊あくあ)",
+ * "(歌：ななかぐら)", "(feat. X)" — rather than the track's artist.
+ */
+const CREDIT_ROLE = /^(?:vocal|vo|feat(?:uring)?|ft|歌|cv)\s*[.:：・]/iu;
+
+/**
  * Strips a trailing artist credit that mirrors the track's artist —
  * "もぐもぐYUMMY！ - 猫又おかゆ" or "… (Nerissa Ravencroft)" when the
  * artist is 猫又おかゆ / Nerissa Ravencroft. Only strips when a non-empty
@@ -650,11 +677,13 @@ export function stripArtistSuffix(title: string, artist?: string): string {
 		);
 	};
 
-	// "(<artist>)" / "【<artist>】" tail.
+	// "(<artist>)" / "【<artist>】" tail. A role credit stays: when the
+	// vocalist is also the track's artist, "(Vocal.湊あくあ)" is the feature,
+	// not a duplicate artist suffix.
 	const bracket = title.match(
 		/\s*([（(【[])([^（）()【】[\]]{1,80})([）)】\]])\s*$/u,
 	);
-	if (bracket && matches(bracket[2])) {
+	if (bracket && !CREDIT_ROLE.test(bracket[2]) && matches(bracket[2])) {
 		const head = title.slice(0, bracket.index ?? 0).trim();
 		if (head) return head;
 	}
@@ -662,7 +691,7 @@ export function stripArtistSuffix(title: string, artist?: string): string {
 	const separated = title.match(
 		/\s*(?:[-–—]\s*|\s*\/\s*|／)([^-–—／/]{1,80})$/u,
 	);
-	if (separated && matches(separated[1])) {
+	if (separated && !CREDIT_ROLE.test(separated[1]) && matches(separated[1])) {
 		const head = title.slice(0, separated.index ?? 0).trim();
 		if (head) return head;
 	}

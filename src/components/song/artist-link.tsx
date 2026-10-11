@@ -1,9 +1,9 @@
+import { Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { closeNowPlaying } from "@/lib/player/player-ui";
 import {
 	formatArtistName,
-	joinArtists,
 	mergeArtistNames,
 	useFormatTitle,
 } from "@/lib/utils/title";
@@ -90,6 +90,13 @@ export function ArtistLinks({
 		for (const part of artist.name.split(/[,，&]/)) known.add(foldName(part));
 	}
 	const extras = feats.filter((feat) => !known.has(foldName(feat)));
+	/** Channel id recorded for a credited name, when the description linked one. */
+	const creditId = (name: string): string | undefined => {
+		const wanted = foldName(formatArtistName(name));
+		return song.creditIds?.find(
+			(credit) => foldName(formatArtistName(credit.name)) === wanted,
+		)?.id;
+	};
 
 	return (
 		<>
@@ -105,7 +112,16 @@ export function ArtistLinks({
 			{extras.length > 0 && (
 				<span className="text-muted-foreground/70">
 					{artists.length > 0 ? " " : ""}
-					feat. {joinArtists(extras)}
+					feat.{" "}
+					{extras.map((feat, index) => (
+						<Fragment
+							// biome-ignore lint/suspicious/noArrayIndexKey: featured names may repeat
+							key={`${feat}-${index}`}
+						>
+							{index === 0 ? "" : index === extras.length - 1 ? " & " : ", "}
+							<ArtistLink id={creditId(feat)} name={feat} />
+						</Fragment>
+					))}
 				</span>
 			)}
 		</>

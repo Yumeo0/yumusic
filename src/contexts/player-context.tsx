@@ -63,6 +63,12 @@ export interface Song {
 	 * pair. Undefined means "not checked" (normal parsing).
 	 */
 	upload?: boolean;
+	/**
+	 * Channel ids for credited names from the description ("Vocal：湊あくあ"
+	 * next to a channel link), so featured performers link their artist page
+	 * like the primary artist does.
+	 */
+	creditIds?: Array<{ name: string; id: string }>;
 }
 
 /**
@@ -1225,7 +1231,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		if (!currentSong || !isPlaying) return;
 		const videoEl = videoElementRef.current;
-		listeningSession.start(currentSong.id, videoEl?.duration ?? 0);
+		// The element's length can still be unknown right after mounting
+		// (MediaSource metadata); the track's listed length fills in so the
+		// scrobble threshold is right from the start.
+		const elementDuration =
+			videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+		const listedDuration =
+			parseDuration(currentSong.duration) ||
+			videoInfo?.basic_info.duration ||
+			0;
+		listeningSession.start(currentSong.id, elementDuration || listedDuration);
 		const timer = window.setInterval(() => {
 			if (videoEl && Number.isFinite(videoEl.duration)) {
 				listeningSession.setDuration(videoEl.duration);
@@ -1233,7 +1248,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			listeningSession.tick(1);
 		}, 1000);
 		return () => window.clearInterval(timer);
-	}, [currentSong, isPlaying]);
+	}, [currentSong, isPlaying, videoInfo]);
 
 	// Register the play in YouTube's watch history — the same ping the web
 	// player sends — once the track has passed the shared grace period, so

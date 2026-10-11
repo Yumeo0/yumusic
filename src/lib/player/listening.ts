@@ -9,7 +9,13 @@ export const LISTEN_GRACE_SECONDS = 5;
 
 /** Seconds listened before a track scrobbles: half of it, clamped to 30s–4min. */
 export function scrobbleThresholdSeconds(duration: number): number {
-	return Math.max(30, Math.min(duration > 0 ? duration * 0.5 : 240, 240));
+	return Math.max(
+		30,
+		Math.min(
+			Number.isFinite(duration) && duration > 0 ? duration * 0.5 : 240,
+			240,
+		),
+	);
 }
 
 export type ListeningEvent = "established" | "scrobbled";
@@ -27,14 +33,18 @@ class ListeningSession {
 	/**
 	 * Starts tracking `songId`, resetting progress for a new track. Repeated
 	 * calls for the same track keep the accumulated time (e.g. after a pause).
+	 * The duration is ignored when non-finite: a media element reports NaN or
+	 * Infinity until its metadata (MediaSource) is ready, and letting that in
+	 * would pin the scrobble threshold to its 4-minute fallback forever.
 	 */
 	start(songId: string, duration = 0) {
+		const seconds = Number.isFinite(duration) ? duration : 0;
 		if (this.#songId === songId) {
-			if (duration > 0) this.#duration = duration;
+			if (seconds > 0) this.#duration = seconds;
 			return;
 		}
 		this.#songId = songId;
-		this.#duration = duration;
+		this.#duration = seconds;
 		this.#elapsed = 0;
 		this.#established = false;
 		this.#scrobbled = false;
@@ -42,7 +52,8 @@ class ListeningSession {
 
 	/** Records the track duration once known (drives the scrobble threshold). */
 	setDuration(duration: number) {
-		if (Number.isFinite(duration) && duration > this.#duration) {
+		if (!Number.isFinite(duration) || duration <= 0) return;
+		if (!Number.isFinite(this.#duration) || duration > this.#duration) {
 			this.#duration = duration;
 		}
 	}

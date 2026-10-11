@@ -212,9 +212,19 @@ function splitArtistNames(raw: string): string[] {
 		.slice(0, 8);
 }
 
+/**
+ * Bracketed role credits — "(Vocal.湊あくあ)", "(歌：ななかぐら)", "(feat. X)".
+ * A name inside one is a feature/vocalist credit, not the track's artist.
+ */
+const ROLE_BRACKET =
+	/[(（【『「]\s*(?:vocal|vo|feat(?:uring)?|ft|歌|cv)\s*[.:：・][^)）】』」]*[)）】』」]/giu;
+
 /** Whether the title credits the parsed artist ("Nameless - Song"). */
 function artistMentionedInTitle(title: string, artist: string): boolean {
-	const foldedTitle = title.toLowerCase();
+	// Role-bracketed mentions ("(Vocal.X)") credit the vocalist as a feature,
+	// not the track's artist, so they don't count as a title credit.
+	const plain = title.replace(ROLE_BRACKET, " ");
+	const foldedTitle = plain.toLowerCase();
 	const titleWords = new Set(
 		foldedTitle.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
 	);
@@ -391,6 +401,18 @@ export function applySongDescription(
 	const credits = parseDescriptionCredits(full, song.title);
 	if (!credits) return next;
 	if (credits.title) next.title = credits.title;
+	// The description's credited names keep their channel links on the song,
+	// so a featured performer renders as a link even without the artist role.
+	const linked = linkedArtistIds(song, full);
+	if (linked.size > 0) {
+		const creditIds = [...(next.creditIds ?? [])];
+		for (const [name, id] of linked) {
+			if (!creditIds.some((credit) => sameArtistName(credit.name, name))) {
+				creditIds.push({ name, id });
+			}
+		}
+		next.creditIds = creditIds;
+	}
 	if (credits.artist) {
 		const names = splitArtistNames(credits.artist);
 		// Several performers ("Vocal: A × B") are the track's artists even
@@ -408,7 +430,6 @@ export function applySongDescription(
 				: song.artist
 					? [{ name: song.artist, id: song.artistId }]
 					: [];
-			const linked = linkedArtistIds(song, full);
 			const artists = names.map((name): { name: string; id?: string } => {
 				const match = existing.find((artist) =>
 					sameArtistName(artist.name, name),

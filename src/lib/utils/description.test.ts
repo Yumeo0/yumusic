@@ -170,6 +170,41 @@ describe("applySongDescription", () => {
 		expect(updated.artistId).toBe("UCPeJaqP6WgxUVDcpYkXZKMQ");
 	});
 
+	test("a role-bracketed vocalist does not replace the artist", () => {
+		// "Take Over (Vocal.湊あくあ)[Dyako Remix]": the title's role bracket
+		// names the vocalist as a feature, so the description's "Vocal：" line
+		// must not replace the uploader (YTM's artist credit) with her.
+		const updated = applySongDescription(
+			song({
+				title: "Take Over (Vocal.湊あくあ)[Dyako Remix]",
+				artist: "Dyako",
+				artistId: "UC4umAudusgKeIjT2_aTBm5Q",
+				artists: [{ name: "Dyako", id: "UC4umAudusgKeIjT2_aTBm5Q" }],
+			}),
+			"🌈MIX：Dyako\nhttps://twitter.com/hyunsooxi\n\n🌈Vocal：湊あくあ\nhttps://youtube.com/channel/UC1opHUrw8rvnsadT-iGp7Cg",
+		);
+		expect(updated.artist).toBe("Dyako");
+		expect(updated.artistId).toBe("UC4umAudusgKeIjT2_aTBm5Q");
+	});
+
+	test("keeps the description's channel links for featured credits", () => {
+		// The vocalist stays a feature, but her linked channel must ride
+		// along so the "feat. …" credit renders as a link too.
+		const updated = applySongDescription(
+			song({
+				title: "Take Over (Vocal.湊あくあ)[Dyako Remix]",
+				artist: "Dyako",
+				artistId: "UC4umAudusgKeIjT2_aTBm5Q",
+				artists: [{ name: "Dyako", id: "UC4umAudusgKeIjT2_aTBm5Q" }],
+			}),
+			"🌈Vocal：湊あくあ\nhttps://youtube.com/channel/UC1opHUrw8rvnsadT-iGp7Cg",
+		);
+		expect(updated.artist).toBe("Dyako");
+		expect(updated.creditIds).toEqual([
+			{ name: "湊あくあ", id: "UC1opHUrw8rvnsadT-iGp7Cg" },
+		]);
+	});
+
 	test("adopts a multi-name vocal credit the title doesn't mention", () => {
 		const updated = applySongDescription(
 			song({

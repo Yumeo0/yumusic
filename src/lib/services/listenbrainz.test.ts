@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { findRecording } from "./listenbrainz";
+import { findRecording, submitListen } from "./listenbrainz";
 
 const store = new Map<string, string>();
 
@@ -108,9 +108,118 @@ describe("findRecording artist resolution", () => {
 
 		const mbids = await findRecording("モードク", "Nobody At All", 168);
 		expect(mbids).toBeNull();
-		// The unmatched artist search must not redirect the recording query.
-		expect(requests).toHaveLength(2);
+		// The unmatched artist search must not redirect the recording query;
+		// after the fielded attempt the unfielded "title artist" fallback runs.
+		expect(requests).toHaveLength(3);
 		expect(requests[1]).toContain('artist:"Nobody At All"');
+		expect(requests[2]).toContain("query=モードク Nobody At All");
+	});
+
+	test("a title the catalog doesn't carry finds its recording unfielded", async () => {
+		// "❥ バッドエンドメーカー" is stored as "バッドエンドメーカー": the
+		// fielded query misses, the unfielded page search finds the cover.
+		stubMusicBrainz((url) => {
+			if (url.pathname.endsWith("/artist")) {
+				return { artists: [{ score: 100, name: "月乃" }] };
+			}
+			const query = url.searchParams.get("query") ?? "";
+			if (query.startsWith("recording:")) return { recordings: [] };
+			return {
+				recordings: [
+					{
+						id: "45903c96-d764-4c7f-8db7-ea82b98070e6",
+						title: "バッドエンドメーカー",
+						length: 195000,
+						"artist-credit": [
+							{ name: "月乃", artist: { id: "tsukino-id", name: "月乃" } },
+						],
+						releases: [],
+					},
+				],
+			};
+		});
+
+		const mbids = await findRecording("❥ バッドエンドメーカー", "月乃", 195);
+		expect(mbids?.recording).toBe("45903c96-d764-4c7f-8db7-ea82b98070e6");
+		expect(requests[2]).toContain("query=❥ バッドエンドメーカー 月乃");
+	});
+
+	test("an artist that isn't on MusicBrainz matches nothing", async () => {
+		// The title search returns the original by another artist; without an
+		// artist match nothing may be linked.
+		stubMusicBrainz((url) => {
+			if (url.pathname.endsWith("/artist")) return { artists: [] };
+			return {
+				recordings: [
+					{
+						id: "original-id",
+						title: "ときめきちゅるぴかきゅるるらった",
+						length: 159000,
+						"artist-credit": [
+							{
+								name: "p-katsu",
+								artist: { id: "p-katsu-id", name: "p-katsu" },
+							},
+						],
+						releases: [],
+					},
+				],
+			};
+		});
+
+		const mbids = await findRecording(
+			"ときめきちゅるぴかきゅるるらった",
+			"加猫 のか",
+			159,
+		);
+		expect(mbids).toBeNull();
+	});
+
+	test("a busy MusicBrainz is retried on the next lookup", async () => {
+		let recordingCalls = 0;
+		stubMusicBrainz((url) => {
+			if (url.pathname.endsWith("/artist")) {
+				return {
+					artists: [
+						{
+							score: 100,
+							name: "ナナヲアカリ",
+							aliases: [{ name: "NANAOAKARI" }],
+						},
+					],
+				};
+			}
+			recordingCalls += 1;
+			// The lookup and its single retry are busy; later ones get through.
+			if (recordingCalls <= 2) return new Response("busy", { status: 503 });
+			return {
+				recordings: [
+					{
+						id: "36a03f56-8ef5-47f0-a293-225bd52b40c0",
+						title: "キュートフィクション",
+						length: 220000,
+						"artist-credit": [
+							{
+								name: "ナナヲアカリ",
+								artist: { id: "nanawo-id", name: "ナナヲアカリ" },
+							},
+						],
+						releases: [],
+					},
+				],
+			};
+		});
+
+		// The busy attempt must not poison the session: the next call retries.
+		expect(
+			await findRecording("キュートフィクション", "NANAOAKARI", 221),
+		).toBeNull();
+		const mbids = await findRecording(
+			"キュートフィクション",
+			"NANAOAKARI",
+			221,
+		);
+		expect(mbids?.recording).toBe("36a03f56-8ef5-47f0-a293-225bd52b40c0");
 	});
 
 	test("matches a name whose words are in a different order", async () => {
@@ -179,5 +288,59 @@ describe("findRecording artist resolution", () => {
 		const mbids = await findRecording("唱", "Ado", 200);
 		expect(mbids?.recording).toBe("11111111-2222-3333-4444-555555555555");
 		expect(artistCalls).toBe(2);
+	});
+});
+
+describe("submitListen", () => {
+	/** Captures the next ListenBrainz request body. */
+	function stubListenBrainz(): { request: () => unknown } {
+		let captured: unknown = null;
+		const stub = async (_input: RequestInfo | URL, init?: RequestInit) => {
+			captured = JSON.parse(String(init?.body ?? "null"));
+			return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+		};
+		globalThis.fetch = Object.assign(stub, {
+			preconnect: () => undefined,
+		}) as typeof fetch;
+		return { request: () => captured };
+	}
+
+	test("a scrobble is a single listen carrying listened_at", async () => {
+		const { request } = stubListenBrainz();
+		await submitListen({
+			token: "tok",
+			trackName: "Victory Over Truth",
+			artistName: "Fox Stevenson",
+			album: "Songs",
+			listenedAt: 1_700_000_000,
+		});
+		const body = request() as {
+			listen_type: string;
+			payload: Array<Record<string, unknown>>;
+		};
+		expect(body.listen_type).toBe("single");
+		expect(body.payload[0]).toMatchObject({
+			listened_at: 1_700_000_000,
+			track_metadata: {
+				track_name: "Victory Over Truth",
+				artist_name: "Fox Stevenson",
+				release_name: "Songs",
+			},
+		});
+	});
+
+	test("playing now submits without listened_at", async () => {
+		const { request } = stubListenBrainz();
+		await submitListen({
+			token: "tok",
+			trackName: "Victory Over Truth",
+			artistName: "Fox Stevenson",
+		});
+		const body = request() as {
+			listen_type: string;
+			payload: Array<Record<string, unknown>>;
+		};
+		expect(body.listen_type).toBe("playing_now");
+		expect(body.payload[0]).not.toHaveProperty("listened_at");
 	});
 });

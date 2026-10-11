@@ -62,8 +62,7 @@ import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
 	displayTitle,
 	formatArtistName,
-	formatTitleParts,
-	joinArtists,
+	scrobbleTitle,
 } from "./lib/utils/title";
 import { cn } from "./lib/utils/utils";
 import {
@@ -361,9 +360,12 @@ function ListenBrainzSync() {
 	const startedAtRef = useRef<number | null>(null);
 
 	/**
-	 * Scrobble metadata in the track's original language: the title without
-	 * its translated part and the primary artist credit (both from the
-	 * original-language queue fetch when available).
+	 * Scrobble metadata in the track's original language: the uploader's
+	 * locale-independent title parsed like the display pipeline — always
+	 * cleaned, since catalog metadata doesn't follow the display preference —
+	 * and the primary artist credit, without channel/group decorations
+	 * ("Apricot (Froot)" → "Apricot") so the submission and the MusicBrainz
+	 * lookup use the artist's catalog name.
 	 */
 	const scrobbleMetadata = useCallback((): {
 		trackName: string;
@@ -371,25 +373,20 @@ function ListenBrainzSync() {
 		mainTitle: string;
 		feats: string[];
 	} => {
-		const parts = formatTitleParts(
-			currentSong?.title ?? "",
-			"original",
-			settings.cleanTitles,
+		const { main, feats, trackName } = scrobbleTitle(
+			meta?.originalTitle ?? currentSong?.title ?? "",
 			currentSong?.artist,
 		);
-		const trackName =
-			meta?.originalTitle ??
-			(parts.feats.length > 0
-				? `${parts.main} (feat. ${joinArtists(parts.feats)})`
-				: parts.main);
-		const artistName = meta?.originalArtist ?? currentSong?.artist ?? "";
+		const artistName = formatArtistName(
+			meta?.originalArtist ?? currentSong?.artist ?? "",
+		);
 		return {
 			trackName,
 			artistName,
-			mainTitle: parts.main,
-			feats: parts.feats,
+			mainTitle: main,
+			feats,
 		};
-	}, [currentSong, meta, settings.cleanTitles]);
+	}, [currentSong, meta]);
 	const scrobbleMetadataRef = useRef(scrobbleMetadata);
 	scrobbleMetadataRef.current = scrobbleMetadata;
 
