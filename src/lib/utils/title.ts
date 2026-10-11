@@ -459,6 +459,9 @@ export function formatTitleParts(
 } {
 	let credits: TitleCredit[] = [];
 	let coverArtists: string[] = [];
+	// Cover evidence is read from the raw title: credit extraction removes
+	// the very marker ("【covered by …】") the flavor-bracket strip keys on.
+	const coverContext = COVER_CONTEXT.test(title);
 	if (clean) {
 		coverArtists = extractCoverArtists(title, artist);
 		const extracted = extractCredits(title);
@@ -468,14 +471,14 @@ export function formatTitleParts(
 		// before the cover cleanup would mistake the song for the performer
 		// ("Song - Performer (cover)" shape).
 		title = stripArtistPrefix(title, artist, credits);
-		title = cleanUpTitle(title);
+		title = cleanUpTitle(title, coverContext);
 		title = stripArtistPrefix(title, artist, credits);
 		title = stripArtistSuffix(title, artist);
 	}
 	// Re-clean the main title: noise hidden behind the feat tail
 	// ("HOP HOP (Music Video) - ft. X") only becomes a tail after the split.
 	const split = splitFeaturedTitle(title);
-	const main = clean ? cleanUpTitle(split.main) : split.main;
+	const main = clean ? cleanUpTitle(split.main, coverContext) : split.main;
 	return {
 		main: applyMode(main, mode),
 		feats: split.feats,
@@ -522,9 +525,10 @@ function escapeRegExp(text: string): string {
 }
 
 /**
- * Strips leading artist credits from the title. Two conventions:
- * "<artist> - Song" (e.g. "Chenomio -フィクションです。feat.重音テト") and
- * comma/ampersand chains — "Dutch Disorder, Cryogenic, & Unlocked, Heroine".
+ * Strips leading artist credits from the title. Three conventions:
+ * "<artist> - Song" (e.g. "Chenomio -フィクションです。feat.重音テト"),
+ * comma/ampersand chains — "Dutch Disorder, Cryogenic, & Unlocked, Heroine" —
+ * and a leading name tag in 【】 ("【ちくわ】人生マタタビ" for ちくわちゃんねる).
  * Chain segments must be the primary artist or a name found inside the
  * extracted credit authors, so unknown text (the actual song) ends the strip.
  */
@@ -543,10 +547,26 @@ export function stripArtistPrefix(
 	if (decorated && decorated !== primary) candidates.push(decorated);
 	const lead = primary.split(/\s+/)[0];
 	if (lead && lead !== primary && lead.length >= 3) candidates.push(lead);
+
+	// "【<artist>】Song": a channel tags its own uploads with its name
+	// ("ちくわちゃんねる" → "【ちくわ】人生マタタビ"). Only a bracket whose
+	// content is one of the name candidates is an artist tag.
+	let out = title;
+	const tag = out.match(/^\s*【([^【】]{1,40}?)】\s*/u);
+	const tagContent = tag?.[1].trim();
+	if (
+		tag &&
+		tagContent &&
+		candidates.some((name) => foldName(name) === foldName(tagContent))
+	) {
+		const next = out.slice(tag[0].length).trim();
+		if (next !== "") out = next;
+	}
+
 	const matched = candidates.find((name) =>
-		title.toLowerCase().startsWith(name.toLowerCase()),
+		out.toLowerCase().startsWith(name.toLowerCase()),
 	);
-	if (!matched) return title;
+	if (!matched) return out;
 
 	// Names that may lead the title as credits: the primary artist plus
 	// every name found inside the extracted credit authors.
@@ -562,7 +582,6 @@ export function stripArtistPrefix(
 		}
 	}
 
-	let out = title;
 	// "<artist> - Song" convention.
 	out = out
 		.replace(new RegExp(`^${escapeRegExp(matched)}\\s*[-–—]\\s*`, "i"), "")
@@ -816,9 +835,14 @@ const COVER_CONTEXT = /[歌弾踊叩]ってみた|\bcover(?:ed|s)?\b|カバー/i
  * Strips known noise from the end of a title; never empties it. The rules
  * are applied to a fixpoint so patterns revealed by an earlier peel (e.g.
  * "(Cover)" after a trailing 【channel】 bracket) are also removed.
+ * `coverContext` can be supplied by the caller when the cover evidence was
+ * already extracted from the title ("【covered by …】"), so leading flavor
+ * brackets are still recognized as video tags.
  */
-export function cleanUpTitle(title: string): string {
-	const coverContext = COVER_CONTEXT.test(title);
+export function cleanUpTitle(
+	title: string,
+	coverContext = COVER_CONTEXT.test(title),
+): string {
 	let out = title;
 	for (;;) {
 		const before = out;
@@ -907,7 +931,18 @@ function stripGluedSlashCredit(title: string): string {
 const DECOR_OPEN = String.raw`【『「《〈≪\[`;
 const DECOR_CLOSE = String.raw`】』」》〉≫\]`;
 
-const HASHTAG_TAIL = /(?:\s*#\S+)+\s*$/u;
+/**
+ * Trailing hashtag run, e.g. "Song #tag". The tag body stops at brackets:
+ * Japanese titles have no spaces, so a greedy "\S+" would swallow the rest
+ * of the title through a bracket ("【#tag】Song" → "【").
+ */
+const HASHTAG_TAIL = new RegExp(
+	String.raw`(?:\s*#[^\s#` +
+		DECOR_OPEN +
+		DECOR_CLOSE +
+		String.raw`(){}]+)+\s*$`,
+	"u",
+);
 const TAG_TAIL = new RegExp(
 	String.raw`\s*[` +
 		DECOR_OPEN +
@@ -1006,20 +1041,35 @@ function stripDecorations(title: string, coverContext = false): string {
 	return out.replace(SEPARATOR_TAIL, "").trimEnd();
 }
 
-/** Settings-bound title formatter for plain-string display sites. */
-export function useDisplayTitle(): (title: string) => string {
+/**
+ * Settings-bound title formatter for plain-string display sites. `keepTitle`
+ * is for uploader videos, whose raw "Original - Translation"-shaped title is
+ * shown whole — the title mode doesn't apply to them.
+ */
+export function useDisplayTitle(): (
+	title: string,
+	keepTitle?: boolean,
+) => string {
 	const [settings] = useSettings();
 	return useCallback(
-		(title: string) =>
-			displayTitle(title, settings.titleMode, settings.cleanTitles),
+		(title: string, keepTitle = false) =>
+			displayTitle(
+				title,
+				keepTitle ? "both" : settings.titleMode,
+				settings.cleanTitles,
+			),
 		[settings.cleanTitles, settings.titleMode],
 	);
 }
 
-/** Settings-bound variant that keeps feats and credits separate. */
+/**
+ * Settings-bound variant that keeps feats and credits separate; `keepTitle`
+ * behaves as in `useDisplayTitle`.
+ */
 export function useFormatTitle(): (
 	title: string,
 	artist?: string,
+	keepTitle?: boolean,
 ) => {
 	main: string;
 	feats: string[];
@@ -1028,8 +1078,13 @@ export function useFormatTitle(): (
 } {
 	const [settings] = useSettings();
 	return useCallback(
-		(title: string, artist?: string) =>
-			formatTitleParts(title, settings.titleMode, settings.cleanTitles, artist),
+		(title: string, artist?: string, keepTitle = false) =>
+			formatTitleParts(
+				title,
+				keepTitle ? "both" : settings.titleMode,
+				settings.cleanTitles,
+				artist,
+			),
 		[settings.cleanTitles, settings.titleMode],
 	);
 }

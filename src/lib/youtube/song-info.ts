@@ -63,6 +63,8 @@ export async function getSongPreview(
 			hiResThumb(biggestThumb(basic?.thumbnail)?.url) ||
 			`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
 		duration: basic?.duration ? formatDuration(basic.duration) : undefined,
+		// No release behind the video: its title is the uploader's own string.
+		upload: meta ? !meta.album : undefined,
 	};
 	return {
 		// applySongDescription stores the text itself, so leave it off above.

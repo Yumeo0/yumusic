@@ -3,14 +3,17 @@ import {
 	applySongDescription,
 	titleNeedsDescription,
 } from "@/lib/utils/description";
+import { formatTitleParts, splitDualTitle } from "@/lib/utils/title";
 import { isVideoId } from "./youtube.utils";
-import { getYoutubeClient } from "./youtube-client";
+import { getTrackMeta, getYoutubeClient } from "./youtube-client";
 
 /**
- * Video descriptions, fetched from the player metadata and used to resolve
- * song titles and artists (see `applySongDescription`). Descriptions fetched
- * this session are cached by video id, so a song played after being enriched
- * — or the same song in another playlist — never fetches twice.
+ * Background song enrichment for list rows. Video descriptions resolve song
+ * titles and artists (see `applySongDescription`), and uploader-video
+ * detection keeps a reupload's raw title out of the dual-title parser.
+ * Descriptions fetched this session are cached by video id, so a song played
+ * after being enriched — or the same song in another playlist — never fetches
+ * twice.
  */
 const resolved = new Map<string, string>();
 const inFlight = new Map<string, Promise<string | null>>();
@@ -102,6 +105,53 @@ export function enrichSongsWithDescriptions(
 			if (cancelled || !description) continue;
 			const updated = applySongDescription(song, description);
 			if (updated !== song) onUpdate(updated);
+			await delay(REQUEST_GAP_MS);
+		}
+	};
+	void Promise.all(Array.from({ length: CONCURRENCY }, worker));
+	return () => {
+		cancelled = true;
+	};
+}
+
+/**
+ * Whether a list row could still be an uploader video: its title reads as an
+ * original/translation pair (the raw title and the parsed display differ),
+ * and no verdict has been recorded yet. Only those rows are worth checking —
+ * the flag changes nothing for any other title.
+ */
+export function needsUploadCheck(song: Song): boolean {
+	if (song.upload !== undefined || !song.title) return false;
+	if (splitDualTitle(song.title)) return true;
+	return (
+		splitDualTitle(formatTitleParts(song.title, "both", true).main) !== null
+	);
+}
+
+/**
+ * Marks list rows as uploader videos when their track metadata has no release
+ * (album) behind it — such titles are the uploader's own string and are shown
+ * as-is (see the `upload` field on `Song`). Runs in the background with the
+ * same politeness as the description prefetch; `titleNeedsDescription` and
+ * this check are mutually exclusive, so the two pipelines never race over one
+ * song.
+ */
+export function enrichSongsWithUploads(
+	songs: Song[],
+	onUpdate: (song: Song) => void,
+): () => void {
+	const queue = songs.filter(
+		(song) => isVideoId(song.id) && needsUploadCheck(song),
+	);
+	let cancelled = false;
+	const worker = async () => {
+		while (!cancelled) {
+			const song = queue.shift();
+			if (!song) return;
+			const meta = await getTrackMeta(song.id);
+			if (!cancelled && meta && !meta.album) {
+				onUpdate({ ...song, upload: true });
+			}
 			await delay(REQUEST_GAP_MS);
 		}
 	};

@@ -60,7 +60,6 @@ import { useSettings } from "./lib/stores/settings";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
-	cleanSearchTitle,
 	displayTitle,
 	formatArtistName,
 	formatTitleParts,
@@ -96,7 +95,8 @@ function DiscordPresenceSync() {
 	const artist = currentSong?.artist ?? "";
 	const title = displayTitle(
 		currentSong?.title ?? "",
-		settings.titleMode,
+		// Uploader videos keep their raw title (no original/translation split).
+		currentSong?.upload ? "both" : settings.titleMode,
 		settings.cleanTitles,
 		artist,
 	);
@@ -285,7 +285,8 @@ function MediaSessionSync() {
 	const title = currentSong
 		? displayTitle(
 				currentSong.title,
-				settings.titleMode,
+				// Uploader videos keep their raw title.
+				currentSong.upload ? "both" : settings.titleMode,
 				settings.cleanTitles,
 				currentSong.artist,
 			)
@@ -439,10 +440,7 @@ function ListenBrainzSync() {
 				// cache for the scrobble. Submits without MBIDs if lookup fails.
 				const submit = async () => {
 					const mbids = await findRecording(
-						cleanSearchTitle(
-							meta?.originalTitle ?? names.mainTitle,
-							names.artistName,
-						),
+						names.mainTitle,
 						names.artistName,
 						duration,
 						names.feats,
@@ -464,10 +462,7 @@ function ListenBrainzSync() {
 			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
 			const submit = async () => {
 				const mbids = await findRecording(
-					cleanSearchTitle(
-						meta?.originalTitle ?? names.mainTitle,
-						names.artistName,
-					),
+					names.mainTitle,
 					names.artistName,
 					duration,
 					names.feats,

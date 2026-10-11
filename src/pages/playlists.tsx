@@ -70,7 +70,10 @@ import {
 	mergePlaylistSongs,
 	type RowFallback,
 } from "@/lib/youtube/playlist-data";
-import { enrichSongsWithDescriptions } from "@/lib/youtube/song-description";
+import {
+	enrichSongsWithDescriptions,
+	enrichSongsWithUploads,
+} from "@/lib/youtube/song-description";
 import { isAlbumId } from "@/lib/youtube/youtube.utils";
 import {
 	getAlbum,
@@ -138,11 +141,14 @@ export function PlaylistDetails() {
 		);
 	}, []);
 
-	// ── Description prefetch ─────────────────────────────────────
+	// ── Background enrichment ────────────────────────────────────
 	// Uploader descriptions carry the real song credits ("Singer: X /
 	// Song: Y"); they resolve in the background, update the rendered rows and
 	// are patched into the playlist cache so the next visit skips the fetch.
-	const enrichCancelRef = useRef<(() => void) | null>(null);
+	// Uploader-video detection runs alongside it: reuploads (no release) keep
+	// their raw titles, which the rows must know about.
+	const descriptionCancelRef = useRef<(() => void) | null>(null);
+	const uploadCancelRef = useRef<(() => void) | null>(null);
 	const pendingSongsRef = useRef(new Map<string, Song>());
 	const flushTimerRef = useRef<number | null>(null);
 
@@ -154,42 +160,53 @@ export function PlaylistDetails() {
 		pending.clear();
 	}, [id]);
 
-	const startDescriptionEnrichment = useCallback(
+	const applyEnrichedSong = useCallback(
+		(updated: Song) => {
+			setPlaylist((prev) =>
+				prev && prev.id === id
+					? {
+							...prev,
+							songs: prev.songs.map((song) =>
+								song.id === updated.id ? updated : song,
+							),
+						}
+					: prev,
+			);
+			// Cache writes are batched: one localStorage write per song
+			// would re-serialize the whole playlist on every arrival.
+			pendingSongsRef.current.set(updated.id, updated);
+			if (flushTimerRef.current === null) {
+				flushTimerRef.current = window.setTimeout(flushEnrichedSongs, 1500);
+			}
+		},
+		[id, flushEnrichedSongs],
+	);
+
+	const startEnrichment = useCallback(
 		(songs: Song[]) => {
-			enrichCancelRef.current?.();
-			enrichCancelRef.current = enrichSongsWithDescriptions(
+			descriptionCancelRef.current?.();
+			descriptionCancelRef.current = enrichSongsWithDescriptions(
 				songs,
-				(updated) => {
-					setPlaylist((prev) =>
-						prev && prev.id === id
-							? {
-									...prev,
-									songs: prev.songs.map((song) =>
-										song.id === updated.id ? updated : song,
-									),
-								}
-							: prev,
-					);
-					// Cache writes are batched: one localStorage write per song
-					// would re-serialize the whole playlist on every arrival.
-					pendingSongsRef.current.set(updated.id, updated);
-					if (flushTimerRef.current === null) {
-						flushTimerRef.current = window.setTimeout(flushEnrichedSongs, 1500);
-					}
-				},
+				applyEnrichedSong,
 				// Whatever is playing gets its description from the player
 				// response; prefetching it here would be a duplicate request.
 				playingId ? new Set([playingId]) : undefined,
 			);
+			uploadCancelRef.current?.();
+			uploadCancelRef.current = enrichSongsWithUploads(
+				songs,
+				applyEnrichedSong,
+			);
 		},
-		[id, flushEnrichedSongs, playingId],
+		[applyEnrichedSong, playingId],
 	);
 
 	// Leaving the playlist (or switching to another one) stops the prefetch
 	// and flushes whatever resolved so far into the cache.
 	useEffect(() => {
 		return () => {
-			enrichCancelRef.current?.();
+			descriptionCancelRef.current?.();
+			uploadCancelRef.current?.();
 			if (flushTimerRef.current !== null) {
 				window.clearTimeout(flushTimerRef.current);
 				flushTimerRef.current = null;
@@ -212,7 +229,7 @@ export function PlaylistDetails() {
 			setPlaylist({ ...cached.data, id });
 			setLoading(false);
 			syncDownloadedPlaylist(id, cached.data.title, cached.data.songs);
-			startDescriptionEnrichment(cached.data.songs);
+			startEnrichment(cached.data.songs);
 			return;
 		}
 
@@ -305,7 +322,7 @@ export function PlaylistDetails() {
 
 			// Resolve real titles/artists from uploader descriptions in the
 			// background (updates the rendered list and the cache).
-			startDescriptionEnrichment(view.songs);
+			startEnrichment(view.songs);
 			// A kept-downloaded playlist picks up newly added songs here.
 			syncDownloadedPlaylist(id, view.title, view.songs);
 			// Never downgrade a complete cache to a partial one: when the
@@ -910,7 +927,11 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 								isCurrent && "text-primary",
 							)}
 						>
-							<SongTitle artist={song.artist} title={song.title} />
+							<SongTitle
+								artist={song.artist}
+								keepTitle={song.upload}
+								title={song.title}
+							/>
 						</h3>
 						<p className="truncate text-xs text-muted-foreground">
 							<ArtistLinks song={song} />

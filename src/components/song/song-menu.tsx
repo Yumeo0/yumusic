@@ -67,6 +67,9 @@ async function copySongData(
 		song.description ?? (await fetchSongDescription(song.id)) ?? undefined;
 	const seconds =
 		knownDuration > 0 ? knownDuration : parseDuration(song.duration);
+	// Uploader videos keep their raw title: no dual-language parsing applies.
+	const mode = song.upload ? "both" : settings.titleMode;
+	const originalMode = song.upload ? "both" : "original";
 	const data = {
 		...song,
 		description,
@@ -75,20 +78,20 @@ async function copySongData(
 		lengthSeconds: seconds > 0 ? Math.round(seconds) : undefined,
 		displayTitle: displayTitle(
 			song.title,
-			settings.titleMode,
+			mode,
 			settings.cleanTitles,
 			song.artist,
 		),
 		displayArtist: formatArtistName(song.artist),
 		originalTitle: displayTitle(
 			song.title,
-			"original",
+			originalMode,
 			settings.cleanTitles,
 			song.artist,
 		),
 		parsedTitle: formatTitleParts(
 			song.title,
-			"original",
+			originalMode,
 			settings.cleanTitles,
 			song.artist,
 		),
@@ -272,7 +275,7 @@ export function SongContextMenu({
 												void copyText(
 													displayTitle(
 														song.title,
-														"original",
+														song.upload ? "both" : "original",
 														settings.cleanTitles,
 														song.artist,
 													),

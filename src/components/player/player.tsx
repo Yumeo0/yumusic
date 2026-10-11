@@ -114,6 +114,7 @@ export function Player() {
 								<span className="min-w-0 truncate">
 									<SongTitle
 										artist={currentSong.artist}
+										keepTitle={currentSong.upload}
 										title={currentSong.title}
 									/>
 								</span>

@@ -239,6 +239,20 @@ describe("noise, credit and decoration tails", () => {
 		expect(main("【推しの子】アイドル")).toBe("【推しの子】アイドル");
 	});
 
+	test("leading artist name tag is stripped", () => {
+		expect(
+			main("【ちくわ】人生マタタビ【オリジナル曲】", "ちくわちゃんねる"),
+		).toBe("人生マタタビ");
+		// Only the artist's own name tag goes; unrelated brackets stay.
+		expect(main("【推しの子】アイドル", "YOASOBI")).toBe(
+			"【推しの子】アイドル",
+		);
+		// The decorator-stripped form matches too.
+		expect(
+			main("【藍月なくる】ヘヴンリィ", "藍月なくる / Aitsuki Nakuru"),
+		).toBe("ヘヴンリィ");
+	});
+
 	test("latin bare cover word is kept", () => {
 		expect(main("Take Cover")).toBe("Take Cover");
 	});
@@ -359,6 +373,25 @@ describe("cover markers and artist credit tails", () => {
 		expect(detectTitleTags("【cover】 スロウダウナー(Slow Downer)")).toContain(
 			"cover",
 		);
+	});
+
+	test("hashtag tag bracket before the title with a covered-by credit", () => {
+		const title =
+			"【#あの8人でナユタンメドレー】金星のダンス【covered by 鏑木ろこ / にじさんじ】";
+		const parts = formatTitleParts(
+			title,
+			"original",
+			true,
+			"鏑木ろこ / Kaburaki Roco【にじさんじ】",
+		);
+		expect(parts.main).toBe("金星のダンス");
+		expect(parts.coverArtists).toEqual(["鏑木ろこ", "にじさんじ"]);
+		expect(parts.credits).toEqual([{ tag: "cover" }]);
+	});
+
+	test("hashtag tail stops at brackets instead of swallowing the title", () => {
+		expect(cleanUpTitle("【#タグ】金星のダンス")).toBe("【#タグ】金星のダンス");
+		expect(cleanUpTitle("Song #tag")).toBe("Song");
 	});
 
 	test("artist suffix + bootleg credit bracket", () => {
@@ -533,6 +566,16 @@ describe("cover markers and artist credit tails", () => {
 		);
 		expect(main(title)).toBe("チューリングラブ");
 		expect(detectTitleTags(title)).toContain("cover");
+	});
+
+	test("uploader titles keep their whole string in every mode", () => {
+		// A reupload's raw title ("Artist - Song") is shown as-is: display
+		// sites pass "both" for songs marked as uploads (no release behind
+		// them), because the pair is not an original/translation form.
+		const title = "かめりあ - Towards the Horizon";
+		expect(displayTitle(title, "both", true)).toBe(title);
+		// The default parse reads the same string as a dual title instead…
+		expect(displayTitle(title, "original", true)).toBe("かめりあ");
 	});
 
 	test("leading MV tag, cover paren and channel tag bracket", () => {

@@ -19,7 +19,10 @@ import {
 	hiResThumb,
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
-import { enrichSongsWithDescriptions } from "@/lib/youtube/song-description";
+import {
+	enrichSongsWithDescriptions,
+	enrichSongsWithUploads,
+} from "@/lib/youtube/song-description";
 import {
 	artistIdOf,
 	artistListOf,
@@ -253,7 +256,11 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 			<h3 className="mt-2.5 flex items-center gap-1.5 text-sm font-medium transition-colors group-hover:text-primary">
 				<span className="line-clamp-1 min-w-0">
 					{item.kind === "song" ? (
-						<SongTitle artist={item.song.artist} title={item.song.title} />
+						<SongTitle
+							artist={item.song.artist}
+							keepTitle={item.song.upload}
+							title={item.song.title}
+						/>
 					) : (
 						title
 					)}
@@ -310,6 +317,7 @@ export function HomeFeed() {
 	// ("Singer: X / Song: Y") and resolve the ambiguous titles the raw
 	// pipeline leaves alone. Rows update as each description lands.
 	const enrichCancelRef = useRef<(() => void) | null>(null);
+	const uploadCancelRef = useRef<(() => void) | null>(null);
 	// Read at prefetch start; whatever is playing gets its description from
 	// the player response, so fetching it here would be a duplicate request.
 	const playingIdRef = useRef(currentSong?.id);
@@ -360,14 +368,19 @@ export function HomeFeed() {
 				setSections(out);
 				setFailed(out.length === 0);
 				const playingId = playingIdRef.current;
+				const applyUpdatedSong = (updated: Song): void => {
+					setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
+				};
 				enrichCancelRef.current = enrichSongsWithDescriptions(
 					feedSongs(out),
-					(updated) => {
-						setSections((prev) =>
-							prev ? withUpdatedSong(prev, updated) : prev,
-						);
-					},
+					applyUpdatedSong,
 					playingId ? new Set([playingId]) : undefined,
+				);
+				// Reuploads (no release) keep their raw titles; the player
+				// marks what it plays, this covers the rest of the feed.
+				uploadCancelRef.current = enrichSongsWithUploads(
+					feedSongs(out),
+					applyUpdatedSong,
 				);
 			} catch (error) {
 				console.warn("[HomeFeed] failed to load recommendations:", error);
@@ -379,6 +392,7 @@ export function HomeFeed() {
 		return () => {
 			cancelled = true;
 			enrichCancelRef.current?.();
+			uploadCancelRef.current?.();
 		};
 	}, []);
 

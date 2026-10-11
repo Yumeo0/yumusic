@@ -206,7 +206,11 @@ export function LinkPreviewDialog() {
 									/>
 									<div className="min-w-0 flex-1">
 										<Dialog.Title className="text-sm leading-snug font-semibold">
-											<SongTitle artist={song.artist} title={song.title} />
+											<SongTitle
+												artist={song.artist}
+												keepTitle={song.upload}
+												title={song.title}
+											/>
 										</Dialog.Title>
 										<p className="mt-0.5 truncate text-sm text-muted-foreground">
 											<ArtistLinks song={song} />

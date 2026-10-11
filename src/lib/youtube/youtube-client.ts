@@ -1068,12 +1068,34 @@ export interface TrackMeta {
 }
 
 /**
+ * Session cache for queue metadata: it is locale-stable and costs a queue
+ * fetch, so a track played, scrobbled and enriched only fetches it once.
+ */
+const trackMetaCache = new Map<string, TrackMeta>();
+const trackMetaRequests = new Map<string, Promise<TrackMeta | null>>();
+
+/**
  * Album and artist metadata for a track, taken from the selected entry of the
  * "Up next" queue (fetched in the app's current language). The original title
  * comes from oEmbed, which is locale-independent; failures resolve to null so
  * callers keep working without it.
  */
-export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
+export function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
+	const known = trackMetaCache.get(videoId);
+	if (known) return Promise.resolve(known);
+	const pending = trackMetaRequests.get(videoId);
+	if (pending) return pending;
+	const request = fetchTrackMeta(videoId)
+		.then((meta) => {
+			if (meta) trackMetaCache.set(videoId, meta);
+			return meta;
+		})
+		.finally(() => trackMetaRequests.delete(videoId));
+	trackMetaRequests.set(videoId, request);
+	return request;
+}
+
+async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	try {
 		const client = await getYoutubeClient();
 		const info = await client.music.getInfo(videoId);

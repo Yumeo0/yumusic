@@ -417,7 +417,11 @@ export default function ArtistPage() {
 														isCurrent && "text-primary",
 													)}
 												>
-													<SongTitle artist={song.artist} title={song.title} />
+													<SongTitle
+														artist={song.artist}
+														keepTitle={song.upload}
+														title={song.title}
+													/>
 												</h3>
 												<p className="truncate text-xs text-muted-foreground">
 													<ArtistLinks song={song} />
@@ -494,7 +498,11 @@ export default function ArtistPage() {
 										)}
 									</div>
 									<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
-										<SongTitle artist={item.song?.artist} title={item.title} />
+										<SongTitle
+											artist={item.song?.artist}
+											keepTitle={item.song?.upload}
+											title={item.title}
+										/>
 									</h3>
 									<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
 										{item.song ? (

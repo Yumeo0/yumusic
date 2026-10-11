@@ -35,6 +35,7 @@ import {
 	fetchFunction,
 	getAutoplaySongs,
 	getSongStream,
+	getTrackMeta,
 } from "@/lib/youtube/youtube-client";
 
 export interface Song {
@@ -49,6 +50,13 @@ export interface Song {
 	duration?: string;
 	/** Uploader description; its credits refine the title and artist. */
 	description?: string;
+	/**
+	 * Uploader video without a music release behind it (no album). Its title
+	 * is the uploader's own string — e.g. "かめりあ - Towards the Horizon" —
+	 * and is shown as-is instead of being read as an original/translation
+	 * pair. Undefined means "not checked" (normal parsing).
+	 */
+	upload?: boolean;
 }
 
 /**
@@ -751,6 +759,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	/**
+	 * Marks a track as an uploader video (no music release behind it) on every
+	 * copy on screen; such titles are the uploader's own string and are shown
+	 * as-is. Resolves to the marked song for the caller's own copy.
+	 */
+	const markUpload = useCallback(async (song: Song): Promise<Song> => {
+		const meta = await getTrackMeta(song.id).catch(() => null);
+		if (!meta || meta.album) return song;
+		const mark = (entry: Song): Song =>
+			entry.id === song.id ? { ...entry, upload: true } : entry;
+		setCurrentSong((prev) => (prev ? mark(prev) : prev));
+		setQueueState((prev) => prev.map(mark));
+		setAutoplayTracks((prev) => prev.map(mark));
+		return { ...song, upload: true };
+	}, []);
+
+	/**
 	 * Buffers `nextSong` on the idle deck so it is ready to fade in. Called
 	 * once the active track enters the preload window; everything is torn
 	 * down again if the fade never happens (skip, seek, pause, queue edit).
@@ -807,6 +831,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					rememberSongDescription(state.nextSong.id, description);
 					state.nextSong = applySongDescription(state.nextSong, description);
 				}
+				// Uploader videos without a release keep their raw titles.
+				state.nextSong = await markUpload(state.nextSong);
 				state.result = {
 					videoInfo: result.videoInfo,
 					innertube: result.innertube,
@@ -825,7 +851,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				console.error("[PlayerContext] Crossfade preload failed:", error);
 			}
 		},
-		[mountLocalTrack, mountTrack],
+		[markUpload, mountLocalTrack, mountTrack],
 	);
 
 	/**
@@ -1127,6 +1153,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 							prev && prev.id === basic.id ? { ...prev, thumbnail } : prev,
 						);
 					}
+
+					// Uploader videos without a release keep their raw titles.
+					void markUpload(song);
 				}
 			} catch (error) {
 				console.error(
@@ -1136,7 +1165,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				);
 			}
 		},
-		[abortCrossfade, mountLocalTrack],
+		[abortCrossfade, markUpload, mountLocalTrack],
 	);
 
 	// Feed the shared listening-session tracker: one tick per second while

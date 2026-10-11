@@ -1,13 +1,17 @@
 /**
  * ListenBrainz scrobbling with MusicBrainz track lookup: recordings are
  * searched on MusicBrainz first so the submitted listen carries the
- * recording MBID and ListenBrainz doesn't have to match it itself.
+ * recording MBID and ListenBrainz doesn't have to match it itself. The
+ * artist is resolved on MusicBrainz first, because the queue's credit is
+ * often a romanization/alias ("Sakamata Chloe") that the recording's artist
+ * credit doesn't carry ("沙花叉クロヱ").
  */
 
 const LB_API = "https://api.listenbrainz.org/1";
 const MB_API = "https://musicbrainz.org/ws/2";
 const MBID_CACHE_KEY = "yumusic:mbids";
-const MBID_CACHE_MAX = 200;
+const ARTIST_CACHE_KEY = "yumusic:mb-artists";
+const CACHE_MAX = 200;
 
 export interface RecordingMbids {
 	recording: string;
@@ -25,29 +29,22 @@ export interface ListenPayload {
 	listenedAt?: number;
 }
 
-type MbidCache = Record<string, RecordingMbids>;
-
 const memoryCache = new Map<string, RecordingMbids | null>();
 /** Session-scoped negative cache so failed lookups aren't hammered. */
 const failedLookups = new Set<string>();
 
-function readMbidCache(): MbidCache {
+function readCache<T>(key: string): Record<string, T> {
 	try {
-		return JSON.parse(
-			localStorage.getItem(MBID_CACHE_KEY) ?? "{}",
-		) as MbidCache;
+		return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, T>;
 	} catch {
 		return {};
 	}
 }
 
-function writeMbidCache(cache: MbidCache) {
+function writeCache<T>(key: string, cache: Record<string, T>) {
 	try {
-		const entries = Object.entries(cache).slice(-MBID_CACHE_MAX);
-		localStorage.setItem(
-			MBID_CACHE_KEY,
-			JSON.stringify(Object.fromEntries(entries)),
-		);
+		const entries = Object.entries(cache).slice(-CACHE_MAX);
+		localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
 	} catch {
 		// storage unavailable — memory cache still applies
 	}
@@ -65,19 +62,139 @@ interface MbRecording {
 }
 
 let mbQueue: Promise<unknown> = Promise.resolve();
+const MB_SPACING_MS = 1100;
+const MB_RETRY_LIMIT = 1;
 
-/** MusicBrainz allows ~1 request/second — serialize with 1.1s spacing. */
-function mbRequest<T>(url: string): Promise<T> {
+/** HTTP-level MusicBrainz failure, carrying the status for retry decisions. */
+class MbRequestError extends Error {
+	status: number;
+	constructor(status: number) {
+		super(`MusicBrainz ${status}`);
+		this.status = status;
+	}
+}
+
+/**
+ * MusicBrainz allows ~1 request/second — serialize with 1.1s spacing. The
+ * search server reports load with 503/429; one spaced retry usually gets
+ * through, while 4xx query errors are final.
+ */
+function mbRequest<T>(url: string, attempt = 0): Promise<T> {
 	const run = mbQueue.then(async () => {
 		const res = await fetch(url);
-		if (!res.ok) throw new Error(`MusicBrainz ${res.status}`);
+		if (!res.ok) throw new MbRequestError(res.status);
 		return (await res.json()) as T;
 	});
 	mbQueue = run.then(
-		() => new Promise((resolve) => setTimeout(resolve, 1100)),
-		() => new Promise((resolve) => setTimeout(resolve, 1100)),
+		() => new Promise((resolve) => setTimeout(resolve, MB_SPACING_MS)),
+		() => new Promise((resolve) => setTimeout(resolve, MB_SPACING_MS)),
 	);
-	return run;
+	return run.catch((error) => {
+		const retriable =
+			!(error instanceof MbRequestError) ||
+			error.status === 429 ||
+			error.status >= 500;
+		if (retriable && attempt < MB_RETRY_LIMIT) {
+			return mbRequest<T>(url, attempt + 1);
+		}
+		throw error;
+	});
+}
+
+/** MusicBrainz artist search hit (fields used here). */
+interface MbArtist {
+	name?: string;
+	"sort-name"?: string;
+	score?: number;
+	aliases?: Array<{ name?: string }>;
+}
+
+const artistMemoryCache = new Map<string, string | null>();
+/** Session-scoped negative cache for artist searches without a hit. */
+const artistFailures = new Set<string>();
+
+/** Folds a name for comparison: lowercase, no spaces, punctuation or symbols. */
+function foldName(text: string): string {
+	return text.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+/**
+ * Token signature of a name: lowercase words, sorted — so word order and
+ * punctuation don't matter ("Nakuru Aitsuki" ≡ "Aitsuki, Nakuru").
+ */
+function tokenKey(text: string): string {
+	return text
+		.split(/[\s\p{P}\p{S}]+/u)
+		.map((token) => token.toLowerCase())
+		.filter(Boolean)
+		.sort()
+		.join(" ");
+}
+
+/** Whether a hit carries the searched name as its name, sort name or alias. */
+function artistMatches(
+	artist: MbArtist,
+	folded: string,
+	tokens: string,
+): boolean {
+	const names = [
+		artist.name,
+		artist["sort-name"],
+		...(artist.aliases ?? []).map((alias) => alias.name),
+	];
+	return names.some(
+		(name) =>
+			name !== undefined &&
+			(foldName(name) === folded || tokenKey(name) === tokens),
+	);
+}
+
+/**
+ * Resolves the name MusicBrainz credits an artist under. The queue's credit
+ * is often a romanization or alias ("Sakamata Chloe") while recording credits
+ * carry the original-language name ("沙花叉クロヱ"), and the recording query's
+ * `artist:` field only matches the credit. A hit counts when the searched
+ * name equals the artist's name, sort name or an alias — word order and
+ * punctuation ignored, so "Nakuru Aitsuki" matches the alias "Aitsuki
+ * Nakuru" — so an unrelated top result can't redirect the recording search.
+ * Results are cached in localStorage; resolves to null when nothing matches.
+ */
+async function findArtistName(artistName: string): Promise<string | null> {
+	const folded = foldName(artistName);
+	if (folded === "") return null;
+	const tokens = tokenKey(artistName);
+	const memory = artistMemoryCache.get(folded);
+	if (memory !== undefined) return memory;
+	if (artistFailures.has(folded)) return null;
+	const stored = readCache<string>(ARTIST_CACHE_KEY)[folded];
+	if (stored) {
+		artistMemoryCache.set(folded, stored);
+		return stored;
+	}
+	const data = await mbRequest<{ artists?: MbArtist[] }>(
+		`${MB_API}/artist?query=${encodeURIComponent(artistName)}&fmt=json&limit=5`,
+	);
+	let pick: MbArtist | undefined;
+	let bestScore = -Number.MAX_SAFE_INTEGER;
+	for (const artist of data.artists ?? []) {
+		if (!artistMatches(artist, folded, tokens)) continue;
+		const score = artist.score ?? 0;
+		if (score > bestScore) {
+			bestScore = score;
+			pick = artist;
+		}
+	}
+	const name = pick?.name?.trim() || null;
+	if (!name) {
+		artistMemoryCache.set(folded, null);
+		artistFailures.add(folded);
+		return null;
+	}
+	artistMemoryCache.set(folded, name);
+	const cache = readCache<string>(ARTIST_CACHE_KEY);
+	cache[folded] = name;
+	writeCache(ARTIST_CACHE_KEY, cache);
+	return name;
 }
 
 /** Penalize instrumental/karaoke-style qualifiers when the query lacks them. */
@@ -106,7 +223,10 @@ function recordingScore(
 }
 
 /**
- * Finds the MusicBrainz recording for a track. Results are cached in
+ * Finds the MusicBrainz recording for a track. `trackName` is the parsed
+ * main title and `artistName` the primary credit; the artist is resolved to
+ * MusicBrainz' canonical name first, and the recording is then searched with
+ * that name (falling back to the given one). Results are cached in
  * localStorage (keyed by artist+track) so each track is looked up once.
  * Candidate selection scores title equality, qualifier penalties
  * (instrumental/karaoke/…), duration proximity and featured-artist credit
@@ -124,7 +244,7 @@ export async function findRecording(
 	const memory = memoryCache.get(key);
 	if (memory !== undefined) return memory;
 	if (failedLookups.has(key)) return null;
-	const stored = readMbidCache()[key];
+	const stored = readCache<RecordingMbids>(MBID_CACHE_KEY)[key];
 	if (stored) {
 		memoryCache.set(key, stored);
 		return stored;
@@ -133,11 +253,23 @@ export async function findRecording(
 	const featsLower = featuringArtists.map((f) => f.toLowerCase());
 
 	try {
-		const query = `recording:"${trackName}" AND artist:"${artistName}"`;
-		const data = await mbRequest<{ recordings?: MbRecording[] }>(
-			`${MB_API}/recording?query=${encodeURIComponent(query)}&fmt=json&limit=5`,
-		);
-		const recordings = data.recordings ?? [];
+		// The recording's artist credit only matches MusicBrainz' canonical
+		// name, so the queue credit is resolved first; the raw name stays as
+		// a fallback when the resolved one finds nothing.
+		const resolved = await findArtistName(artistName).catch(() => null);
+		const artistNames =
+			resolved && foldName(resolved) !== foldName(artistName)
+				? [resolved, artistName]
+				: [artistName];
+		let recordings: MbRecording[] = [];
+		for (const name of artistNames) {
+			const query = `recording:"${trackName}" AND artist:"${name}"`;
+			const data = await mbRequest<{ recordings?: MbRecording[] }>(
+				`${MB_API}/recording?query=${encodeURIComponent(query)}&fmt=json&limit=5`,
+			);
+			recordings = data.recordings ?? [];
+			if (recordings.length > 0) break;
+		}
 		if (recordings.length === 0) {
 			failedLookups.add(key);
 			memoryCache.set(key, null);
@@ -169,9 +301,9 @@ export async function findRecording(
 			release: pick.releases?.[0]?.id,
 		};
 		memoryCache.set(key, mbids);
-		const cache = readMbidCache();
+		const cache = readCache<RecordingMbids>(MBID_CACHE_KEY);
 		cache[key] = mbids;
-		writeMbidCache(cache);
+		writeCache(MBID_CACHE_KEY, cache);
 		return mbids;
 	} catch (error) {
 		console.warn("[listenbrainz] MusicBrainz lookup failed:", error);

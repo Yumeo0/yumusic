@@ -28,12 +28,15 @@ const TAG_LABELS: Record<TitleTag, string> = {
 export function SongTitle({
 	title,
 	artist,
+	keepTitle,
 }: {
 	title: string;
 	artist?: string;
+	/** Uploader video: show the raw title without dual-language parsing. */
+	keepTitle?: boolean;
 }) {
 	const formatTitle = useFormatTitle();
-	const { main, credits } = formatTitle(title, artist);
+	const { main, credits } = formatTitle(title, artist, keepTitle);
 	const remix = joinArtists(remixAuthors(credits));
 	const generic = detectTitleTags(title).filter(
 		(tag) =>

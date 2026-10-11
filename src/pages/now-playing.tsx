@@ -688,7 +688,11 @@ function TrackHeading({ song, className }: { song: Song; className?: string }) {
 					key={`title-${song.id}`}
 				>
 					<span className="min-w-0 truncate">
-						<SongTitle artist={song.artist} title={song.title} />
+						<SongTitle
+							artist={song.artist}
+							keepTitle={song.upload}
+							title={song.title}
+						/>
 					</span>
 					<DownloadedBadge songId={song.id} />
 				</h1>
@@ -951,7 +955,11 @@ function QueueRow({
 				)}
 				<div className="min-w-0 flex-1">
 					<p className="truncate text-sm font-medium">
-						<SongTitle artist={song.artist} title={song.title} />
+						<SongTitle
+							artist={song.artist}
+							keepTitle={song.upload}
+							title={song.title}
+						/>
 					</p>
 					<p className="truncate text-xs text-muted-foreground">
 						<ArtistLinks song={song} />

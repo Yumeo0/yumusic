@@ -622,6 +622,7 @@ function TopResultCard({
 							{isPlayable ? (
 								<SongTitle
 									artist={entry.song.artist}
+									keepTitle={entry.song.upload}
 									title={entry.song.title}
 								/>
 							) : (
@@ -749,7 +750,11 @@ function PlayableRow({
 								isCurrent && "text-primary",
 							)}
 						>
-							<SongTitle artist={song.artist} title={song.title} />
+							<SongTitle
+								artist={song.artist}
+								keepTitle={song.upload}
+								title={song.title}
+							/>
 						</h3>
 						<p className="truncate text-xs text-muted-foreground">
 							<ArtistLinks song={song} />

@@ -254,7 +254,11 @@ export function QueuePanel() {
 													isCurrent && "text-primary",
 												)}
 											>
-												<SongTitle artist={song.artist} title={song.title} />
+												<SongTitle
+													artist={song.artist}
+													keepTitle={song.upload}
+													title={song.title}
+												/>
 											</p>
 											<p className="truncate text-xs text-muted-foreground">
 												<ArtistLinks song={song} />
