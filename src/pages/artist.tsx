@@ -19,6 +19,7 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
@@ -197,6 +198,8 @@ export default function ArtistPage() {
 	const navigate = useNavigate();
 	const { play, playQueue, addToQueue, currentSong } = usePlayer();
 	const { isPlaying } = usePlayerControls();
+	// Video entries already resolved to their song version while playing.
+	const versions = useSongVersionReplacements();
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -368,7 +371,9 @@ export default function ArtistPage() {
 						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
 					</div>
 					<div className="space-y-0.5">
-						{artist.songs.map((song, index) => {
+						{artist.songs.map((source, index) => {
+							// Show the album track when the video was resolved.
+							const song = versions.get(source.id) ?? source;
 							const isCurrent = currentSong?.id === song.id;
 							return (
 								<SongContextMenu
@@ -456,14 +461,19 @@ export default function ArtistPage() {
 							<SongContextMenu
 								// biome-ignore lint/suspicious/noArrayIndexKey: shelf items may repeat titles
 								key={`${item.title}-${i}`}
-								song={item.song}
+								song={
+									item.song
+										? (versions.get(item.song.id) ?? item.song)
+										: item.song
+								}
 							>
 								<button
 									className="group w-44 shrink-0 text-left disabled:cursor-default"
 									onClick={() => {
 										if (item.song) {
+											const song = versions.get(item.song.id) ?? item.song;
 											play(
-												item.song,
+												song,
 												shelf.items
 													.slice(i + 1)
 													.map((shelfItem) => shelfItem.song)

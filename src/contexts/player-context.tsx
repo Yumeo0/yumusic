@@ -20,6 +20,10 @@ import {
 } from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
+import {
+	rememberSongVersion,
+	songVersionReplacement,
+} from "@/lib/stores/song-versions";
 import { applySongDescription } from "@/lib/utils/description";
 import { MAX_VOLUME } from "@/lib/utils/hooks";
 import {
@@ -30,11 +34,13 @@ import {
 } from "@/lib/utils/utils";
 import { botguardService } from "@/lib/youtube/botguard-service";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
+import { applySongVersion } from "@/lib/youtube/song-version";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	fetchFunction,
 	getAutoplaySongs,
-	getSongStream,
+	getPlaybackStream,
+	getSongVersion,
 	getTrackMeta,
 } from "@/lib/youtube/youtube-client";
 
@@ -257,6 +263,11 @@ interface CrossfadeState {
 	phase: "preload" | "fading";
 	/** Song that fades in (the track after the current one). */
 	nextSong: Song;
+	/**
+	 * Id `nextSong` was queued under; it changes when the track is swapped
+	 * for its song version, and stays the queue/action key.
+	 */
+	originalId: string;
 	/** Song that fades out; committed to history on completion. */
 	fromSong: Song;
 	/** Deck the next song is buffered on (always the idle one). */
@@ -676,6 +687,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (state.promote) {
 				setQueueState((prev) => [...prev, state.nextSong]);
 				setAutoplayTracks((prev) => prev.slice(1));
+			} else if (state.nextSong.id !== state.originalId) {
+				// The preload swapped the track for its song version: the
+				// queue entry takes over so the current row stays consistent.
+				setQueueState((prev) =>
+					prev.map((entry) =>
+						entry.id === state.originalId ? state.nextSong : entry,
+					),
+				);
 			}
 
 			// A stored file carries its own artwork; a streamed preload gets
@@ -803,6 +822,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				nextSong: localEntry?.description
 					? applySongDescription(nextSong, localEntry.description)
 					: nextSong,
+				originalId: nextSong.id,
 				phase: "preload",
 				promote,
 				result: null,
@@ -821,8 +841,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			}
 
 			try {
-				const result = await getSongStream(state.nextSong.id);
+				const result = await getPlaybackStream(state.nextSong.id);
 				if (crossfadeRef.current !== state) return;
+				// The stream may be the album track of a music video: the
+				// incoming track becomes that song before the handover.
+				if (result.videoId !== state.nextSong.id) {
+					const version = await getSongVersion(state.nextSong.id);
+					if (crossfadeRef.current !== state) return;
+					if (version) {
+						const played = applySongVersion(state.nextSong, version);
+						rememberSongVersion(state.nextSong, played);
+						state.nextSong = played;
+					}
+				}
 				// The player response carries the uploader description; keep it
 				// and let its credits refine the title/artist before the handover.
 				const description =
@@ -879,7 +910,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		const state = crossfadeRef.current;
 		// The queue changed under an armed crossfade; re-evaluate from scratch.
-		if (state && (!nextSong || nextSong.id !== state.nextSong.id)) {
+		// Compared against the queued id: the state's song may already be the
+		// album track of that entry.
+		if (state && (!nextSong || nextSong.id !== state.originalId)) {
 			abortCrossfade();
 		}
 
@@ -1102,10 +1135,28 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
 					);
 				}
-				const result = await getSongStream(song.id);
+				const result = await getPlaybackStream(song.id);
 				// A newer play request superseded this one while it loaded.
 				if (request !== loadRequestRef.current) return;
 				if (result) {
+					// The stream may be the album track of a music video: the
+					// track *is* that song, so adopt its entry everywhere.
+					let played = song;
+					if (result.videoId !== song.id) {
+						const version = await getSongVersion(song.id);
+						if (request !== loadRequestRef.current) return;
+						if (version) {
+							played = applySongVersion(song, version);
+							rememberSongVersion(song, played);
+							const replace = (entry: Song) =>
+								entry.id === song.id ? played : entry;
+							setCurrentSong((prev) =>
+								prev && prev.id === song.id ? played : prev,
+							);
+							setQueueState((prev) => prev.map(replace));
+							setAutoplayTracks((prev) => prev.map(replace));
+						}
+					}
 					// Debug: dump everything YouTube returned for this song
 					console.log(
 						"[YuMusic] song info:",
@@ -1124,22 +1175,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					const basic = result.videoInfo.basic_info;
 					const description = basic.short_description?.trim();
 					if (description) {
-						rememberSongDescription(song.id, description);
+						rememberSongDescription(played.id, description);
 						setCurrentSong((prev) =>
-							prev && prev.id === basic.id
+							prev && prev.id === played.id
 								? applySongDescription(prev, description)
 								: prev,
 						);
 						setQueueState((prev) =>
 							prev.map((entry) =>
-								entry.id === basic.id
+								entry.id === played.id
 									? applySongDescription(entry, description)
 									: entry,
 							),
 						);
 						setAutoplayTracks((prev) =>
 							prev.map((entry) =>
-								entry.id === basic.id
+								entry.id === played.id
 									? applySongDescription(entry, description)
 									: entry,
 							),
@@ -1147,15 +1198,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					}
 
 					// Upgrade the artwork from the player response (see pickArtwork).
-					const thumbnail = pickArtwork(song, basic);
+					const thumbnail = pickArtwork(played, basic);
 					if (thumbnail) {
 						setCurrentSong((prev) =>
-							prev && prev.id === basic.id ? { ...prev, thumbnail } : prev,
+							prev && prev.id === played.id ? { ...prev, thumbnail } : prev,
 						);
 					}
 
 					// Uploader videos without a release keep their raw titles.
-					void markUpload(song);
+					void markUpload(played);
 				}
 			} catch (error) {
 				console.error(
@@ -1186,15 +1237,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	// Register the play in YouTube's watch history — the same ping the web
 	// player sends — once the track has passed the shared grace period, so
-	// instant skips are never tracked.
+	// instant skips are never tracked. The session tracks the requested
+	// song's id, which differs from the streamed id when a song version is
+	// playing, so compare against the song, not the stream.
 	useEffect(() => {
-		if (!settings.watchHistory || !videoInfo) return;
-		return listeningSession.subscribe((event, songId) => {
+		if (!settings.watchHistory || !videoInfo || !currentSong) return;
+		const songId = currentSong.id;
+		return listeningSession.subscribe((event, eventSongId) => {
 			if (event !== "established") return;
-			if (songId !== videoInfo.basic_info.id) return;
+			if (eventSongId !== songId) return;
 			reportPlayback(videoInfo);
 		});
-	}, [settings.watchHistory, videoInfo]);
+	}, [settings.watchHistory, videoInfo, currentSong]);
 
 	// Keep the queue's autoplay section stocked: whenever the current track
 	// changes and no suggestions are pending, fetch the radio mix for it. The
@@ -1229,7 +1283,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	const play = useCallback(
 		async (song: Song, newQueue?: Song[]) => {
-			if (currentSong?.id === song.id) {
+			// The entry may resolve to its album track: match and queue that.
+			const target = songVersionReplacement(song.id) ?? song;
+			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
 			}
@@ -1246,21 +1302,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			// If a new queue is provided, add the current song to the front and set it
 			if (newQueue) {
-				setQueueState([song, ...newQueue]);
+				setQueueState([target, ...newQueue]);
 				setCurrentIndex(0);
 			} else {
 				// Find the song in the existing queue
-				const index = queue.findIndex((s) => s.id === song.id);
+				const index = queue.findIndex((s) => s.id === target.id);
 				if (index !== -1) {
 					setCurrentIndex(index);
 				} else {
 					// Song not in queue, add it to the front
-					setQueueState([song, ...queue]);
+					setQueueState([target, ...queue]);
 					setCurrentIndex(0);
 				}
 			}
 
-			await playSong(song);
+			await playSong(target);
 		},
 		[currentSong, queue, playSong],
 	);
@@ -1273,7 +1329,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		async (songs: Song[], index: number) => {
 			const song = songs[index];
 			if (!song) return;
-			if (currentSong?.id === song.id) {
+			// The entry may resolve to its album track: match and queue that.
+			const target = songVersionReplacement(song.id) ?? song;
+			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
 			}
@@ -1283,9 +1341,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			// A fresh start gets a fresh radio (same as `play`).
 			setAutoplayTracks([]);
 			autoplayForRef.current = null;
-			setQueueState(songs);
+			setQueueState(
+				song === target
+					? songs
+					: songs.map((entry) => (entry.id === song.id ? target : entry)),
+			);
 			setCurrentIndex(index);
-			await playSong(song);
+			await playSong(target);
 		},
 		[currentSong, playSong],
 	);

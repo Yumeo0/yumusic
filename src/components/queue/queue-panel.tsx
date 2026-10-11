@@ -16,6 +16,7 @@ import {
 	useQueueState,
 } from "@/lib/player/player-ui";
 import { useSettings } from "@/lib/stores/settings";
+import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { EqualizerBars } from "../player/waveform";
@@ -33,6 +34,8 @@ export function QueuePanel() {
 	const { queue, currentIndex, autoplayTracks, play, playAutoplayAt } =
 		usePlayer();
 	const { isPlaying } = usePlayerControls();
+	// Video entries already resolved to their song version while playing.
+	const versions = useSongVersionReplacements();
 	const [settings] = useSettings();
 	const sheetRef = useQueueSheetRef();
 	const sheetGesture = useQueueSheetGesture();
@@ -198,11 +201,14 @@ export function QueuePanel() {
 							const i = isAutoplayRow
 								? virtualRow.index - separatorIndex - autoplayOffset
 								: virtualRow.index;
-							const song = isAutoplayRow ? autoplayTracks[i] : queue[i];
+							const source = isAutoplayRow ? autoplayTracks[i] : queue[i];
+							// Show and play the album track when the video was
+							// resolved to one while playing.
+							const song = versions.get(source.id) ?? source;
 							const isCurrent = !isAutoplayRow && i === currentIndex;
 							return (
 								<SongContextMenu
-									key={`${isAutoplayRow ? "auto" : "queue"}-${song.id}-${i}`}
+									key={`${isAutoplayRow ? "auto" : "queue"}-${source.id}-${i}`}
 									queueIndex={isAutoplayRow ? undefined : i}
 									song={song}
 								>

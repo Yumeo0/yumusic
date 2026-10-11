@@ -58,6 +58,7 @@ import {
 	subscribeToLibraryChanges,
 	writeCache,
 } from "@/lib/stores/playlist-cache";
+import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { useDisplayTitle } from "@/lib/utils/title";
@@ -126,6 +127,8 @@ export function PlaylistDetails() {
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const downloadJob = downloads.jobs.get(id ?? "");
 	const downloaded = usePlaylistDownloaded(id ?? "");
+	// Video entries already resolved to their song version while playing.
+	const versions = useSongVersionReplacements();
 	/** Video id currently playing; prefetch skips it (playback enriches it). */
 	const playingId = currentSong?.id;
 
@@ -793,21 +796,28 @@ export function PlaylistDetails() {
 						Loading more…
 					</p>
 				)}
-				{visible.map(({ song, index }, i) => (
-					<PlaylistTrackRow
-						editable={playlist.editable}
-						index={index}
-						isCurrent={currentSong?.id === song.id}
-						isPlaying={currentSong?.id === song.id && isPlaying}
-						key={rowKeys[i]}
-						number={sort === "newest" ? index + 1 : i + 1}
-						onPlay={playTrack}
-						onQueue={addToQueue}
-						onRemove={playlist.editable ? removeSong : undefined}
-						position={i}
-						song={song}
-					/>
-				))}
+				{visible.map(({ song, index }, i) => {
+					// The row displays the album track when the video was
+					// resolved to one; removal and playlist edits stay keyed
+					// to the playlist's own entry.
+					const displaySong = versions.get(song.id) ?? song;
+					return (
+						<PlaylistTrackRow
+							displaySong={displaySong}
+							editable={playlist.editable}
+							index={index}
+							isCurrent={currentSong?.id === displaySong.id}
+							isPlaying={currentSong?.id === displaySong.id && isPlaying}
+							key={rowKeys[i]}
+							number={sort === "newest" ? index + 1 : i + 1}
+							onPlay={playTrack}
+							onQueue={addToQueue}
+							onRemove={playlist.editable ? removeSong : undefined}
+							position={i}
+							song={song}
+						/>
+					);
+				})}
 				{visible.length === 0 && search.trim() && songs.length > 0 && (
 					<p className="px-4 py-10 text-sm text-muted-foreground sm:px-0">
 						No tracks match "{search.trim()}".
@@ -853,6 +863,7 @@ export function PlaylistDetails() {
  */
 const PlaylistTrackRow = memo(function PlaylistTrackRow({
 	song,
+	displaySong,
 	position,
 	index,
 	number,
@@ -863,7 +874,10 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 	onQueue,
 	onRemove,
 }: {
+	/** The playlist's own entry, used when removing it. */
 	song: Song;
+	/** The song as shown and queued: its album track, when one was resolved. */
+	displaySong: Song;
 	/** Display position, used to start playback at this row. */
 	position: number;
 	/** Playlist position, used when removing this entry. */
@@ -879,9 +893,9 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 	return (
 		<SongContextMenu
 			onRemove={editable && onRemove ? () => onRemove(song, index) : undefined}
-			song={song}
+			song={displaySong}
 		>
-			<SwipeToQueue onQueue={() => onQueue([song])}>
+			<SwipeToQueue onQueue={() => onQueue([displaySong])}>
 				<button
 					className={cn(
 						"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors duration-150 hover:bg-foreground/5 sm:px-2.5",
@@ -908,12 +922,12 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 					</span>
 
 					{/* Thumbnail */}
-					{song.thumbnail ? (
+					{displaySong.thumbnail ? (
 						<img
-							alt={song.title}
+							alt={displaySong.title}
 							className="size-10 rounded-md border border-foreground/10 object-cover"
 							loading="lazy"
-							src={proxiedImageUrl(song.thumbnail)}
+							src={proxiedImageUrl(displaySong.thumbnail)}
 						/>
 					) : (
 						<div className="size-10 rounded-md bg-muted" />
@@ -928,21 +942,21 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 							)}
 						>
 							<SongTitle
-								artist={song.artist}
-								keepTitle={song.upload}
-								title={song.title}
+								artist={displaySong.artist}
+								keepTitle={displaySong.upload}
+								title={displaySong.title}
 							/>
 						</h3>
 						<p className="truncate text-xs text-muted-foreground">
-							<ArtistLinks song={song} />
+							<ArtistLinks song={displaySong} />
 						</p>
 					</div>
 
 					{/* Downloaded marker + duration */}
 					<div className="flex items-center gap-2 pr-2">
-						<DownloadedBadge songId={song.id} />
+						<DownloadedBadge songId={displaySong.id} />
 						<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-							{song.duration}
+							{displaySong.duration}
 						</span>
 					</div>
 				</button>

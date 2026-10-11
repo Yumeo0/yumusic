@@ -14,7 +14,7 @@ import { applySongDescription } from "@/lib/utils/description";
 import { botguardService } from "@/lib/youtube/botguard-service";
 import { loadPlaylistSongs } from "@/lib/youtube/playlist-data";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
-import { fetchFunction, getSongStream } from "@/lib/youtube/youtube-client";
+import { fetchFunction, getPlaybackStream } from "@/lib/youtube/youtube-client";
 
 /**
  * Download manager: saves songs as audio files in the app's data directory
@@ -242,7 +242,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 	let token: string | null = null;
 	let lastProgressEmit = 0;
 	try {
-		const result = await getSongStream(song.id);
+		const result = await getPlaybackStream(song.id);
 		if (cancelled) throw new Error("cancelled");
 		// Hydration may have filled the index while this sat in the queue:
 		// the file is already stored, so re-downloading it is wasted work.
@@ -285,14 +285,14 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		};
 
 		stream = new SabrStream({
-			videoId: song.id,
+			videoId: result.videoId,
 			fetchFunction: fetchFunction as unknown as typeof fetch,
 			serverAbrStreamingUrl: await decipher(
 				streamingData.server_abr_streaming_url,
 			),
 			videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
 			clientInfo,
-			poToken: await botguardService.mintToken(song.id),
+			poToken: await botguardService.mintToken(result.videoId),
 			formats: streamingData.adaptive_formats.map(buildSabrFormat),
 		});
 		if (cancelled) throw new Error("cancelled");

@@ -11,6 +11,7 @@ import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSettings } from "@/lib/stores/settings";
+import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import {
@@ -322,6 +323,8 @@ export function HomeFeed() {
 	// the player response, so fetching it here would be a duplicate request.
 	const playingIdRef = useRef(currentSong?.id);
 	playingIdRef.current = currentSong?.id;
+	// Video cards already resolved to their song version while playing.
+	const versions = useSongVersionReplacements();
 
 	const removeFeedItem = (id: string) =>
 		setSections((prev) =>
@@ -450,6 +453,12 @@ export function HomeFeed() {
 					</div>
 					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
 						{section.items.map((item, i) => {
+							// A video resolved to its album track while playing
+							// is shown and played as that song.
+							const song =
+								item.kind === "song"
+									? (versions.get(item.song.id) ?? item.song)
+									: null;
 							const onOpen =
 								item.kind === "song"
 									? () => {
@@ -458,7 +467,7 @@ export function HomeFeed() {
 												.flatMap((next) =>
 													next.kind === "song" ? [next.song] : [],
 												);
-											play(item.song, queue);
+											play(song ?? item.song, queue);
 										}
 									: item.kind === "artist"
 										? () => navigate(`/artist/${item.id}`)
@@ -466,8 +475,11 @@ export function HomeFeed() {
 							const key = `${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`;
 							if (item.kind === "song") {
 								return (
-									<SongContextMenu key={key} song={item.song}>
-										<FeedCard item={item} onClick={onOpen} />
+									<SongContextMenu key={key} song={song ?? item.song}>
+										<FeedCard
+											item={{ ...item, song: song ?? item.song }}
+											onClick={onOpen}
+										/>
 									</SongContextMenu>
 								);
 							}

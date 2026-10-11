@@ -12,6 +12,7 @@ import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
 import { getOembedMetadata } from "./oembed";
+import { type SongVersion, songVersionEntryFromQueue } from "./song-version";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
 async function bodyToBase64(body: BodyInit): Promise<string | null> {
@@ -1058,6 +1059,59 @@ export async function getSongStream(videoId: string) {
 	return { videoInfo: info, innertube: client, poToken };
 }
 
+/**
+ * Stream session for a track, preferring its song version: when YouTube Music
+ * pairs a music video with an album track, the track is that song, so
+ * playback, crossfade preloading and downloads all use the song's stream.
+ * The video's own stream is fetched in parallel with the version lookup, so
+ * tracks without a song version load exactly as before; when one exists, its
+ * stream replaces the video's. `videoId` is the id actually streamed — the
+ * Sabr session and its PoToken must use it, not the requested one.
+ */
+export async function getPlaybackStream(videoId: string) {
+	const [version, fallback] = await Promise.allSettled([
+		getSongVersion(videoId),
+		getSongStream(videoId),
+	]);
+	const songVersion = version.status === "fulfilled" ? version.value : null;
+	if (songVersion && songVersion.id !== videoId) {
+		try {
+			const result = await getSongStream(songVersion.id);
+			// An unplayable version (region blocks) has no stream to feed the
+			// player, so it must not replace a working video.
+			if (result.videoInfo.streaming_data) {
+				console.log(
+					`[YuMusic] playing the song version ${songVersion.id} (video: ${videoId})`,
+				);
+				return { ...result, videoId: songVersion.id };
+			}
+			console.warn(
+				"[YuMusic] song version has no stream, playing the original video",
+			);
+		} catch (error) {
+			console.warn(
+				"[YuMusic] song version unavailable, playing the original video:",
+				error,
+			);
+		}
+	}
+	if (fallback.status === "fulfilled") return { ...fallback.value, videoId };
+	throw fallback.reason;
+}
+
+/**
+ * The album-track version of the video, when YouTube Music pairs one. Read
+ * from the Up Next queue that the track metadata already fetches, so it
+ * shares the per-track cache; resolves to null when the video has no version
+ * (or the queue is unavailable).
+ */
+export async function getSongVersion(
+	videoId: string,
+): Promise<SongVersion | null> {
+	const meta = await getTrackMeta(videoId).catch(() => null);
+	return meta?.songVersion ?? null;
+}
+
 export interface TrackMeta {
 	album?: { name: string; id?: string };
 	artists: { name: string; id?: string }[];
@@ -1065,6 +1119,8 @@ export interface TrackMeta {
 	originalTitle?: string;
 	/** Primary artist credit, in the session's fetch language. */
 	originalArtist?: string;
+	/** Audio-track ("song") version of a music video, when the queue has one. */
+	songVersion?: SongVersion;
 }
 
 /**
@@ -1095,23 +1151,46 @@ export function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	return request;
 }
 
+/** The song-version metadata the queue's counterpart entry carries. */
+function toSongVersion(entry: YTNodes.PlaylistPanelVideo): SongVersion {
+	const artists = (entry.artists ?? [])
+		.filter((artist) => artist.name)
+		.map((artist) => ({
+			name: artist.name,
+			id: artist.channel_id?.startsWith("UC") ? artist.channel_id : undefined,
+		}));
+	return {
+		id: entry.video_id,
+		title: entry.title?.toString() || undefined,
+		artists: artists.length > 0 ? artists : undefined,
+		duration: entry.duration?.text || undefined,
+		thumbnail: hiResThumb(biggestThumb(entry.thumbnail)?.url) || undefined,
+		album: entry.album
+			? { name: entry.album.name, id: entry.album.id }
+			: undefined,
+	};
+}
+
 async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	try {
 		const client = await getYoutubeClient();
 		const info = await client.music.getInfo(videoId);
 		const queue = await info.getUpNext(false);
 		const videos: YTNodes.PlaylistPanelVideo[] = [];
+		const wrappers: YTNodes.PlaylistPanelVideoWrapper[] = [];
 		for (const item of queue.contents) {
 			if (item.is(YTNodes.PlaylistPanelVideo)) {
 				videos.push(item);
 			} else if (item.is(YTNodes.PlaylistPanelVideoWrapper) && item.primary) {
 				videos.push(item.primary);
+				wrappers.push(item);
 			}
 		}
 		const current =
 			videos.find((video) => video.selected) ??
 			videos.find((video) => video.video_id === videoId);
 		if (!current) return null;
+		const versionEntry = songVersionEntryFromQueue(wrappers, videoId);
 		const oembed = await getOembedMetadata(videoId, (input, init) =>
 			fetchFunction(input, init),
 		);
@@ -1129,6 +1208,7 @@ async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 				})),
 			originalTitle: oembed?.title ?? undefined,
 			originalArtist: current.artists?.[0]?.name || undefined,
+			songVersion: versionEntry ? toSongVersion(versionEntry) : undefined,
 		};
 	} catch (error) {
 		console.warn("[YuMusic] failed to load track metadata:", error);

@@ -10,6 +10,7 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
@@ -109,6 +110,24 @@ function entryKey(entry: SearchEntry): string {
 	if (entry.kind === "playable") return `playable:${entry.song.id}`;
 	if (entry.kind === "artist") return `artist:${entry.id}`;
 	return `collection:${entry.id}`;
+}
+
+/** Shows and plays resolved video entries as their song version. */
+function withSongVersions(
+	entry: SearchEntry,
+	versions: ReadonlyMap<string, Song>,
+): SearchEntry {
+	const song =
+		entry.kind === "playable"
+			? (versions.get(entry.song.id) ?? entry.song)
+			: undefined;
+	const songs = entry.songs?.map((item) => versions.get(item.id) ?? item);
+	if (!song && !songs) return entry;
+	return {
+		...entry,
+		...(song ? { song } : {}),
+		...(songs ? { songs } : {}),
+	} as SearchEntry;
 }
 
 /**
@@ -367,6 +386,8 @@ function shuffledSongs(songs: Song[]): Song[] {
 export default function SearchResults({ query }: SearchResultsPageProps) {
 	const { play, playQueue, addToQueue, currentSong } = usePlayer();
 	const { isPlaying } = usePlayerControls();
+	// Video entries already resolved to their song version while playing.
+	const versions = useSongVersionReplacements();
 	const navigate = useNavigate();
 	const [tab, setTab] = useState<SearchTab>("all");
 	const [view, setView] = useState<TabView>({ status: "loading" });
@@ -479,15 +500,16 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 				<>
 					<div className="space-y-0.5">
 						{results.map((entry, i) => {
-							if (entry.top) {
+							const shown = withSongVersions(entry, versions);
+							if (shown.top) {
 								return (
 									<TopResultCard
-										entry={entry}
+										entry={shown}
 										isPlaying={isPlaying}
 										key={entryKey(entry)}
 										onMix={startMix}
 										onOpen={() => {
-											if (entry.kind !== "playable") openEntry(entry);
+											if (shown.kind !== "playable") openEntry(shown);
 										}}
 										onPlay={(song) => play(song)}
 										onQueue={(song) => addToQueue([song])}
@@ -496,33 +518,33 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 									/>
 								);
 							}
-							if (entry.kind === "playable") {
+							if (shown.kind === "playable") {
 								return (
 									<PlayableRow
-										entry={entry}
+										entry={shown}
 										index={i}
-										isCurrent={currentSong?.id === entry.song.id}
+										isCurrent={currentSong?.id === shown.song.id}
 										isPlaying={isPlaying}
-										key={`playable-${entry.song.id}`}
-										onPlay={() => play(entry.song)}
-										onQueue={() => addToQueue([entry.song])}
+										key={entryKey(entry)}
+										onPlay={() => play(shown.song)}
+										onQueue={() => addToQueue([shown.song])}
 									/>
 								);
 							}
-							if (entry.kind === "artist") {
+							if (shown.kind === "artist") {
 								return (
 									<ArtistRow
-										entry={entry}
-										key={`artist-${entry.id}`}
-										onClick={() => openEntry(entry)}
+										entry={shown}
+										key={`artist-${shown.id}`}
+										onClick={() => openEntry(shown)}
 									/>
 								);
 							}
 							return (
 								<CollectionRow
-									entry={entry}
-									key={`collection-${entry.id}`}
-									onClick={() => openEntry(entry)}
+									entry={shown}
+									key={`collection-${shown.id}`}
+									onClick={() => openEntry(shown)}
 								/>
 							);
 						})}
