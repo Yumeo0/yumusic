@@ -205,6 +205,23 @@ describe("applySongDescription", () => {
 		]);
 	});
 
+	test("a featured vocalist in the title tail does not replace the artist", () => {
+		// "はいよろこんで (Magens Remix)  feat. 初音ミク": the description's
+		// "Vocal：初音ミク" is a feature, so the uploader (the remixer) keeps
+		// the artist credit.
+		const updated = applySongDescription(
+			song({
+				title: "はいよろこんで (Magens Remix)  feat. 初音ミク",
+				artist: "Magens",
+				artistId: "UCZeyGHvgI3xdd-PuhyVR4ag",
+				artists: [{ name: "Magens", id: "UCZeyGHvgI3xdd-PuhyVR4ag" }],
+			}),
+			"Vocal：初音ミク\nRemix：Magens   https://x.com/GMagens",
+		);
+		expect(updated.artist).toBe("Magens");
+		expect(updated.artistId).toBe("UCZeyGHvgI3xdd-PuhyVR4ag");
+	});
+
 	test("adopts a multi-name vocal credit the title doesn't mention", () => {
 		const updated = applySongDescription(
 			song({

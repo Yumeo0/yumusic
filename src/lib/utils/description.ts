@@ -219,11 +219,18 @@ function splitArtistNames(raw: string): string[] {
 const ROLE_BRACKET =
 	/[(（【『「]\s*(?:vocal|vo|feat(?:uring)?|ft|歌|cv)\s*[.:：・][^)）】』」]*[)）】』」]/giu;
 
+/**
+ * A bare feature tail — "… feat. 初音ミク", "… ft. X" — which credits a
+ * feature performance, not the track's artist.
+ */
+const FEAT_TAIL = /(?<!\p{L})(?:feat(?:uring)?|ft)(?:\.\s*|\s+).*$/iu;
+
 /** Whether the title credits the parsed artist ("Nameless - Song"). */
 function artistMentionedInTitle(title: string, artist: string): boolean {
-	// Role-bracketed mentions ("(Vocal.X)") credit the vocalist as a feature,
-	// not the track's artist, so they don't count as a title credit.
-	const plain = title.replace(ROLE_BRACKET, " ");
+	// Role-bracketed ("(Vocal.X)") and feature-tail ("feat. X") mentions
+	// credit a feature performance, not the track's artist, so they don't
+	// count as a title credit.
+	const plain = title.replace(ROLE_BRACKET, " ").replace(FEAT_TAIL, " ");
 	const foldedTitle = plain.toLowerCase();
 	const titleWords = new Set(
 		foldedTitle.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
