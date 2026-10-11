@@ -44,6 +44,8 @@ interface ShelfItem {
 	subtitle: string;
 	thumbnail: string | null;
 	song?: Song;
+	/** Route of a browsable entry (album, single, playlist, artist). */
+	link?: string;
 }
 
 interface ArtistShelf {
@@ -93,6 +95,20 @@ function toSongFromTwoRow(
 		artists: artistName ? [{ name: artistName, id: artistId }] : undefined,
 		thumbnail: hiResThumb(biggestThumb(item.thumbnail)?.url),
 	};
+}
+
+/** Route of a browsable carousel entry: album/single, playlist or artist. */
+function collectionLink(item: YTNodes.MusicTwoRowItem): string | undefined {
+	if (!item.id) return undefined;
+	switch (item.item_type) {
+		case "album":
+		case "playlist":
+			return `/playlists/${item.id}`;
+		case "artist":
+			return `/artist/${item.id}`;
+		default:
+			return undefined;
+	}
 }
 
 async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
@@ -171,6 +187,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 						subtitle: item.subtitle?.text || "",
 						thumbnail: hiResThumb(biggestThumb(item.thumbnail)?.url),
 						song: twoRowSong?.id ? twoRowSong : undefined,
+						link: twoRowSong ? undefined : collectionLink(item),
 					});
 				}
 			}
@@ -479,6 +496,8 @@ export default function ArtistPage() {
 													.map((shelfItem) => shelfItem.song)
 													.filter((s): s is Song => Boolean(s)),
 											);
+										} else if (item.link) {
+											navigate(item.link);
 										}
 									}}
 									type="button"
