@@ -103,6 +103,7 @@ function mbRequest<T>(url: string, attempt = 0): Promise<T> {
 
 /** MusicBrainz artist search hit (fields used here). */
 interface MbArtist {
+	id?: string;
 	name?: string;
 	"sort-name"?: string;
 	score?: number;
@@ -150,14 +151,33 @@ function artistMatches(
 }
 
 /**
+ * Whether the artist's external links carry the searched name. MusicBrainz
+ * also matches artists through their linked profiles ("Exsy" finds えくしい
+ * via "twitter.com/exsy_ugoemo", "soundcloud.com/exsy-4767898") without
+ * exposing an alias, which is how such artists can still be corroborated.
+ */
+async function artistLinkedToName(
+	id: string,
+	folded: string,
+): Promise<boolean> {
+	const data = await mbRequest<{
+		relations?: Array<{ url?: { resource?: string } }>;
+	}>(`${MB_API}/artist/${id}?inc=url-rels&fmt=json`);
+	return (data.relations ?? []).some((relation) =>
+		foldName(relation.url?.resource ?? "").includes(folded),
+	);
+}
+
+/**
  * Resolves the name MusicBrainz credits an artist under. The queue's credit
  * is often a romanization or alias ("Sakamata Chloe") while recording credits
  * carry the original-language name ("沙花叉クロヱ"), and the recording query's
  * `artist:` field only matches the credit. A hit counts when the searched
  * name equals the artist's name, sort name or an alias — word order and
  * punctuation ignored, so "Nakuru Aitsuki" matches the alias "Aitsuki
- * Nakuru" — so an unrelated top result can't redirect the recording search.
- * Results are cached in localStorage; resolves to null when nothing matches.
+ * Nakuru" — or when the top hit's linked profiles carry the name, so an
+ * unrelated top result can't redirect the recording search. Results are
+ * cached in localStorage; resolves to null when nothing matches.
  */
 async function findArtistName(artistName: string): Promise<string | null> {
 	const folded = foldName(artistName);
@@ -183,6 +203,13 @@ async function findArtistName(artistName: string): Promise<string | null> {
 			bestScore = score;
 			pick = artist;
 		}
+	}
+	// No name/alias match: MB's top relevance may still be right through the
+	// artist's linked profiles, but only that link evidence makes it usable
+	// (scores alone are not trustworthy: "加猫 のか" returns 猫 シ Corp. at 100).
+	if (!pick) {
+		const top = data.artists?.[0];
+		if (top?.id && (await artistLinkedToName(top.id, folded))) pick = top;
 	}
 	const name = pick?.name?.trim() || null;
 	if (!name) {

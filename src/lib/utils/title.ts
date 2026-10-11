@@ -625,11 +625,28 @@ function foldName(text: string): string {
 	return text.toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
 }
 
+/** Drops bracketed spans from a name; nested brackets go with their parent. */
+function stripBracketSpans(
+	name: string,
+	keep: (span: string) => boolean,
+): string {
+	const spans = [...bracketSegments(name)];
+	// Only outermost spans: nested ones are contained in their parent.
+	const outermost = spans.filter(
+		(span) =>
+			!spans.some((other) => other.start < span.start && span.end < other.end),
+	);
+	let out = name;
+	for (const span of outermost.reverse()) {
+		if (keep(name.slice(span.start, span.end))) continue;
+		out = `${out.slice(0, span.start)} ${out.slice(span.end)}`;
+	}
+	return out;
+}
+
 /** Drops bracketed group tags from an artist ("Elira Pendora 【NIJISANJI EN】"). */
 function artistCore(name: string): string {
-	return name
-		.replace(/[([（【『「〈≪][^)）】』」〉≫\]]*[)）】』」〉≫\]]/gu, " ")
-		.trim();
+	return stripBracketSpans(name, () => false).trim();
 }
 
 /**
@@ -638,10 +655,7 @@ function artistCore(name: string): string {
  * role ("Ellen Joe (CV:Shion Wakayama)").
  */
 function dropGroupTags(name: string): string {
-	return name
-		.replace(/[([（【『「〈≪][^)）】』」〉≫\]]*[)）】』」〉≫\]]/gu, (match) =>
-			/[：:]/u.test(match) ? match : " ",
-		)
+	return stripBracketSpans(name, (span) => /[：:]/u.test(span))
 		.replace(/\s+/g, " ")
 		.trim();
 }
@@ -1148,7 +1162,7 @@ const BRACKET_PAIRS: Record<string, string> = {
 	"（": "）",
 	"【": "】",
 	"{": "}",
-	"『": "」",
+	"『": "』",
 	"「": "」",
 	"〈": "〉",
 	"≪": "≫",

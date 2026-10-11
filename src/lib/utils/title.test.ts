@@ -88,6 +88,19 @@ describe("noise, credit and decoration tails", () => {
 		).toEqual([]);
 	});
 
+	test("nested brackets in a cover credit are dropped whole", () => {
+		// "月乃（『NEEDY GIRL OVERDOSE』主題歌）": the descriptor brackets wrap
+		// the song's quoted name, so the performer is just "月乃".
+		const parts = formatTitleParts(
+			"❥ INTERNET OVERDOSE／Covered by 月乃（『NEEDY GIRL OVERDOSE』主題歌）",
+			"original",
+			true,
+			"Tsukino",
+		);
+		expect(parts.main).toBe("❥ INTERNET OVERDOSE");
+		expect(parts.coverArtists).toEqual(["月乃"]);
+	});
+
 	test("artist slash credit with (cover)", () => {
 		expect(main("flos / R Sound Design (cover)")).toBe("flos");
 	});
@@ -310,6 +323,10 @@ describe("artist name romaji tails", () => {
 		);
 		// Also parenthesized tags on Latin names ("Apricot (Froot)").
 		expect(formatArtistName("Apricot (Froot)")).toBe("Apricot");
+		// Nested group brackets go with their parent span.
+		expect(formatArtistName("月乃（『NEEDY GIRL OVERDOSE』主題歌）")).toBe(
+			"月乃",
+		);
 		// Role credits in brackets are kept: they name a person.
 		expect(formatArtistName("Ellen Joe (CV:Shion Wakayama)")).toBe(
 			"Ellen Joe (CV:Shion Wakayama)",

@@ -222,6 +222,86 @@ describe("findRecording artist resolution", () => {
 		expect(mbids?.recording).toBe("36a03f56-8ef5-47f0-a293-225bd52b40c0");
 	});
 
+	test("an artist matched only through its linked profiles still resolves", async () => {
+		// "Exsy" finds えくしい through twitter.com/exsy_ugoemo; there is no
+		// alias, so the linked profiles corroborate the top hit.
+		stubMusicBrainz((url) => {
+			if (url.pathname.startsWith("/ws/2/artist/")) {
+				return {
+					relations: [{ url: { resource: "https://twitter.com/exsy_ugoemo" } }],
+				};
+			}
+			if (url.pathname.endsWith("/artist")) {
+				return {
+					artists: [
+						{
+							id: "exsy-id",
+							score: 100,
+							name: "えくしい",
+							"sort-name": "えくしい",
+						},
+					],
+				};
+			}
+			return {
+				recordings: [
+					{
+						id: "5e3197cf-0b99-48c5-9907-73e44fdb5538",
+						title: "なんとかしてよ",
+						length: 129000,
+						"artist-credit": [
+							{ name: "えくしい", artist: { id: "exsy-id", name: "えくしい" } },
+							{ name: "重音テト", artist: { id: "teto-id", name: "重音テト" } },
+						],
+						releases: [],
+					},
+				],
+			};
+		});
+
+		const mbids = await findRecording("なんとかしてよ", "Exsy", 130);
+		expect(mbids?.recording).toBe("5e3197cf-0b99-48c5-9907-73e44fdb5538");
+		expect(requests[1]).toContain("/ws/2/artist/exsy-id?inc=url-rels");
+	});
+
+	test("an unrelated top hit stays unmatched without link evidence", async () => {
+		// "加猫 のか" doesn't exist; MB's top hit is another artist (score 100)
+		// whose links don't carry the name, so it must not be adopted.
+		stubMusicBrainz((url) => {
+			if (url.pathname.startsWith("/ws/2/artist/")) {
+				return {
+					relations: [{ url: { resource: "https://twitter.com/catsystem" } }],
+				};
+			}
+			if (url.pathname.endsWith("/artist")) {
+				return { artists: [{ id: "cat-id", score: 100, name: "猫 シ Corp." }] };
+			}
+			return {
+				recordings: [
+					{
+						id: "original-id",
+						title: "ときめきちゅるぴかきゅるるらった",
+						length: 159000,
+						"artist-credit": [
+							{
+								name: "p-katsu",
+								artist: { id: "p-katsu-id", name: "p-katsu" },
+							},
+						],
+						releases: [],
+					},
+				],
+			};
+		});
+
+		const mbids = await findRecording(
+			"ときめきちゅるぴかきゅるるらった",
+			"加猫 のか",
+			159,
+		);
+		expect(mbids).toBeNull();
+	});
+
 	test("matches a name whose words are in a different order", async () => {
 		stubMusicBrainz((url) => {
 			if (url.pathname.endsWith("/artist")) {
