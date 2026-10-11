@@ -2,7 +2,7 @@
 	"name": "yumusic",
 	"productName": "YuMusic",
 	"private": true,
-	"version": "0.4.3",
+	"version": "0.4.4",
 	"description": "Crossplatform app for YTM",
 	"type": "module",
 	"scripts": {
