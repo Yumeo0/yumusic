@@ -84,7 +84,7 @@ import SettingsPage from "./pages/settings";
  * plus playback timestamps that freeze while paused.
  */
 function DiscordPresenceSync() {
-	const { currentSong, videoElementRef } = usePlayer();
+	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
 	const { isPlaying } = usePlayerControls();
 	const [settings] = useSettings();
 	const [meta, setMeta] = useState<TrackMeta | null>(null);
@@ -107,6 +107,9 @@ function DiscordPresenceSync() {
 	// Track the element's duration reactively: when a song starts, the
 	// presence update fires before MSE metadata is parsed (duration NaN),
 	// so re-send once durationchange/loadedmetadata deliver the real value.
+	// A crossfade preloads the next track onto the idle deck early, so its
+	// duration events have already fired by the time the handover makes it
+	// current — read the value once at attach time to catch those.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: songId is an intentional reset trigger for the tracked duration
 	useEffect(() => {
 		setMediaDuration(0);
@@ -116,6 +119,7 @@ function DiscordPresenceSync() {
 			setMediaDuration(
 				Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
 			);
+		sync();
 		videoEl.addEventListener("durationchange", sync);
 		videoEl.addEventListener("loadedmetadata", sync);
 		return () => {
@@ -139,6 +143,11 @@ function DiscordPresenceSync() {
 		};
 	}, [discordEnabled, songId]);
 
+	// The player's metadata length (YouTube's listing) is preferred over the
+	// media element's duration, which reports a fraction less; it is also the
+	// only total available when a crossfade preload beat the element listeners.
+	const durationSecs = knownDuration > 0 ? knownDuration : mediaDuration;
+
 	useEffect(() => {
 		if (!discordEnabled || !songId) return;
 		const videoEl = videoElementRef?.current ?? null;
@@ -158,7 +167,7 @@ function DiscordPresenceSync() {
 					: null,
 				playing: isPlaying,
 				elapsedSecs: elapsed,
-				durationSecs: mediaDuration,
+				durationSecs,
 			},
 		}).catch((error) => {
 			console.warn("[discord] presence update failed:", error);
@@ -171,7 +180,7 @@ function DiscordPresenceSync() {
 		cover,
 		artistId,
 		isPlaying,
-		mediaDuration,
+		durationSecs,
 		meta,
 		videoElementRef,
 	]);
