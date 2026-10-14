@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { SabrStream } from "googlevideo/sabr-stream";
 import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
-import { useSyncExternalStore } from "react";
+import { createStore } from "solid-js";
 import { Constants } from "youtubei.js";
 import type { Song } from "@/contexts/player-context";
 import {
@@ -78,59 +78,64 @@ const CHUNK_BYTES = 512 * 1024;
 let entries = new Map<string, DownloadEntry>();
 const statuses = new Map<string, DownloadStatus>();
 const jobs = new Map<string, PlaylistDownloadJob>();
-let snapshot: DownloadsSnapshot | null = null;
-const listeners = new Set<() => void>();
 
-function emit() {
-	snapshot = null;
-	for (const listener of listeners) listener();
-}
+/** Snapshot shape as a reactive store; fields are read where they render. */
+const [downloads, setDownloads] = createStore<DownloadsSnapshot>({
+	entries: new Map(),
+	failed: [],
+	jobs: new Map(),
+	statuses: new Map(),
+	tasks: [],
+	totalBytes: 0,
+});
 
-function subscribe(listener: () => void) {
-	listeners.add(listener);
-	return () => {
-		listeners.delete(listener);
+function buildSnapshot(): DownloadsSnapshot {
+	let totalBytes = 0;
+	for (const entry of entries.values()) totalBytes += entry.size;
+
+	// Queue order: the running track first, then the waiting ones.
+	const tasks: DownloadTask[] = [];
+	if (current) {
+		const status = statuses.get(current.song.id);
+		tasks.push({
+			phase: "downloading",
+			progress: status?.phase === "downloading" ? status.progress : null,
+			song: current.song,
+		});
+	}
+	for (const item of queue) {
+		tasks.push({ phase: "queued", progress: null, song: item.song });
+	}
+	const failed: Song[] = [];
+	for (const status of statuses.values()) {
+		if (status.phase === "error") failed.push(status.song);
+	}
+
+	return {
+		entries: new Map(entries),
+		failed,
+		jobs: new Map(jobs),
+		statuses: new Map(statuses),
+		tasks,
+		totalBytes,
 	};
 }
 
-function getSnapshot(): DownloadsSnapshot {
-	if (!snapshot) {
-		let totalBytes = 0;
-		for (const entry of entries.values()) totalBytes += entry.size;
-
-		// Queue order: the running track first, then the waiting ones.
-		const tasks: DownloadTask[] = [];
-		if (current) {
-			const status = statuses.get(current.song.id);
-			tasks.push({
-				phase: "downloading",
-				progress: status?.phase === "downloading" ? status.progress : null,
-				song: current.song,
-			});
-		}
-		for (const item of queue) {
-			tasks.push({ phase: "queued", progress: null, song: item.song });
-		}
-		const failed: Song[] = [];
-		for (const status of statuses.values()) {
-			if (status.phase === "error") failed.push(status.song);
-		}
-
-		snapshot = {
-			entries: new Map(entries),
-			failed,
-			jobs: new Map(jobs),
-			statuses: new Map(statuses),
-			tasks,
-			totalBytes,
-		};
-	}
-	return snapshot;
+function emit() {
+	const next = buildSnapshot();
+	setDownloads((state) => {
+		state.entries = next.entries;
+		state.failed = next.failed;
+		state.jobs = next.jobs;
+		state.statuses = next.statuses;
+		state.tasks = next.tasks;
+		state.totalBytes = next.totalBytes;
+	});
 }
 
-/** Reactive view of the downloads; re-renders subscribers on any change. */
+/** Reactive view of the downloads; read fields where they render. */
 export function useDownloads(): DownloadsSnapshot {
-	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+	return downloads;
 }
 
 /** The stored download for a song, when it is saved on this device. */
@@ -475,9 +480,9 @@ export function isPlaylistDownloaded(id: string): boolean {
 }
 
 /** Reactive version of `isPlaylistDownloaded` for menus and buttons. */
-export function usePlaylistDownloaded(id: string): boolean {
+export function usePlaylistDownloaded(getId: () => string): () => boolean {
 	const [settings] = useSettings();
-	return settings.downloadedPlaylists.includes(id);
+	return () => settings.downloadedPlaylists.includes(getId());
 }
 
 /**

@@ -1,4 +1,4 @@
-import { ContextMenu } from "@base-ui/react/context-menu";
+import { ContextMenu } from "@kobalte/core/context-menu";
 import {
 	Download,
 	Loader2,
@@ -7,8 +7,10 @@ import {
 	Share2,
 	Shuffle,
 	Trash2,
-} from "lucide-react";
-import { type ComponentType, type ReactNode, useState } from "react";
+} from "@lucide/solid";
+import type { JSX } from "@solidjs/web";
+import type { Component } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
@@ -34,6 +36,8 @@ interface PlaylistRef {
 	thumbnail?: string | null;
 }
 
+type MenuIcon = Component<{ class?: string }>;
+
 /** Fisher-Yates shuffle into a new array. */
 function shuffleSongs(tracks: Song[]): Song[] {
 	const queue = [...tracks];
@@ -44,42 +48,26 @@ function shuffleSongs(tracks: Song[]): Song[] {
 	return queue;
 }
 
-function MenuItem({
-	icon: Icon,
-	label,
-	onClick,
-	disabled = false,
-	iconClassName,
-}: {
-	icon: ComponentType<{ className?: string }>;
+function MenuItem(props: {
+	icon: MenuIcon;
 	label: string;
 	onClick: () => void;
 	disabled?: boolean;
-	iconClassName?: string;
+	iconClass?: string;
 }) {
 	return (
 		<ContextMenu.Item
-			className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-60 data-highlighted:bg-foreground/8"
-			disabled={disabled}
-			onClick={onClick}
+			class="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-60 data-highlighted:bg-foreground/8"
+			disabled={props.disabled}
+			onClick={props.onClick}
 		>
-			<Icon className={cn("size-4 text-muted-foreground", iconClassName)} />
-			{label}
+			<props.icon class={cn("size-4 text-muted-foreground", props.iconClass)} />
+			{props.label}
 		</ContextMenu.Item>
 	);
 }
 
-export function PlaylistContextMenu({
-	playlist,
-	isPinned,
-	onTogglePinned,
-	onDeleted,
-	onEdit,
-	songs,
-	highlight = true,
-	className = "contents",
-	children,
-}: {
+export function PlaylistContextMenu(props: {
 	playlist: PlaylistRef;
 	isPinned: boolean;
 	onTogglePinned: () => void;
@@ -87,32 +75,34 @@ export function PlaylistContextMenu({
 	onEdit?: () => void;
 	songs?: Song[];
 	highlight?: boolean;
-	className?: string;
-	children: ReactNode;
+	class?: string;
+	children: JSX.Element;
 }) {
-	const { addToQueue, play } = usePlayer();
+	const player = usePlayer();
 	const downloads = useDownloads();
-	const [busy, setBusy] = useState(false);
-	const [confirmOpen, setConfirmOpen] = useState(false);
-	const rawId = playlist.id.startsWith("VL")
-		? playlist.id.slice(2)
-		: playlist.id;
-	const downloadJob = downloads.jobs.get(playlist.id);
-	const downloaded = usePlaylistDownloaded(playlist.id);
+	const [busy, setBusy] = createSignal(false);
+	const [confirmOpen, setConfirmOpen] = createSignal(false);
+	const rawId = () =>
+		props.playlist.id.startsWith("VL")
+			? props.playlist.id.slice(2)
+			: props.playlist.id;
+	const downloadJob = () => downloads.jobs.get(props.playlist.id);
+	const downloaded = usePlaylistDownloaded(() => props.playlist.id);
 
 	const playShuffled = (tracks: Song[]) => {
 		const queue = shuffleSongs(tracks);
-		play(queue[0], queue.slice(1));
+		void player.play(queue[0], queue.slice(1));
 	};
 
 	const shufflePlay = () => {
-		if (busy) return;
+		if (busy()) return;
 		setBusy(true);
 		try {
+			const songs = props.songs;
 			const known =
 				songs && songs.length > 0
 					? songs
-					: readCachedPlaylistSongs(playlist.id);
+					: readCachedPlaylistSongs(props.playlist.id);
 			if (known) {
 				if (known.length === 0) {
 					showToast("Playlist is empty");
@@ -124,7 +114,7 @@ export function PlaylistContextMenu({
 			// No usable cache: start from the first page, then append the
 			// remaining pages to the queue once they finish loading.
 			let firstPage: Song[] | null = null;
-			void loadPlaylistSongs(playlist.id, (page) => {
+			void loadPlaylistSongs(props.playlist.id, (page) => {
 				firstPage = page;
 				if (page.length > 0) playShuffled(page);
 			})
@@ -133,9 +123,9 @@ export function PlaylistContextMenu({
 						showToast("Playlist is empty");
 						return;
 					}
-					refreshCachedPlaylistSongs(playlist.id, all);
+					refreshCachedPlaylistSongs(props.playlist.id, all);
 					const rest = all.slice(firstPage?.length ?? 0);
-					if (rest.length > 0) addToQueue(shuffleSongs(rest));
+					if (rest.length > 0) player.addToQueue(shuffleSongs(rest));
 				})
 				.catch((error) => {
 					console.error("[YuMusic] shuffle playlist failed:", error);
@@ -148,98 +138,117 @@ export function PlaylistContextMenu({
 
 	return (
 		<>
-			<ContextMenu.Root>
+			<ContextMenu>
 				<ContextMenu.Trigger
-					className={cn(highlight && "context-menu-highlight", className)}
+					class={cn(
+						props.highlight !== false && "context-menu-highlight",
+						props.class ?? "contents",
+					)}
 				>
-					{children}
+					{props.children}
 				</ContextMenu.Trigger>
 				<ContextMenu.Portal>
-					<ContextMenu.Positioner className="z-90 outline-none" sideOffset={6}>
-						<ContextMenu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-							{onEdit && (
+					<ContextMenu.Content class="z-90 min-w-44 origin-(--kb-menu-content-transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-[closed]:scale-95 data-[closed]:opacity-0">
+						<Show when={props.onEdit}>
+							{(onEdit) => (
 								<MenuItem
 									icon={Pencil}
 									label="Edit playlist"
-									onClick={onEdit}
+									onClick={onEdit()}
 								/>
 							)}
-							<MenuItem
-								icon={Shuffle}
-								label="Shuffle play"
-								onClick={shufflePlay}
-							/>
-							{downloadJob ? (
+						</Show>
+						<MenuItem
+							icon={Shuffle}
+							label="Shuffle play"
+							onClick={shufflePlay}
+						/>
+						<Show
+							fallback={
+								<Show
+									fallback={
+										<MenuItem
+											icon={Download}
+											label={
+												isAlbumId(props.playlist.id)
+													? "Download album"
+													: "Download playlist"
+											}
+											onClick={() =>
+												togglePlaylistDownload(
+													props.playlist.id,
+													props.playlist.title,
+													props.songs,
+												)
+											}
+										/>
+									}
+									when={downloaded()}
+								>
+									<MenuItem
+										icon={PlaylistDownloadOffIcon}
+										label={`Stop downloading ${isAlbumId(props.playlist.id) ? "album" : "playlist"}`}
+										onClick={() =>
+											togglePlaylistDownload(
+												props.playlist.id,
+												props.playlist.title,
+												props.songs,
+											)
+										}
+									/>
+								</Show>
+							}
+							when={downloadJob()}
+						>
+							{(job) => (
 								<MenuItem
 									disabled
 									icon={Loader2}
-									iconClassName="animate-spin"
+									iconClass="animate-spin"
 									label={
-										downloadJob.total > 0
-											? `Downloading ${downloadJob.done}/${downloadJob.total}`
+										job().total > 0
+											? `Downloading ${job().done}/${job().total}`
 											: "Preparing download…"
 									}
 									onClick={() => undefined}
 								/>
-							) : downloaded ? (
-								<MenuItem
-									icon={PlaylistDownloadOffIcon}
-									label={`Stop downloading ${isAlbumId(playlist.id) ? "album" : "playlist"}`}
-									onClick={() =>
-										togglePlaylistDownload(playlist.id, playlist.title, songs)
-									}
-								/>
-							) : (
-								<MenuItem
-									icon={Download}
-									label={
-										isAlbumId(playlist.id)
-											? "Download album"
-											: "Download playlist"
-									}
-									onClick={() =>
-										togglePlaylistDownload(playlist.id, playlist.title, songs)
-									}
-								/>
 							)}
+						</Show>
+						<MenuItem
+							icon={Pin}
+							label={props.isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+							onClick={props.onTogglePinned}
+						/>
+						<ContextMenu.Separator class="my-1 h-px bg-foreground/8" />
+						<MenuItem
+							icon={Share2}
+							label="Share playlist"
+							onClick={() =>
+								void shareLink({
+									title: props.playlist.title,
+									url: `https://music.youtube.com/playlist?list=${rawId()}`,
+								})
+							}
+						/>
+						<Show when={!isAlbumId(props.playlist.id)}>
+							<ContextMenu.Separator class="my-1 h-px bg-foreground/8" />
 							<MenuItem
-								icon={Pin}
-								label={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-								onClick={onTogglePinned}
+								icon={Trash2}
+								label="Delete playlist"
+								onClick={() => setConfirmOpen(true)}
 							/>
-							<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
-							<MenuItem
-								icon={Share2}
-								label="Share playlist"
-								onClick={() =>
-									void shareLink({
-										title: playlist.title,
-										url: `https://music.youtube.com/playlist?list=${rawId}`,
-									})
-								}
-							/>
-							{!isAlbumId(playlist.id) && (
-								<>
-									<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
-									<MenuItem
-										icon={Trash2}
-										label="Delete playlist"
-										onClick={() => setConfirmOpen(true)}
-									/>
-								</>
-							)}
-						</ContextMenu.Popup>
-					</ContextMenu.Positioner>
+						</Show>
+					</ContextMenu.Content>
 				</ContextMenu.Portal>
-			</ContextMenu.Root>
+			</ContextMenu>
 			<ConfirmDeletePlaylistDialog
-				isPinned={isPinned}
-				onDeleted={onDeleted}
+				isPinned={props.isPinned}
+				onDeleted={props.onDeleted}
 				onOpenChange={setConfirmOpen}
-				onTogglePinned={onTogglePinned}
-				open={confirmOpen}
-				playlistId={playlist.id}
-				playlistTitle={playlist.title}
+				onTogglePinned={props.onTogglePinned}
+				open={confirmOpen()}
+				playlistId={props.playlist.id}
+				playlistTitle={props.playlist.title}
 			/>
 		</>
 	);

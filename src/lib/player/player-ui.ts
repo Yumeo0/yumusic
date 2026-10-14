@@ -1,47 +1,37 @@
-import { useSyncExternalStore } from "react";
+import { createMemo, createSignal } from "solid-js";
 
 /**
- * Tiny external store for player *UI* flags (fullscreen open, queue sheet
+ * Module-level store for player *UI* flags (fullscreen open, queue sheet
  * open). These live outside PlayerProvider on purpose: keeping them in the
- * React context meant every open/close re-rendered the provider's value,
- * which re-rendered the entire app shell and current page before the
- * open/close animation could start (a ~0.5s hitch). Here only the few
- * components that actually read these flags re-render.
+ * player context touched the shared value on every open/close, while as
+ * module signals only the components that actually read a flag update.
  */
-let nowPlayingOpen = false;
+const [nowPlayingOpen, writeNowPlayingOpen] = createSignal(false);
 /**
  * Queue sheet position. On mobile the queue can rest halfway up (a quick peek
  * that is easy to swipe closed); on desktop anything but "closed" renders as
  * the open drawer.
  */
 export type QueueState = "closed" | "half" | "full";
-let queueState: QueueState = "closed";
+const [queueState, writeQueueState] = createSignal<QueueState>("closed");
 
-const listeners = new Set<() => void>();
+/** Reactive flags, read as `nowPlayingOpen()` / `queueState()`. */
+export { nowPlayingOpen, queueState };
 
-function emit() {
-	for (const listener of listeners) listener();
-}
-
-function subscribe(listener: () => void) {
-	listeners.add(listener);
-	return () => {
-		listeners.delete(listener);
-	};
-}
+/** `true` while the queue rests at any open detent. */
+export const queueOpen = createMemo(() => queueState() !== "closed");
 
 export function getNowPlayingOpen() {
-	return nowPlayingOpen;
+	return nowPlayingOpen();
 }
 
 export function setNowPlayingOpen(open: boolean) {
-	if (nowPlayingOpen === open) return;
-	nowPlayingOpen = open;
-	emit();
+	if (nowPlayingOpen() === open) return;
+	writeNowPlayingOpen(open);
 }
 
 export function toggleNowPlaying() {
-	setNowPlayingOpen(!nowPlayingOpen);
+	setNowPlayingOpen(!nowPlayingOpen());
 }
 
 /** Closes the fullscreen player if open; safe to call unconditionally. */
@@ -50,16 +40,17 @@ export function closeNowPlaying() {
 }
 
 export function getQueueState() {
-	return queueState;
+	return queueState();
 }
 
 /**
  * Blend factor (0 = closed layout, 1 = queue-up layout) for fullscreen views
  * that morph while the queue is dragged. Written per frame by the drag
- * gestures, so it must not re-render React. It is applied to the morphing
- * stage element rather than the document root: a custom property on the root
- * invalidates the computed style of every element in the app, which makes
- * drags stutter once the queue list is populated.
+ * gestures, so it is kept as a plain module variable: it must not invalidate
+ * any reactive readers. It is applied to the morphing stage element rather
+ * than the document root: a custom property on the root invalidates the
+ * computed style of every element in the app, which makes drags stutter once
+ * the queue list is populated.
  */
 let queueReveal = 0;
 let queueRevealTarget: HTMLElement | null = null;
@@ -98,14 +89,13 @@ function applyQueueReveal() {
 }
 
 export function setQueueState(next: QueueState) {
-	if (queueState === next) return;
-	queueState = next;
+	if (queueState() === next) return;
+	writeQueueState(next);
 	setQueueReveal(next === "closed" ? 0 : 1);
-	emit();
 }
 
 export function getQueueOpen() {
-	return queueState !== "closed";
+	return queueState() !== "closed";
 }
 
 /** `true` reveals the queue at its half (peek) detent, `false` closes it. */
@@ -114,17 +104,5 @@ export function setQueueOpen(open: boolean) {
 }
 
 export function toggleQueue() {
-	setQueueState(queueState === "closed" ? "half" : "closed");
-}
-
-export function useNowPlayingOpen() {
-	return useSyncExternalStore(subscribe, getNowPlayingOpen, getNowPlayingOpen);
-}
-
-export function useQueueState() {
-	return useSyncExternalStore(subscribe, getQueueState, getQueueState);
-}
-
-export function useQueueOpen() {
-	return useSyncExternalStore(subscribe, getQueueOpen, getQueueOpen);
+	setQueueState(queueState() === "closed" ? "half" : "closed");
 }

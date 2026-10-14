@@ -4,23 +4,14 @@
  * it and records the switched song here, so every list that still holds the
  * video entry renders — and plays — the song version from then on.
  */
-import { useSyncExternalStore } from "react";
+import { createStore } from "solid-js";
 import type { Song } from "@/contexts/player-context";
 
-const replacements = new Map<string, Song>();
-let snapshot: ReadonlyMap<string, Song> = new Map();
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void): () => void {
-	listeners.add(listener);
-	return () => {
-		listeners.delete(listener);
-	};
-}
+const [replacements, setReplacements] = createStore<Record<string, Song>>({});
 
 /** The recorded song version for a video id, when one was resolved. */
 export function songVersionReplacement(id: string): Song | undefined {
-	return replacements.get(id);
+	return replacements[id];
 }
 
 /**
@@ -29,15 +20,17 @@ export function songVersionReplacement(id: string): Song | undefined {
  */
 export function rememberSongVersion(song: Song, version: Song): void {
 	if (song.id === version.id) return;
-	replacements.set(song.id, version);
-	snapshot = new Map(replacements);
-	for (const listener of listeners) listener();
+	setReplacements((state) => {
+		state[song.id] = version;
+	});
 }
 
 /**
- * All recorded replacements, as a reactive map. Components render a row's
- * song as `replacements.get(song.id) ?? song`.
+ * All recorded replacements. Components render a row's song as
+ * `replacements.get(song.id) ?? song`; the read tracks where it renders.
  */
-export function useSongVersionReplacements(): ReadonlyMap<string, Song> {
-	return useSyncExternalStore(subscribe, () => snapshot);
+export function useSongVersionReplacements() {
+	return {
+		get: (id: string) => replacements[id],
+	};
 }

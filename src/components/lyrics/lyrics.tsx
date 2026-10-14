@@ -1,14 +1,14 @@
-import { AudioLines, MicVocal } from "lucide-react";
+import { AudioLines, MicVocal } from "@lucide/solid";
+import type { JSX } from "@solidjs/web";
 import {
-	type CSSProperties,
-	memo,
-	type RefObject,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
+	createEffect,
+	createMemo,
+	createSignal,
+	For,
+	onCleanup,
+	Show,
+	untrack,
+} from "solid-js";
 import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
 import {
 	fetchSyncedLyrics,
@@ -31,6 +31,11 @@ import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
 import { getSongLyrics } from "@/lib/youtube/youtube-client";
 
+/** Mutable holder for the media element sampled per frame. */
+interface VideoRef {
+	current: HTMLVideoElement | null;
+}
+
 interface LyricsPanelProps {
 	songId: string;
 	title: string;
@@ -41,8 +46,8 @@ interface LyricsPanelProps {
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	/** The playing media element — sampled per frame for the word fills. */
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
-	className?: string;
+	videoRef?: VideoRef | null;
+	class?: string;
 }
 
 interface ProviderLyrics {
@@ -86,212 +91,236 @@ const KIND_TITLES: Record<LyricsKind, string> = {
  * optionally shows romanization under each line, and falls back to a quiet
  * placeholder when nothing is available.
  */
-export function LyricsPanel({
-	songId,
-	title,
-	artist,
-	duration,
-	currentTime,
-	onSeekTime,
-	videoRef,
-	className,
-}: LyricsPanelProps) {
-	const [sources, setSources] = useState<LyricsSources>(PENDING_SOURCES);
-	const [view, setView] = useState<LyricsProviderId>("lrclib");
+export function LyricsPanel(props: LyricsPanelProps) {
+	const [sources, setSources] = createSignal<LyricsSources>(PENDING_SOURCES);
+	const [view, setView] = createSignal<LyricsProviderId>("lrclib");
 	const [settings] = useSettings();
 	// A manual provider pick sticks for the current track (until the next song).
-	const manualView = useRef(false);
+	let manualView = false;
 
-	useEffect(() => {
-		let cancelled = false;
-		setSources(PENDING_SOURCES);
-		manualView.current = false;
+	createEffect(
+		() => ({
+			artist: props.artist,
+			duration: props.duration,
+			loose: settings.lrclibLooseMatch,
+			songId: props.songId,
+			title: props.title,
+		}),
+		({ artist, duration, loose, songId, title }) => {
+			let cancelled = false;
+			setSources(PENDING_SOURCES);
+			manualView = false;
 
-		// Each provider lands on its own; a failing fetch counts as "none".
-		const settle = <T,>(
-			id: LyricsProviderId,
-			request: Promise<T>,
-			toLyrics: (result: T) => ProviderLyrics | null,
-		) => {
-			request
-				.then(toLyrics, () => null)
-				.then((lyrics) => {
-					if (!cancelled) setSources((prev) => ({ ...prev, [id]: lyrics }));
-				});
-		};
+			// Each provider lands on its own; a failing fetch counts as "none".
+			const settle = <T,>(
+				id: LyricsProviderId,
+				request: Promise<T>,
+				toLyrics: (result: T) => ProviderLyrics | null,
+			) => {
+				request
+					.then(toLyrics, () => null)
+					.then((lyrics) => {
+						if (!cancelled) setSources((prev) => ({ ...prev, [id]: lyrics }));
+					});
+			};
 
-		settle(
-			"lrclib",
-			fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
-			(lrclib) => (lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null),
-		);
-		settle(
-			"musixmatch",
-			fetchMusixmatchSynced(title, artist, duration),
-			(musixmatch) =>
-				musixmatch && musixmatch.length > 0
-					? { synced: musixmatch, plain: null, confirmed: true }
+			settle(
+				"lrclib",
+				fetchSyncedLyrics(title, artist, duration, loose),
+				(lrclib) => (lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null),
+			);
+			settle(
+				"musixmatch",
+				fetchMusixmatchSynced(title, artist, duration),
+				(musixmatch) =>
+					musixmatch && musixmatch.length > 0
+						? { synced: musixmatch, plain: null, confirmed: true }
+						: null,
+			);
+			settle("youtube", getSongLyrics(songId), (youtube) =>
+				youtube && (youtube.synced || youtube.plain)
+					? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
 					: null,
-		);
-		settle("youtube", getSongLyrics(songId), (youtube) =>
-			youtube && (youtube.synced || youtube.plain)
-				? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
-				: null,
-		);
-		settle("vocadb", fetchVocadbLyrics(title, artist, duration), (vocadb) =>
-			vocadb ? { synced: null, plain: vocadb, confirmed: true } : null,
-		);
-		settle(
-			"lrcred",
-			fetchLrcRedLyrics(title, artist, duration),
-			(lrcred) => lrcred,
-		);
+			);
+			settle("vocadb", fetchVocadbLyrics(title, artist, duration), (vocadb) =>
+				vocadb ? { synced: null, plain: vocadb, confirmed: true } : null,
+			);
+			settle(
+				"lrcred",
+				fetchLrcRedLyrics(title, artist, duration),
+				(lrcred) => lrcred,
+			);
 
-		return () => {
-			cancelled = true;
-		};
-	}, [songId, title, artist, duration, settings.lrclibLooseMatch]);
-
-	// Provider order is user-configurable, so selection re-runs when it changes.
-	const order = settings.lyricsProviderOrder;
-	const preferSynced = settings.preferSyncedLyrics;
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
 	// Pick the provider (respecting manual picks) among the sources that have
 	// arrived so far; re-runs as more land, so a better match that resolves
 	// later takes over. A confirmed match beats a loose one, word-synced
 	// lyrics beat line-synced ones; ties keep the priority order.
-	useEffect(() => {
-		const chosen = pickProvider(order, sources, preferSynced);
-		if (chosen === null) return;
-		if (manualView.current && sources[view]) return;
-		setView(chosen);
-	}, [sources, order, preferSynced, view]);
+	createEffect(
+		() => ({
+			order: settings.lyricsProviderOrder,
+			prefer: settings.preferSyncedLyrics,
+			sources: sources(),
+		}),
+		({ order, prefer, sources: current }) => {
+			const chosen = pickProvider(order, current, prefer);
+			if (chosen === null) return;
+			// Read the current pick untracked: tracking it here would make the
+			// setView below feed back into this effect's own inputs. A manual
+			// pick always comes from the available list, so it has sources.
+			if (manualView && current[untrack(view)]) return;
+			setView(chosen);
+		},
+	);
 
-	const romanize = settings.romanizeLyrics;
-	const available = order.flatMap((id) => {
-		const provider = PROVIDER_BY_ID.get(id);
-		if (!provider || !sources[id]) return [];
-		return [provider];
-	});
-	const pending = order.some((id) => sources[id] === undefined);
 	// The view can briefly point at a provider that hasn't arrived (or has
 	// none) until the selection effect catches up.
-	const active = sources[view] ?? null;
-	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
-	const kind = active ? lyricsKind(active) : null;
+	const active = () => sources()[view()] ?? null;
+	const attribution = () => PROVIDER_BY_ID.get(view())?.attribution;
+	const kind = () => {
+		const current = active();
+		return current ? lyricsKind(current) : null;
+	};
+	const available = createMemo(() =>
+		settings.lyricsProviderOrder.flatMap((id) => {
+			const provider = PROVIDER_BY_ID.get(id);
+			if (!provider || !sources()[id]) return [];
+			return [provider];
+		}),
+	);
+	const pending = createMemo(() =>
+		settings.lyricsProviderOrder.some((id) => sources()[id] === undefined),
+	);
+	const activeSynced = () => active()?.synced ?? null;
+	const activePlain = () => {
+		const current = active();
+		return current && !current.synced && current.plain ? current.plain : null;
+	};
+	const activeUnconfirmed = () => {
+		const current = active();
+		return current && !current.confirmed ? current : null;
+	};
 
 	return (
-		<div className={cn("flex h-full min-h-0 flex-col", className)}>
+		<div class={cn("flex h-full min-h-0 flex-col", props.class)}>
 			{/* Header + provider toggle */}
-			<div className="mb-4 flex items-center gap-2">
-				<MicVocal className="size-3.5 shrink-0 text-muted-foreground" />
-				<span className="text-xs font-medium text-muted-foreground">
-					Lyrics
-				</span>
-				{kind && (
+			<div class="mb-4 flex items-center gap-2">
+				<MicVocal class="size-3.5 shrink-0 text-muted-foreground" />
+				<span class="text-xs font-medium text-muted-foreground">Lyrics</span>
+				<Show when={kind()}>
+					{(currentKind) => (
+						<span
+							class="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+							title={KIND_TITLES[currentKind()]}
+						>
+							{LYRICS_KIND_LABELS[currentKind()]}
+						</span>
+					)}
+				</Show>
+				<Show when={activeUnconfirmed()}>
 					<span
-						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-						title={KIND_TITLES[kind]}
-					>
-						{LYRICS_KIND_LABELS[kind]}
-					</span>
-				)}
-				{active && !active.confirmed && (
-					<span
-						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+						class="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
 						title="Matched by title alone — may be a different version of this song"
 					>
 						Loose match
 					</span>
-				)}
-				{available.length >= 2 && (
-					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/6 p-0.5">
-						{available.map((provider) => (
-							<button
-								className={cn(
-									"animate-in fade-in rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
-									view === provider.id
-										? "bg-background text-foreground shadow-sm"
-										: "text-muted-foreground hover:text-foreground",
-								)}
-								key={provider.id}
-								onClick={() => {
-									manualView.current = true;
-									setView(provider.id);
-								}}
-								type="button"
-							>
-								{provider.label}
-							</button>
-						))}
+				</Show>
+				<Show when={available().length >= 2}>
+					<div class="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/6 p-0.5">
+						<For each={available()}>
+							{(provider) => (
+								<button
+									class={cn(
+										"animate-in fade-in rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
+										view() === provider.id
+											? "bg-background text-foreground shadow-sm"
+											: "text-muted-foreground hover:text-foreground",
+									)}
+									onClick={() => {
+										manualView = true;
+										setView(provider.id);
+									}}
+									type="button"
+								>
+									{provider.label}
+								</button>
+							)}
+						</For>
 					</div>
-				)}
+				</Show>
 			</div>
-			{!active && pending && <LyricsSkeleton />}
-			{active?.synced && (
-				<SyncedLines
-					attribution={attribution}
-					currentTime={currentTime}
-					lines={active.synced}
-					onSeekTime={onSeekTime}
-					romanize={romanize}
-					videoRef={videoRef}
-				/>
-			)}
-			{active && !active.synced && active.plain && (
-				<LyricsLines
-					attribution={attribution}
-					romanize={romanize}
-					text={active.plain}
-				/>
-			)}
-			{!pending && available.length === 0 && <LyricsFallback />}
+			<Show when={!active() && pending()}>
+				<LyricsSkeleton />
+			</Show>
+			<Show when={activeSynced()}>
+				{(lines) => (
+					<SyncedLines
+						attribution={attribution()}
+						currentTime={props.currentTime}
+						lines={lines()}
+						onSeekTime={props.onSeekTime}
+						romanize={settings.romanizeLyrics}
+						videoRef={props.videoRef}
+					/>
+				)}
+			</Show>
+			<Show when={activePlain()}>
+				{(text) => (
+					<LyricsLines
+						attribution={attribution()}
+						romanize={settings.romanizeLyrics}
+						text={text()}
+					/>
+				)}
+			</Show>
+			<Show when={!pending() && available().length === 0}>
+				<LyricsFallback />
+			</Show>
 		</div>
 	);
 }
 
-function SyncedLines({
-	lines,
-	currentTime,
-	onSeekTime,
-	romanize,
-	attribution,
-	videoRef,
-}: {
+function SyncedLines(props: {
 	lines: LrcLine[];
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	romanize: boolean;
 	attribution?: string;
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
+	videoRef?: VideoRef | null;
 }) {
-	const containerRef = useRef<HTMLDivElement>(null);
+	let container!: HTMLDivElement;
 	// Visual anchor per line index: the line itself, or the dots row that
 	// replaces it during silence
-	const anchorRefs = useRef<Array<HTMLElement | null>>([]);
+	const anchors: Array<HTMLElement | null> = [];
 	// Pauses auto-scroll briefly while the user scrolls manually
-	const holdUntilRef = useRef(0);
-	const lineTexts = useMemo(() => lines.map((l) => l.text), [lines]);
-	const romanized = useRomanizedLines(lineTexts, romanize);
+	let holdUntil = 0;
+	const lineTexts = () => props.lines.map((line) => line.text);
+	const romanized = useRomanizedLines(lineTexts, () => props.romanize);
 	// Romaji spacing stays reserved while pending; dropped once there is
 	// nothing to show (Latin-script lyrics, or every reading matches).
-	const showRomaji = romanize && romanized?.size !== 0;
+	const showRomaji = () => props.romanize && romanized()?.size !== 0;
 
-	const activeIndex = useMemo(() => {
+	const activeIndex = createMemo(() => {
 		let idx = -1;
-		for (let i = 0; i < lines.length; i++) {
-			if (lines[i].time <= currentTime + 0.25) {
+		for (let i = 0; i < props.lines.length; i++) {
+			if (props.lines[i].time <= props.currentTime + 0.25) {
 				idx = i;
 			} else {
 				break;
 			}
 		}
 		return idx;
-	}, [lines, currentTime]);
+	});
 
 	// Build render segments: runs of silence-only lines ("♪"/empty) are
 	// replaced by a single dots row; everything else renders as-is.
-	const segments = useMemo(() => {
+	const segments = createMemo(() => {
+		const lines = props.lines;
 		const out: Array<
 			| { kind: "line"; index: number }
 			| {
@@ -300,7 +329,6 @@ function SyncedLines({
 					to: number;
 					start: number;
 					end: number | null;
-					key: string;
 			  }
 		> = [];
 		let i = 0;
@@ -320,7 +348,6 @@ function SyncedLines({
 						i < lines.length
 							? Math.max(lines[i].time - 0.2, lines[from].time + 0.5)
 							: null,
-					key: `dots-${from}`,
 				});
 			} else {
 				out.push({ kind: "line", index: i });
@@ -328,159 +355,157 @@ function SyncedLines({
 			}
 		}
 		return out;
-	}, [lines]);
+	});
 
 	// Auto-scroll is animated by hand rather than with `behavior: "smooth"`:
 	// Chromium on Windows (WebView2) drops smooth programmatic scrolling
 	// whenever the OS animation/smooth-scroll setting is off, so the lyrics
 	// jumped line to line on desktop while Android eased them.
-	const scrollFrameRef = useRef(0);
-	const stopScroll = useCallback(() => {
-		cancelAnimationFrame(scrollFrameRef.current);
-		scrollFrameRef.current = 0;
-	}, []);
-	useEffect(() => stopScroll, [stopScroll]);
+	let scrollFrame = 0;
+	const stopScroll = () => {
+		cancelAnimationFrame(scrollFrame);
+		scrollFrame = 0;
+	};
+	onCleanup(stopScroll);
 
-	useEffect(() => {
-		const container = containerRef.current;
-		if (!container) return;
-		// Center the first line before playback reaches its timestamp too
-		const idx = activeIndex < 0 ? 0 : activeIndex;
-		const el = anchorRefs.current[idx];
-		if (!el) return;
-		if (Date.now() < holdUntilRef.current) return;
-		const max = container.scrollHeight - container.clientHeight;
-		const target = Math.min(
-			max,
-			Math.max(
-				0,
-				el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2,
-			),
-		);
-		stopScroll();
-		const from = container.scrollTop;
-		const distance = target - from;
-		if (Math.abs(distance) < 1) return;
-		// Long jumps (seeks, first load) get a bit more time, capped.
-		const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
-		const start = performance.now();
-		const tick = (now: number) => {
-			const t = Math.min((now - start) / duration, 1);
-			// easeInOutCubic: settles like the browser's smooth scroll
-			const eased = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
-			container.scrollTop = from + distance * eased;
-			scrollFrameRef.current = t < 1 ? requestAnimationFrame(tick) : 0;
-		};
-		scrollFrameRef.current = requestAnimationFrame(tick);
-	}, [activeIndex, stopScroll]);
+	createEffect(
+		() => activeIndex(),
+		(idx) => {
+			if (!container) return;
+			// Center the first line before playback reaches its timestamp too
+			const target = idx < 0 ? 0 : idx;
+			const el = anchors[target];
+			if (!el) return;
+			if (Date.now() < holdUntil) return;
+			const max = container.scrollHeight - container.clientHeight;
+			const to = Math.min(
+				max,
+				Math.max(
+					0,
+					el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2,
+				),
+			);
+			stopScroll();
+			const from = container.scrollTop;
+			const distance = to - from;
+			if (Math.abs(distance) < 1) return;
+			// Long jumps (seeks, first load) get a bit more time, capped.
+			const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
+			const start = performance.now();
+			const tick = (now: number) => {
+				const t = Math.min((now - start) / duration, 1);
+				// easeInOutCubic: settles like the browser's smooth scroll
+				const eased = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
+				container.scrollTop = from + distance * eased;
+				scrollFrame = t < 1 ? requestAnimationFrame(tick) : 0;
+			};
+			scrollFrame = requestAnimationFrame(tick);
+		},
+	);
 
 	// Manual scrolling wins: stop any running glide and pause auto-scroll.
 	const hold = () => {
 		stopScroll();
-		holdUntilRef.current = Date.now() + 4000;
+		holdUntil = Date.now() + 4000;
 	};
 
-	// Stable so the memoized lines don't all re-render on every clock tick.
-	const setAnchor = useCallback(
-		(index: number, el: HTMLParagraphElement | null) => {
-			anchorRefs.current[index] = el;
-		},
-		[],
-	);
+	const setAnchor = (index: number, el: HTMLParagraphElement | null) => {
+		anchors[index] = el;
+	};
 
 	return (
 		<div
-			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
+			class="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
 			data-swipe-dismiss-ignore
 			onTouchMove={hold}
 			onWheel={hold}
-			ref={containerRef}
+			ref={container}
 		>
 			{/* Half-viewport spacers so the first and last lines can truly center */}
-			<div className="pb-[50vh] pt-[50vh]">
-				{segments.map((seg) => {
-					if (seg.kind === "dots") {
-						// Only render while the silence is actually happening
-						const visible =
-							currentTime >= seg.start &&
-							(seg.end === null || currentTime < seg.end);
-						if (!visible) return null;
-						const progress =
-							seg.end === null
-								? 0
-								: Math.min(
-										1,
-										Math.max(
-											0,
-											(currentTime - seg.start) / (seg.end - seg.start),
-										),
-									);
+			<div class="pb-[50vh] pt-[50vh]">
+				<For each={segments()}>
+					{(seg) => {
+						if (seg.kind === "dots") {
+							// Only render while the silence is actually happening
+							const visible = () =>
+								props.currentTime >= seg.start &&
+								(seg.end === null || props.currentTime < seg.end);
+							const progress = () =>
+								seg.end === null
+									? 0
+									: Math.min(
+											1,
+											Math.max(
+												0,
+												(props.currentTime - seg.start) / (seg.end - seg.start),
+											),
+										);
+							return (
+								<Show when={visible()}>
+									<div
+										ref={(el) => {
+											for (let k = seg.from; k <= seg.to; k++) {
+												anchors[k] = el;
+											}
+										}}
+									>
+										<PauseDots
+											looping={seg.end === null}
+											progress={progress()}
+										/>
+									</div>
+								</Show>
+							);
+						}
+						const line = () => props.lines[seg.index];
+						const lineWords = () => line().words ?? [];
+						const isActive = () => seg.index === activeIndex();
 						return (
-							<div
-								key={seg.key}
-								ref={(el) => {
-									for (let k = seg.from; k <= seg.to; k++) {
-										anchorRefs.current[k] = el;
-									}
-								}}
+							<Show
+								fallback={
+									<LyricLine
+										index={seg.index}
+										isActive={isActive()}
+										onRef={setAnchor}
+										onSeekTime={props.onSeekTime}
+										romanize={showRomaji()}
+										romanizedText={romanized()?.get(seg.index)}
+										text={line().text}
+										time={line().time}
+									/>
+								}
+								when={lineWords().length > 0}
 							>
-								<PauseDots looping={seg.end === null} progress={progress} />
-							</div>
+								<WordSyncLyricLine
+									activeTime={isActive() ? props.currentTime : undefined}
+									endTime={props.lines[seg.index + 1]?.time}
+									index={seg.index}
+									isActive={isActive()}
+									onRef={setAnchor}
+									onSeekTime={props.onSeekTime}
+									romanize={showRomaji()}
+									romanizedText={romanized()?.get(seg.index)}
+									time={line().time}
+									videoRef={props.videoRef}
+									words={lineWords()}
+								/>
+							</Show>
 						);
-					}
-					const line = lines[seg.index];
-					if (line.words && line.words.length > 0) {
-						return (
-							<WordSyncLyricLine
-								activeTime={seg.index === activeIndex ? currentTime : undefined}
-								endTime={lines[seg.index + 1]?.time}
-								index={seg.index}
-								isActive={seg.index === activeIndex}
-								key={`lrc-${seg.index}`}
-								onRef={setAnchor}
-								onSeekTime={onSeekTime}
-								romanize={showRomaji}
-								romanizedText={romanized?.get(seg.index)}
-								time={line.time}
-								videoRef={videoRef}
-								words={line.words}
-							/>
-						);
-					}
-					return (
-						<LyricLine
-							index={seg.index}
-							isActive={seg.index === activeIndex}
-							key={`lrc-${seg.index}`}
-							onRef={setAnchor}
-							onSeekTime={onSeekTime}
-							romanize={showRomaji}
-							romanizedText={romanized?.get(seg.index)}
-							text={line.text}
-							time={line.time}
-						/>
-					);
-				})}
-				{attribution && <LyricsAttribution source={attribution} />}
+					}}
+				</For>
+				<Show when={props.attribution}>
+					{(source) => <LyricsAttribution source={source()} />}
+				</Show>
 			</div>
 		</div>
 	);
 }
 
 /**
- * One lyric line. Memoized on `isActive` so a clock tick only re-renders the
- * line that actually changed state instead of the whole (often long) list.
+ * One lyric line. Only the line whose active state changed re-renders on a
+ * clock tick; the others keep their DOM.
  */
-const LyricLine = memo(function LyricLine({
-	text,
-	time,
-	index,
-	isActive,
-	romanize,
-	romanizedText,
-	onSeekTime,
-	onRef,
-}: {
+function LyricLine(props: {
 	text: string;
 	time: number;
 	index: number;
@@ -492,42 +517,42 @@ const LyricLine = memo(function LyricLine({
 }) {
 	return (
 		<p
-			className={cn(
+			class={cn(
 				"cursor-pointer text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500 py-3",
-				isActive
+				props.isActive
 					? "text-foreground [text-shadow:0_0_24px_color-mix(in_oklab,var(--primary)_35%,transparent)]"
 					: "text-foreground/25 hover:text-foreground/60",
 			)}
-			onClick={() => onSeekTime(time)}
-			ref={(el) => onRef(index, el)}
+			onClick={() => props.onSeekTime(props.time)}
+			ref={(el) => props.onRef(props.index, el)}
 		>
-			{isActive && text
-				? Array.from(text).map((char, ci) =>
+			<Show fallback={props.text} when={props.isActive && props.text}>
+				<For each={Array.from(props.text)}>
+					{(char, charIndex) => (
 						// Plain spaces stay outside the spans so line breaks still
 						// happen at word boundaries, and inline spans keep font
 						// shaping (kerning, CJK punctuation) intact.
-						char === " " ? (
-							" "
-						) : (
+						<Show fallback={" "} when={char !== " "}>
 							<span
-								className="relative inline animate-char-wave"
-								// biome-ignore lint/suspicious/noArrayIndexKey: positional wave, characters never reorder
-								key={`c-${ci}`}
-								style={{ animationDelay: `${ci * 30}ms` }}
+								class="relative inline animate-char-wave"
+								style={{ "animation-delay": `${charIndex() * 30}ms` }}
 							>
 								{char}
 							</span>
-						),
-					)
-				: text}
-			{romanize && romanizedText && (
-				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
-					{romanizedText}
-				</span>
-			)}
+						</Show>
+					)}
+				</For>
+			</Show>
+			<Show when={props.romanize && props.romanizedText}>
+				{(reading) => (
+					<span class="mt-1 block text-sm leading-normal font-normal text-foreground/45">
+						{reading()}
+					</span>
+				)}
+			</Show>
 		</p>
 	);
-});
+}
 
 /**
  * The word line's playback position at display rate. The panel's
@@ -537,44 +562,54 @@ const LyricLine = memo(function LyricLine({
  * Returns undefined while the line is inactive (all words stay dim).
  */
 function useLivePosition(
-	videoRef: RefObject<HTMLVideoElement | null> | null | undefined,
-	activeTime: number | undefined,
-): number | undefined {
-	const [position, setPosition] = useState(0);
-	const active = activeTime !== undefined;
+	videoRef: VideoRef | null | undefined,
+	activeTime: () => number | undefined,
+): () => number | undefined {
+	const [position, setPosition] = createSignal(0);
 
-	useEffect(() => {
-		if (!active || !videoRef) return;
-		const videoEl = videoRef.current;
-		if (videoEl) setPosition(videoEl.currentTime);
-		let frame = requestAnimationFrame(function tick() {
-			const media = videoRef.current;
-			if (media) setPosition(media.currentTime);
-			frame = requestAnimationFrame(tick);
-		});
-		return () => cancelAnimationFrame(frame);
-	}, [active, videoRef]);
+	createEffect(
+		() => ({
+			active: activeTime() !== undefined,
+			// Snapshot the element in the compute phase: reading the (reactive)
+			// prop accessor inside the effect callback would be untracked.
+			element: videoRef?.current ?? null,
+		}),
+		({ active, element }) => {
+			if (!active || !videoRef) return;
+			if (element) setPosition(element.currentTime);
+			let frame = requestAnimationFrame(function tick() {
+				const media = videoRef.current;
+				if (media) setPosition(media.currentTime);
+				frame = requestAnimationFrame(tick);
+			});
+			return () => cancelAnimationFrame(frame);
+		},
+	);
 
 	// Without a media element, fall back to the prop clock.
-	if (!active) return undefined;
-	return videoRef ? position : activeTime;
+	return () =>
+		activeTime() === undefined
+			? undefined
+			: videoRef
+				? position()
+				: activeTime();
 }
 
 /** Last-resort fill window for a word with no end and no following word. */
 const WORD_TAIL_SEC = 0.6;
 
 /** Karaoke fill of a span: lit up to `progress`, with a glow on the fill. */
-function fillStyle(progress: number, dim: number): CSSProperties {
+function fillStyle(progress: number, dim: number): JSX.CSSProperties {
 	return {
-		backgroundImage: `linear-gradient(to right, var(--foreground) ${
+		"background-image": `linear-gradient(to right, var(--foreground) ${
 			progress * 100
 		}%, color-mix(in oklab, var(--foreground) ${dim}%, transparent) ${
 			progress * 100
 		}%)`,
-		backgroundClip: "text",
-		WebkitBackgroundClip: "text",
+		"background-clip": "text",
+		"-webkit-background-clip": "text",
 		color: "transparent",
-		WebkitTextFillColor: "transparent",
+		"-webkit-text-fill-color": "transparent",
 		filter:
 			"drop-shadow(0 0 12px color-mix(in oklab, var(--primary) 35%, transparent))",
 	};
@@ -585,22 +620,10 @@ function fillStyle(progress: number, dim: number): CSSProperties {
  * right while it is being sung (start → end time), upcoming words stay dim,
  * finished words are lit — and the romanized reading below fills along with
  * it. Only the active line receives a live position, so the other (often
- * many) word lines keep the memoized rendering and don't re-render on every
- * clock tick.
+ * many) word lines keep their rendering and don't re-render on every clock
+ * tick.
  */
-const WordSyncLyricLine = memo(function WordSyncLyricLine({
-	words,
-	activeTime,
-	endTime,
-	time,
-	index,
-	isActive,
-	romanize,
-	romanizedText,
-	onSeekTime,
-	onRef,
-	videoRef,
-}: {
+function WordSyncLyricLine(props: {
 	words: LrcWord[];
 	/** Playback position while this line is active; undefined otherwise. */
 	activeTime?: number;
@@ -613,166 +636,183 @@ const WordSyncLyricLine = memo(function WordSyncLyricLine({
 	romanizedText?: string;
 	onSeekTime: (seconds: number) => void;
 	onRef: (index: number, el: HTMLParagraphElement | null) => void;
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
+	videoRef?: VideoRef | null;
 }) {
-	const position = useLivePosition(videoRef, activeTime);
+	const position = useLivePosition(props.videoRef, () => props.activeTime);
 
 	// A word without an end lasts until the next one starts — the line's end
 	// for the final word, or a short tail when even that is unknown.
-	const ends = words.map(
-		(word, wi) =>
-			word.end ?? words[wi + 1]?.time ?? endTime ?? word.time + WORD_TAIL_SEC,
-	);
+	const ends = () =>
+		props.words.map(
+			(word, wi) =>
+				word.end ??
+				props.words[wi + 1]?.time ??
+				props.endTime ??
+				word.time + WORD_TAIL_SEC,
+		);
 
 	// The reading fills with the same timing, weighted by each chunk's text
 	// length: the fraction of the romaji that is sung at the current position.
-	let readingProgress = 0;
-	if (position !== undefined) {
+	const readingProgress = () => {
+		const at = position();
+		if (at === undefined) return 0;
+		const words = props.words;
 		const total = words.reduce((sum, word) => sum + word.text.trim().length, 0);
-		if (total > 0) {
-			let sung = 0;
-			for (let i = 0; i < words.length; i++) {
-				sung +=
-					wordProgress(words[i].time, ends[i], position) *
-					words[i].text.trim().length;
-			}
-			readingProgress = sung / total;
+		if (total <= 0) return 0;
+		const wordEnds = ends();
+		let sung = 0;
+		for (let i = 0; i < words.length; i++) {
+			sung +=
+				wordProgress(words[i].time, wordEnds[i], at) *
+				words[i].text.trim().length;
 		}
-	}
+		return sung / total;
+	};
 
 	return (
 		<p
-			className={cn(
+			class={cn(
 				"cursor-pointer py-3 text-[26px] leading-snug font-medium tracking-tight transition-colors duration-500",
-				!isActive && "text-foreground/25 hover:text-foreground/60",
+				!props.isActive && "text-foreground/25 hover:text-foreground/60",
 			)}
-			onClick={() => onSeekTime(time)}
-			ref={(el) => onRef(index, el)}
+			onClick={() => props.onSeekTime(props.time)}
+			ref={(el) => props.onRef(props.index, el)}
 		>
-			{words.map((word, wi) => {
-				const progress =
-					position === undefined
-						? 0
-						: wordProgress(word.time, ends[wi], position);
-				return (
-					<span
-						className={cn(
-							"relative inline",
-							progress <= 0 && "text-foreground/25",
-						)}
-						// biome-ignore lint/suspicious/noArrayIndexKey: positional word, times may repeat on synthetic syllabus
-						key={`w-${wi}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onSeekTime(word.time);
-						}}
-						style={progress > 0 ? fillStyle(progress, 25) : undefined}
-					>
-						{word.text}
-					</span>
-				);
-			})}
-			{romanize && romanizedText && (
-				<span className="mt-1 block text-sm leading-normal font-normal text-foreground/45">
-					{position === undefined
-						? romanizedText
-						: readingSegments(romanizedText, readingProgress).map((segment) =>
-								segment.sung === undefined ? (
-									segment.text
-								) : (
-									<span
-										className="relative inline"
-										key={`r-${segment.start}`}
-										style={
-											segment.sung > 0 ? fillStyle(segment.sung, 45) : undefined
-										}
-									>
-										{segment.text}
-									</span>
-								),
+			<For each={props.words}>
+				{(word, wi) => {
+					const progress = () => {
+						const at = position();
+						return at === undefined
+							? 0
+							: wordProgress(word.time, ends()[wi()], at);
+					};
+					return (
+						<span
+							class={cn(
+								"relative inline",
+								progress() <= 0 && "text-foreground/25",
 							)}
-				</span>
-			)}
+							onClick={(event) => {
+								event.stopPropagation();
+								props.onSeekTime(word.time);
+							}}
+							style={progress() > 0 ? fillStyle(progress(), 25) : undefined}
+						>
+							{word.text}
+						</span>
+					);
+				}}
+			</For>
+			<Show when={props.romanize && props.romanizedText}>
+				{(reading) => (
+					<span class="mt-1 block text-sm leading-normal font-normal text-foreground/45">
+						<Show fallback={reading()} when={position() !== undefined}>
+							<For
+								each={readingSegments(reading(), readingProgress())}
+								keyed={(segment) => segment.start}
+							>
+								{(segment) => (
+									<Show
+										fallback={segment().text}
+										when={segment().sung !== undefined}
+									>
+										<span
+											class="relative inline"
+											style={
+												(segment().sung ?? 0) > 0
+													? fillStyle(segment().sung ?? 0, 45)
+													: undefined
+											}
+										>
+											{segment().text}
+										</span>
+									</Show>
+								)}
+							</For>
+						</Show>
+					</span>
+				)}
+			</Show>
 		</p>
 	);
-});
+}
 
-function LyricsLines({
-	text,
-	romanize,
-	attribution,
-}: {
+function LyricsLines(props: {
 	text: string;
 	romanize: boolean;
 	attribution?: string;
 }) {
-	const lines = useMemo(() => text.split("\n"), [text]);
-	const romanized = useRomanizedLines(lines, romanize);
-	const showRomaji = romanize && romanized?.size !== 0;
+	const lines = createMemo(() => props.text.split("\n"));
+	const romanized = useRomanizedLines(lines, () => props.romanize);
+	const showRomaji = () => props.romanize && romanized()?.size !== 0;
 
 	return (
 		<div
-			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
+			class="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
 			data-swipe-dismiss-ignore
 		>
-			<div className="pb-24 pt-10">
-				{lines.map((line, i) =>
-					line.trim() === "" ? (
-						// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
-						<div className="h-5" key={`gap-${i}`} />
-					) : (
-						<p
-							className={cn(
-								"cursor-default text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
-								showRomaji ? "py-3" : "py-2.5",
-								i === 0 && "text-foreground/70",
-							)}
-							// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
-							key={`line-${i}`}
-						>
-							{line}
-							{showRomaji && romanized?.get(i) && (
-								<span className="mt-1 block text-base leading-normal font-normal text-foreground/45">
-									{romanized.get(i)}
-								</span>
-							)}
-						</p>
-					),
-				)}
-				{attribution && <LyricsAttribution source={attribution} />}
+			<div class="pb-24 pt-10">
+				<For each={lines()}>
+					{(line, i) => (
+						<Show fallback={<div class="h-5" />} when={line.trim() !== ""}>
+							<p
+								class={cn(
+									"cursor-default text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
+									showRomaji() ? "py-3" : "py-2.5",
+									i() === 0 && "text-foreground/70",
+								)}
+							>
+								{line}
+								<Show when={showRomaji() && romanized()?.get(i())}>
+									{(reading) => (
+										<span class="mt-1 block text-base leading-normal font-normal text-foreground/45">
+											{reading()}
+										</span>
+									)}
+								</Show>
+							</p>
+						</Show>
+					)}
+				</For>
+				<Show when={props.attribution}>
+					{(source) => <LyricsAttribution source={source()} />}
+				</Show>
 			</div>
 		</div>
 	);
 }
 
-function LyricsAttribution({ source }: { source: string }) {
+function LyricsAttribution(props: { source: string }) {
 	return (
-		<p className="mt-8 text-[11px] text-muted-foreground/50">
-			Lyrics via {source}
+		<p class="mt-8 text-[11px] text-muted-foreground/50">
+			Lyrics via {props.source}
 		</p>
 	);
 }
 
 function LyricsSkeleton() {
 	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-4 pr-2">
-			{[85, 65, 92, 58, 78, 88, 45, 70, 60].map((w, i) => (
-				<div
-					className="shimmer-surface h-6 rounded-md"
-					// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-					key={i}
-					style={{ width: `${w}%`, animationDelay: `${i * 120}ms` }}
-				/>
-			))}
+		<div class="flex min-h-0 flex-1 flex-col gap-4 pr-2">
+			<For each={[85, 65, 92, 58, 78, 88, 45, 70, 60]}>
+				{(width, i) => (
+					<div
+						class="shimmer-surface h-6 rounded-md"
+						style={{
+							width: `${width}%`,
+							"animation-delay": `${i() * 120}ms`,
+						}}
+					/>
+				)}
+			</For>
 		</div>
 	);
 }
 
 function LyricsFallback() {
 	return (
-		<div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8 text-center">
-			<AudioLines className="mb-4 size-8 text-muted-foreground/60" />
-			<p className="text-sm font-medium text-muted-foreground/60">
+		<div class="flex min-h-0 flex-1 flex-col items-center justify-center px-8 text-center">
+			<AudioLines class="mb-4 size-8 text-muted-foreground/60" />
+			<p class="text-sm font-medium text-muted-foreground/60">
 				No lyrics available
 			</p>
 		</div>
@@ -784,29 +824,27 @@ function LyricsFallback() {
  * always bounce up and down; with `looping` they also fill sequentially on a
  * loop, otherwise `progress` (0-1) fills them up in sync with the song time.
  */
-function PauseDots({
-	progress,
-	looping,
-}: {
-	progress: number;
-	looping: boolean;
-}) {
+function PauseDots(props: { progress: number; looping: boolean }) {
 	return (
-		<span aria-hidden className="flex items-center gap-1.5 py-2.5 pl-1">
-			{[0, 1, 2].map((d) => {
-				const filled = !looping && progress >= (d + 0.5) / 3;
-				return (
-					<span
-						className={cn(
-							"size-2 rounded-full bg-white/25",
-							filled && "bg-white shadow-[0_0_8px_rgba(255,255,255,0.45)]",
-							looping ? "animate-dot-fill" : "animate-dot-wave",
-						)}
-						key={d}
-						style={{ animationDelay: `${d * (looping ? 0.35 : 0.18)}s` }}
-					/>
-				);
-			})}
+		<span aria-hidden="true" class="flex items-center gap-1.5 py-2.5 pl-1">
+			<For each={[0, 1, 2]}>
+				{(dot) => {
+					const filled = () =>
+						!props.looping && props.progress >= (dot + 0.5) / 3;
+					return (
+						<span
+							class={cn(
+								"size-2 rounded-full bg-white/25",
+								filled() && "bg-white shadow-[0_0_8px_rgba(255,255,255,0.45)]",
+								props.looping ? "animate-dot-fill" : "animate-dot-wave",
+							)}
+							style={{
+								"animation-delay": `${dot * (props.looping ? 0.35 : 0.18)}s`,
+							}}
+						/>
+					);
+				}}
+			</For>
 		</span>
 	);
 }

@@ -1,5 +1,6 @@
-import { Button as ButtonPrimitive } from "@base-ui/react/button";
+import type { ComponentProps } from "@solidjs/web";
 import { cva, type VariantProps } from "class-variance-authority";
+import { omit } from "solid-js";
 
 import { cn } from "@/lib/utils/utils";
 
@@ -38,17 +39,19 @@ const buttonVariants = cva(
 	},
 );
 
-function Button({
-	className,
-	variant = "default",
-	size = "default",
-	...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+function Button(
+	props: ComponentProps<"button"> & VariantProps<typeof buttonVariants>,
+) {
+	const rest = omit(props, "class", "size", "variant");
 	return (
-		<ButtonPrimitive
-			className={cn(buttonVariants({ variant, size, className }))}
+		<button
+			class={cn(
+				buttonVariants({ size: props.size, variant: props.variant }),
+				props.class,
+			)}
 			data-slot="button"
-			{...props}
+			type="button"
+			{...rest}
 		/>
 	);
 }

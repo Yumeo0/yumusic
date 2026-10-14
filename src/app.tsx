@@ -1,5 +1,3 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
 	HouseIcon,
 	LibraryIcon,
@@ -8,17 +6,25 @@ import {
 	Pin,
 	SettingsIcon,
 	X,
-} from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
+} from "@lucide/solid";
 import {
-	HashRouter,
-	Route,
-	Routes,
+	createRouter,
+	hashHistory,
 	useLocation,
 	useNavigate,
-} from "react-router-dom";
-import { ScrollArea } from "@/components/ui/scroll-area";
+} from "@solidjs/router";
+import type { JSX } from "@solidjs/web";
+import { render } from "@solidjs/web";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import {
+	createEffect,
+	createSignal,
+	For,
+	onSettled,
+	Show,
+	untrack,
+} from "solid-js";
 import { Titlebar } from "./components/app/titlebar";
 import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
@@ -40,11 +46,11 @@ import {
 } from "./lib/motion/now-playing-motion";
 import { listeningSession } from "./lib/player/listening";
 import {
+	nowPlayingOpen,
+	queueOpen,
 	setQueueOpen,
 	toggleNowPlaying,
 	toggleQueue,
-	useNowPlayingOpen,
-	useQueueOpen,
 } from "./lib/player/player-ui";
 import { findRecording, submitListen } from "./lib/services/listenbrainz";
 import {
@@ -79,30 +85,73 @@ import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
 import SettingsPage from "./pages/settings";
 
 /**
+ * Login state lives at module scope: the router's root (`Layout`) owns the
+ * session check, while the routed settings page renders from the same state.
+ */
+const [isLoggedIn, setIsLoggedIn] = createSignal(false);
+const [userProfile, setUserProfile] = createSignal<{
+	name?: string;
+	photo?: string;
+} | null>(null);
+let authChecked = false;
+
+async function checkLogin() {
+	const cookie = await window.electron.getCookie();
+	if (cookie) {
+		setIsLoggedIn(true);
+		await getYoutubeClient(cookie);
+		const profile = await getUserProfile();
+		if (profile) {
+			setUserProfile(profile);
+		}
+	}
+}
+
+async function handleLogin() {
+	const cookie = await window.electron.login();
+	if (!cookie) return;
+	// Rebuild the shared client with the new session, then reload so every
+	// mounted view (home feed, library, profile) refetches authenticated
+	// data — effects that already ran against the signed-out client would
+	// otherwise never refresh.
+	await getYoutubeClient(cookie);
+	window.location.reload();
+}
+
+async function handleLogout() {
+	await window.electron.logout();
+	setIsLoggedIn(false);
+	setUserProfile(null);
+	window.location.reload();
+}
+
+/**
  * Mirrors the current song into Discord rich presence while enabled:
  * cover art + album tooltip (linked), clickable song title and artist,
  * plus playback timestamps that freeze while paused.
  */
 function DiscordPresenceSync() {
-	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
-	const { isPlaying } = usePlayerControls();
+	const player = usePlayer();
+	const controls = usePlayerControls();
 	const [settings] = useSettings();
-	const [meta, setMeta] = useState<TrackMeta | null>(null);
-	const [mediaDuration, setMediaDuration] = useState(0);
+	const [meta, setMeta] = createSignal<TrackMeta | null>(null);
+	const [mediaDuration, setMediaDuration] = createSignal(0);
 
-	const songId = currentSong?.id;
-	const artist = currentSong?.artist ?? "";
-	const title = displayTitle(
-		currentSong?.title ?? "",
-		// Uploader videos keep their raw title (no original/translation split).
-		currentSong?.upload ? "both" : settings.titleMode,
-		settings.cleanTitles,
-		artist,
-	);
-	const cover = currentSong?.thumbnail ?? "";
-	const artistId =
-		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
-	const discordEnabled = settings.discordRpc;
+	const songId = () => player.currentSong()?.id;
+	const artist = () => player.currentSong()?.artist ?? "";
+	const title = () =>
+		displayTitle(
+			player.currentSong()?.title ?? "",
+			// Uploader videos keep their raw title (no original/translation split).
+			player.currentSong()?.upload ? "both" : settings.titleMode,
+			settings.cleanTitles,
+			artist(),
+		);
+	const cover = () => player.currentSong()?.thumbnail ?? "";
+	const artistId = () =>
+		player.currentSong()?.artistId ??
+		player.currentSong()?.artists?.find((a) => a.id)?.id;
+	const discordEnabled = () => settings.discordRpc;
 
 	// Track the element's duration reactively: when a song starts, the
 	// presence update fires before MSE metadata is parsed (duration NaN),
@@ -110,87 +159,100 @@ function DiscordPresenceSync() {
 	// A crossfade preloads the next track onto the idle deck early, so its
 	// duration events have already fired by the time the handover makes it
 	// current — read the value once at attach time to catch those.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: songId is an intentional reset trigger for the tracked duration
-	useEffect(() => {
-		setMediaDuration(0);
-		const videoEl = videoElementRef?.current;
-		if (!videoEl) return;
-		const sync = () =>
-			setMediaDuration(
-				Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
-			);
-		sync();
-		videoEl.addEventListener("durationchange", sync);
-		videoEl.addEventListener("loadedmetadata", sync);
-		return () => {
-			videoEl.removeEventListener("durationchange", sync);
-			videoEl.removeEventListener("loadedmetadata", sync);
-		};
-	}, [videoElementRef, songId]);
+	createEffect(
+		() => songId(),
+		() => {
+			setMediaDuration(0);
+			const videoEl = player.videoElement();
+			if (!videoEl) return;
+			const sync = () =>
+				setMediaDuration(
+					Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
+				);
+			sync();
+			videoEl.addEventListener("durationchange", sync);
+			videoEl.addEventListener("loadedmetadata", sync);
+			return () => {
+				videoEl.removeEventListener("durationchange", sync);
+				videoEl.removeEventListener("loadedmetadata", sync);
+			};
+		},
+	);
 
 	// Album data arrives from a follow-up fetch; it upgrades the presence
 	// (album tooltip/link) once loaded.
-	useEffect(() => {
-		let cancelled = false;
-		setMeta(null);
-		if (discordEnabled && songId) {
-			getTrackMeta(songId).then((next) => {
-				if (!cancelled) setMeta(next);
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [discordEnabled, songId]);
+	createEffect(
+		() => [discordEnabled(), songId()] as const,
+		([enabled, id]) => {
+			let cancelled = false;
+			setMeta(null);
+			if (enabled && id) {
+				getTrackMeta(id).then((next) => {
+					if (!cancelled) setMeta(next);
+				});
+			}
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
 	// The player's metadata length (YouTube's listing) is preferred over the
 	// media element's duration, which reports a fraction less; it is also the
 	// only total available when a crossfade preload beat the element listeners.
-	const durationSecs = knownDuration > 0 ? knownDuration : mediaDuration;
+	const durationSecs = () => {
+		const known = player.duration();
+		return known > 0 ? known : mediaDuration();
+	};
 
-	useEffect(() => {
-		if (!discordEnabled || !songId) return;
-		const videoEl = videoElementRef?.current ?? null;
-		const elapsed = videoEl?.currentTime ?? 0;
-		invoke("set_discord_activity", {
-			track: {
-				title,
-				artist: formatArtistName(artist),
-				album: meta?.album?.name ?? null,
-				coverUrl: cover || null,
-				songUrl: `https://music.youtube.com/watch?v=${songId}`,
-				artistUrl: artistId
-					? `https://music.youtube.com/channel/${artistId}`
-					: null,
-				albumUrl: meta?.album?.id
-					? `https://music.youtube.com/playlist?list=${meta.album.id}`
-					: null,
-				playing: isPlaying,
-				elapsedSecs: elapsed,
-				durationSecs,
-			},
-		}).catch((error) => {
-			console.warn("[discord] presence update failed:", error);
-		});
-	}, [
-		discordEnabled,
-		songId,
-		title,
-		artist,
-		cover,
-		artistId,
-		isPlaying,
-		durationSecs,
-		meta,
-		videoElementRef,
-	]);
+	createEffect(
+		() => ({
+			artist: artist(),
+			artistId: artistId(),
+			cover: cover(),
+			discordEnabled: discordEnabled(),
+			durationSecs: durationSecs(),
+			isPlaying: controls.isPlaying(),
+			meta: meta(),
+			songId: songId(),
+			title: title(),
+		}),
+		(snapshot) => {
+			if (!snapshot.discordEnabled || !snapshot.songId) return;
+			const videoEl = player.videoElement();
+			const elapsed = videoEl?.currentTime ?? 0;
+			invoke("set_discord_activity", {
+				track: {
+					title: snapshot.title,
+					artist: formatArtistName(snapshot.artist),
+					album: snapshot.meta?.album?.name ?? null,
+					coverUrl: snapshot.cover || null,
+					songUrl: `https://music.youtube.com/watch?v=${snapshot.songId}`,
+					artistUrl: snapshot.artistId
+						? `https://music.youtube.com/channel/${snapshot.artistId}`
+						: null,
+					albumUrl: snapshot.meta?.album?.id
+						? `https://music.youtube.com/playlist?list=${snapshot.meta.album.id}`
+						: null,
+					playing: snapshot.isPlaying,
+					elapsedSecs: elapsed,
+					durationSecs: snapshot.durationSecs,
+				},
+			}).catch((error) => {
+				console.warn("[discord] presence update failed:", error);
+			});
+		},
+	);
 
 	// Turning the feature off drops the presence immediately.
-	useEffect(() => {
-		if (!discordEnabled) {
-			invoke("clear_discord_activity").catch(() => undefined);
-		}
-	}, [discordEnabled]);
+	createEffect(
+		() => discordEnabled(),
+		(enabled) => {
+			if (!enabled) {
+				invoke("clear_discord_activity").catch(() => undefined);
+			}
+		},
+	);
 
 	return null;
 }
@@ -208,66 +270,41 @@ interface MediaControlPayload {
  * `media-control` events.
  */
 function MediaSessionSync() {
-	const {
-		currentSong,
-		currentIndex,
-		hasNext,
-		next,
-		previous,
-		videoElementRef,
-	} = usePlayer();
-	const { isPlaying, toggle } = usePlayerControls();
+	const player = usePlayer();
+	const controls = usePlayerControls();
 	const [settings] = useSettings();
 
 	// Next may roll into the autoplay radio once the queue ends, matching the
 	// in-app button; previous stays queue-only so it never rewrites the queue
 	// from history.
-	const canGoNext = hasNext;
-	const canStepPrevious = currentIndex > 0;
+	const canGoNext = () => player.hasNext();
+	const canStepPrevious = () => player.currentIndex() > 0;
 
-	// Media key presses are handled with the latest player state.
-	const live = useRef({
-		canGoNext,
-		canStepPrevious,
-		isPlaying,
-		next,
-		previous,
-		toggle,
-		videoElementRef,
-	});
-	live.current = {
-		canGoNext,
-		canStepPrevious,
-		isPlaying,
-		next,
-		previous,
-		toggle,
-		videoElementRef,
-	};
-
-	useEffect(() => {
+	// Media key presses are handled with the latest player state: the handler
+	// reads the accessors directly, so it never goes stale.
+	onSettled(() => {
 		if (!isTauri()) return;
 		let disposed = false;
 		let unlisten: (() => void) | undefined;
 		listen<MediaControlPayload>("media-control", (event) => {
 			const { action, position } = event.payload;
-			const video = live.current.videoElementRef?.current;
+			const video = player.videoElement();
 			switch (action) {
 				case "play":
-					if (!live.current.isPlaying) live.current.toggle();
+					if (!controls.isPlaying()) controls.toggle();
 					break;
 				case "pause":
 				case "stop":
-					if (live.current.isPlaying) live.current.toggle();
+					if (controls.isPlaying()) controls.toggle();
 					break;
 				case "toggle":
-					live.current.toggle();
+					controls.toggle();
 					break;
 				case "next":
-					if (live.current.canGoNext) void live.current.next();
+					if (canGoNext()) void player.next();
 					break;
 				case "previous":
-					if (live.current.canStepPrevious) void live.current.previous();
+					if (canStepPrevious()) void player.previous();
 					break;
 				case "seek-by":
 					if (video && typeof position === "number") {
@@ -288,64 +325,69 @@ function MediaSessionSync() {
 			disposed = true;
 			unlisten?.();
 		};
-	}, []);
-
-	const title = currentSong
-		? displayTitle(
-				currentSong.title,
-				// Uploader videos keep their raw title.
-				currentSong.upload ? "both" : settings.titleMode,
-				settings.cleanTitles,
-				currentSong.artist,
-			)
-		: null;
-	const artist = currentSong ? formatArtistName(currentSong.artist) : null;
-	const cover = currentSong?.thumbnail ?? null;
-	const songId = currentSong?.id ?? null;
+	});
 
 	// Snapshot for the native session; the same cover the fullscreen player
 	// shows (the OS fetches the URL itself).
-	const push = useCallback(() => {
+	const push = () => {
 		if (!isTauri()) return;
-		const video = videoElementRef?.current;
+		const video = player.videoElement();
 		const duration =
 			video && Number.isFinite(video.duration) && video.duration > 0
 				? video.duration
 				: null;
+		const song = player.currentSong();
+		const title = song
+			? displayTitle(
+					song.title,
+					// Uploader videos keep their raw title.
+					song.upload ? "both" : settings.titleMode,
+					settings.cleanTitles,
+					song.artist,
+				)
+			: null;
 		invoke("update_media_session", {
 			snapshot: {
-				artist,
-				canGoNext,
-				canGoPrevious: canStepPrevious,
-				coverUrl: cover,
+				artist: song ? formatArtistName(song.artist) : null,
+				canGoNext: canGoNext(),
+				canGoPrevious: canStepPrevious(),
+				coverUrl: song?.thumbnail ?? null,
 				duration,
-				id: songId,
-				playing: isPlaying,
+				id: song?.id ?? null,
+				playing: controls.isPlaying(),
 				position: video?.currentTime ?? 0,
 				title,
 			},
 		}).catch(() => undefined);
-	}, [
-		artist,
-		canGoNext,
-		canStepPrevious,
-		cover,
-		isPlaying,
-		songId,
-		title,
-		videoElementRef,
-	]);
+	};
 
-	useEffect(() => {
-		push();
-	}, [push]);
+	// Re-publish on any change that shapes the snapshot; `push` reads the
+	// live values at call time, so the call is deliberately untracked — the
+	// compute below tracks everything the effect must react to.
+	createEffect(
+		() => ({
+			canGoNext: canGoNext(),
+			canStepPrevious: canStepPrevious(),
+			cover: player.currentSong()?.thumbnail ?? null,
+			isPlaying: controls.isPlaying(),
+			songId: player.currentSong()?.id ?? null,
+			titleMode: settings.titleMode,
+			cleanTitles: settings.cleanTitles,
+		}),
+		() => {
+			untrack(push);
+		},
+	);
 
 	// Position ticks keep the OS progress bar moving while playing.
-	useEffect(() => {
-		if (!isPlaying) return;
-		const timer = window.setInterval(push, 5000);
-		return () => window.clearInterval(timer);
-	}, [isPlaying, push]);
+	createEffect(
+		() => controls.isPlaying(),
+		(playing) => {
+			if (!playing) return;
+			const timer = window.setInterval(push, 5000);
+			return () => window.clearInterval(timer);
+		},
+	);
 
 	return null;
 }
@@ -357,16 +399,16 @@ function MediaSessionSync() {
  * has actually been listened to.
  */
 function ListenBrainzSync() {
-	const { currentSong, videoElementRef } = usePlayer();
-	const { isPlaying } = usePlayerControls();
+	const player = usePlayer();
+	const controls = usePlayerControls();
 	const [settings] = useSettings();
-	const [meta, setMeta] = useState<TrackMeta | null>(null);
+	const [meta, setMeta] = createSignal<TrackMeta | null>(null);
 
-	const songId = currentSong?.id;
-	const token = settings.listenbrainzToken.trim();
-	const enabled = settings.listenbrainz && token.length > 0;
+	const songId = () => player.currentSong()?.id;
+	const token = () => settings.listenbrainzToken.trim();
+	const enabled = () => settings.listenbrainz && token().length > 0;
 
-	const startedAtRef = useRef<number | null>(null);
+	let startedAt: number | null = null;
 
 	/**
 	 * Scrobble metadata in the track's original language: the uploader's
@@ -376,18 +418,20 @@ function ListenBrainzSync() {
 	 * ("Apricot (Froot)" → "Apricot") so the submission and the MusicBrainz
 	 * lookup use the artist's catalog name.
 	 */
-	const scrobbleMetadata = useCallback((): {
+	const scrobbleMetadata = (): {
 		trackName: string;
 		artistName: string;
 		mainTitle: string;
 		feats: string[];
 	} => {
+		const song = player.currentSong();
+		const catalogMeta = meta();
 		const { main, feats, trackName } = scrobbleTitle(
-			meta?.originalTitle ?? currentSong?.title ?? "",
-			currentSong?.artist,
+			catalogMeta?.originalTitle ?? song?.title ?? "",
+			song?.artist,
 		);
 		const artistName = formatArtistName(
-			meta?.originalArtist ?? currentSong?.artist ?? "",
+			catalogMeta?.originalArtist ?? song?.artist ?? "",
 		);
 		return {
 			trackName,
@@ -395,55 +439,85 @@ function ListenBrainzSync() {
 			mainTitle: main,
 			feats,
 		};
-	}, [currentSong, meta]);
-	const scrobbleMetadataRef = useRef(scrobbleMetadata);
-	scrobbleMetadataRef.current = scrobbleMetadata;
+	};
 
 	// Album name for the release metadata.
-	useEffect(() => {
-		let cancelled = false;
-		setMeta(null);
-		if (enabled && songId) {
-			getTrackMeta(songId).then((next) => {
-				if (!cancelled) setMeta(next);
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [enabled, songId]);
+	createEffect(
+		() => [enabled(), songId()] as const,
+		([isEnabled, id]) => {
+			let cancelled = false;
+			setMeta(null);
+			if (isEnabled && id) {
+				getTrackMeta(id).then((next) => {
+					if (!cancelled) setMeta(next);
+				});
+			}
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
 	// New track — reset the listen-start timestamp so skipping songs doesn't
 	// submit a stale listenedAt.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: songId/enabled are intentional reset triggers
-	useEffect(() => {
-		startedAtRef.current = null;
-	}, [songId, enabled]);
+	createEffect(
+		() => [songId(), enabled()] as const,
+		() => {
+			startedAt = null;
+		},
+	);
 
 	// Remember when playback started; used as the scrobble's listenedAt.
-	useEffect(() => {
-		if (!enabled || !songId || !isPlaying) return;
-		if (startedAtRef.current === null) {
-			startedAtRef.current = Math.floor(Date.now() / 1000);
-		}
-	}, [enabled, songId, isPlaying]);
+	createEffect(
+		() => [enabled(), songId(), controls.isPlaying()] as const,
+		([isEnabled, id, playing]) => {
+			if (!isEnabled || !id || !playing) return;
+			if (startedAt === null) {
+				startedAt = Math.floor(Date.now() / 1000);
+			}
+		},
+	);
 
 	// The shared listening session drives both the "playing now" submission
 	// (grace period reached) and the scrobble (half the track listened), so
 	// the timing stays consistent with the YouTube watch-history pings.
-	useEffect(() => {
-		if (!enabled || !songId || !currentSong) return;
-		return listeningSession.subscribe((event, eventSongId) => {
-			if (eventSongId !== songId) return;
-			const names = scrobbleMetadataRef.current();
-			const videoEl = videoElementRef?.current ?? null;
-			const duration =
-				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
+	createEffect(
+		() => [enabled(), songId(), player.currentSong(), token(), meta()] as const,
+		([isEnabled, id]) => {
+			if (!isEnabled || !id) return;
+			return listeningSession.subscribe((event, eventSongId) => {
+				if (eventSongId !== id) return;
+				const names = scrobbleMetadata();
+				const videoEl = player.videoElement();
+				const duration =
+					videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
 
-			if (event === "established") {
-				// Resolve the recording MBID for the playing_now listen as well —
-				// it links the card and gives it cover art, and pre-warms the
-				// cache for the scrobble. Submits without MBIDs if lookup fails.
+				if (event === "established") {
+					// Resolve the recording MBID for the playing_now listen as well —
+					// it links the card and gives it cover art, and pre-warms the
+					// cache for the scrobble. Submits without MBIDs if lookup fails.
+					const submit = async () => {
+						const mbids = await findRecording(
+							names.mainTitle,
+							names.artistName,
+							duration,
+							names.feats,
+						).catch(() => null);
+						await submitListen({
+							token: token(),
+							trackName: names.trackName,
+							artistName: names.artistName,
+							album: meta()?.album?.name,
+							mbids,
+						});
+					};
+					submit().catch((error) => {
+						console.warn("[listenbrainz] playing_now failed:", error);
+					});
+					return;
+				}
+
+				const listenedAt = startedAt ?? Math.floor(Date.now() / 1000);
 				const submit = async () => {
 					const mbids = await findRecording(
 						names.mainTitle,
@@ -452,96 +526,84 @@ function ListenBrainzSync() {
 						names.feats,
 					).catch(() => null);
 					await submitListen({
-						token,
+						token: token(),
 						trackName: names.trackName,
 						artistName: names.artistName,
-						album: meta?.album?.name,
+						album: meta()?.album?.name,
 						mbids,
+						listenedAt,
 					});
 				};
 				submit().catch((error) => {
-					console.warn("[listenbrainz] playing_now failed:", error);
+					console.warn("[listenbrainz] scrobble failed:", error);
 				});
-				return;
-			}
-
-			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
-			const submit = async () => {
-				const mbids = await findRecording(
-					names.mainTitle,
-					names.artistName,
-					duration,
-					names.feats,
-				).catch(() => null);
-				await submitListen({
-					token,
-					trackName: names.trackName,
-					artistName: names.artistName,
-					album: meta?.album?.name,
-					mbids,
-					listenedAt,
-				});
-			};
-			submit().catch((error) => {
-				console.warn("[listenbrainz] scrobble failed:", error);
 			});
-		});
-	}, [enabled, songId, currentSong, token, meta, videoElementRef]);
+		},
+	);
 
 	return null;
 }
 
 /** Recolors the app accent from the current song's thumbnail. */
 function AmbientSync() {
-	const { currentSong } = usePlayer();
-	const ambient = useAmbientColor(currentSong?.thumbnail);
+	const player = usePlayer();
+	const ambient = useAmbientColor(() => player.currentSong()?.thumbnail);
 
-	useEffect(() => {
-		const root = document.documentElement;
-		root.style.setProperty("--primary", ambient);
-		root.style.setProperty("--accent", ambient);
-		root.style.setProperty("--ring", ambient);
-	}, [ambient]);
+	createEffect(
+		() => ambient(),
+		(ambient) => {
+			const root = document.documentElement;
+			root.style.setProperty("--primary", ambient);
+			root.style.setProperty("--accent", ambient);
+			root.style.setProperty("--ring", ambient);
+		},
+	);
 
 	return null;
 }
 
 function NowPlayingOverlay() {
-	const isNowPlayingOpen = useNowPlayingOpen();
-	const isQueueOpen = useQueueOpen();
-	const overlayRef = useRef<HTMLDivElement>(null);
-	useNowPlayingMotion(overlayRef, isNowPlayingOpen);
+	let overlayEl!: HTMLDivElement;
+	useNowPlayingMotion(() => overlayEl, nowPlayingOpen);
 	// Dragging down on the fullscreen player minimizes it — but only while the
 	// queue is closed: with the sheet open, the same swipe drags the queue.
 	// The scrollable lyrics column opts out so it keeps scrolling normally.
 	const dismissGesture = useNowPlayingSwipe(false);
 
 	// Escape closes the queue first, then the fullscreen view
-	useEffect(() => {
-		if (!isNowPlayingOpen) return;
-		const handler = (e: KeyboardEvent) => {
-			if (e.key !== "Escape") return;
-			if (isQueueOpen) {
-				setQueueOpen(false);
-			} else {
-				toggleNowPlaying();
-			}
-		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	}, [isNowPlayingOpen, isQueueOpen]);
+	createEffect(
+		() => [nowPlayingOpen(), queueOpen()] as const,
+		([isOpen, isQueueOpen]) => {
+			if (!isOpen) return;
+			const handler = (e: KeyboardEvent) => {
+				if (e.key !== "Escape") return;
+				if (isQueueOpen) {
+					setQueueOpen(false);
+				} else {
+					toggleNowPlaying();
+				}
+			};
+			window.addEventListener("keydown", handler);
+			return () => window.removeEventListener("keydown", handler);
+		},
+	);
 
 	return (
 		<div
-			aria-hidden={!isNowPlayingOpen}
-			className="np-overlay invisible fixed inset-0 z-50 will-change-transform"
-			inert={!isNowPlayingOpen}
-			ref={overlayRef}
+			aria-hidden={nowPlayingOpen() ? "false" : "true"}
+			class="np-overlay invisible fixed inset-0 z-50 will-change-transform"
+			inert={!nowPlayingOpen()}
+			onTouchCancel={dismissGesture.onTouchCancel}
+			onTouchEnd={dismissGesture.onTouchEnd}
+			onTouchMove={dismissGesture.onTouchMove}
+			ref={(el) => {
+				overlayEl = el;
+				dismissGesture.attach(el);
+			}}
 			style={{ transform: "translateY(var(--np-slide, 0px))" }}
-			{...dismissGesture}
 		>
 			<NowPlayingPage
-				isQueueOpen={isQueueOpen}
+				isQueueOpen={queueOpen()}
 				onClose={toggleNowPlaying}
 				onToggleQueue={toggleQueue}
 			/>
@@ -549,93 +611,45 @@ function NowPlayingOverlay() {
 	);
 }
 
-function Layout() {
-	const [isLoggedIn, setIsLoggedIn] = useState(false);
-	const [userProfile, setUserProfile] = useState<{
-		name?: string;
-		photo?: string;
-	} | null>(null);
-
-	useEffect(() => {
-		const checkLogin = async () => {
-			const cookie = await window.electron.getCookie();
-			if (cookie) {
-				setIsLoggedIn(true);
-				await getYoutubeClient(cookie);
-				const profile = await getUserProfile();
-				if (profile) {
-					setUserProfile(profile);
-				}
-			}
-		};
-		checkLogin();
-	}, []);
-
-	const handleLogin = async () => {
-		const cookie = await window.electron.login();
-		if (!cookie) return;
-		// Rebuild the shared client with the new session, then reload so every
-		// mounted view (home feed, library, profile) refetches authenticated
-		// data — effects that already ran against the signed-out client would
-		// otherwise never refresh.
-		await getYoutubeClient(cookie);
-		window.location.reload();
-	};
-
-	const handleLogout = async () => {
-		await window.electron.logout();
-		setIsLoggedIn(false);
-		setUserProfile(null);
-		window.location.reload();
-	};
+function Layout(props: { children?: JSX.Element }) {
+	onSettled(() => {
+		if (authChecked) return;
+		authChecked = true;
+		void checkLogin();
+	});
 
 	return (
 		<PlayerProvider>
-			<AppShell
-				handleLogin={handleLogin}
-				handleLogout={handleLogout}
-				isLoggedIn={isLoggedIn}
-				userProfile={userProfile}
-			/>
+			<AppShell>{props.children}</AppShell>
 		</PlayerProvider>
 	);
 }
 
-/** Rendered inside PlayerProvider so it can consume player state. */
-function AppShell({
-	isLoggedIn,
-	userProfile,
-	handleLogin,
-	handleLogout,
-}: {
-	isLoggedIn: boolean;
-	userProfile: { name?: string; photo?: string } | null;
-	handleLogin: () => void;
-	handleLogout: () => void;
-}) {
+/** Router root contents; reads player state, so it lives inside the provider. */
+function AppShell(props: { children: JSX.Element }) {
 	const location = useLocation();
 	const navigate = useNavigate();
-	const { pinned, unpin } = usePinnedPlaylists();
-	const { currentSong } = usePlayer();
+	const pinnedState = usePinnedPlaylists();
+	const player = usePlayer();
 
 	// Load the stored downloads so the player can play them from disk, and
 	// drop caches from older app versions (they survive upgrades and would
 	// otherwise keep occupying localStorage quota until writes start failing).
-	useEffect(() => {
+	onSettled(() => {
 		pruneStaleCacheVersions();
 		void hydrateDownloads();
-	}, []);
+	});
 
 	// Pinned entries store their cover URL as it was when pinned; heal it from
 	// the cached library on startup so a dead URL (older versions saved tiny
 	// raw variants that no longer resolve) doesn't leave the sidebar artwork
 	// broken until the playlists page is visited.
-	useEffect(() => {
+	onSettled(() => {
 		const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
 		if (cached && cached.data.length > 0) {
 			reconcilePinnedPlaylists(cached.data);
 		}
-	}, []);
+	});
 
 	return (
 		<>
@@ -646,38 +660,41 @@ function AppShell({
 			<UpdateNotifier />
 			<Titlebar />
 			<div
-				className={cn(
+				class={cn(
 					"flex overflow-hidden bg-background text-foreground",
 					IS_MOBILE ? "h-app" : "h-[calc(100vh-2.25rem)]",
 				)}
 			>
 				{/* ── Sidebar (desktop) ───────────────────────── */}
-				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
+				<aside class="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div
-						className={cn(
+						class={cn(
 							"flex min-h-0 flex-1 flex-col px-4 pt-6",
-							currentSong && "pb-26",
+							player.currentSong() && "pb-26",
 						)}
 					>
 						{/* Account — kept at the top of the sidebar */}
-						<div className="pb-3">
-							{isLoggedIn ? (
-								<UserMenu onLogout={handleLogout} user={userProfile || {}} />
-							) : (
-								<button
-									className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/5 hover:text-foreground"
-									onClick={handleLogin}
-									type="button"
-								>
-									<LogInIcon className="size-5" />
-									<span>Log In</span>
-								</button>
-							)}
+						<div class="pb-3">
+							<Show
+								fallback={
+									<button
+										class="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors duration-200 hover:bg-foreground/5 hover:text-foreground"
+										onClick={handleLogin}
+										type="button"
+									>
+										<LogInIcon class="size-5" />
+										<span>Log In</span>
+									</button>
+								}
+								when={isLoggedIn()}
+							>
+								<UserMenu onLogout={handleLogout} user={userProfile() || {}} />
+							</Show>
 						</div>
 
-						<nav className="space-y-1">
+						<nav class="space-y-1">
 							<SidebarItem
-								icon={<HouseIcon className="size-4.5" strokeWidth={2.2} />}
+								icon={<HouseIcon class="size-4.5" stroke-width={2.2} />}
 								isActive={
 									location.pathname === "/" || location.pathname === "/home"
 								}
@@ -685,13 +702,13 @@ function AppShell({
 								onClick={() => navigate("/")}
 							/>
 							<SidebarItem
-								icon={<LibraryIcon className="size-4.5" strokeWidth={2.2} />}
+								icon={<LibraryIcon class="size-4.5" stroke-width={2.2} />}
 								isActive={location.pathname === "/playlists"}
 								label="Playlists"
 								onClick={() => navigate("/playlists")}
 							/>
 							<SidebarItem
-								icon={<SettingsIcon className="size-4.5" strokeWidth={2.2} />}
+								icon={<SettingsIcon class="size-4.5" stroke-width={2.2} />}
 								isActive={location.pathname.startsWith("/settings")}
 								label="Settings"
 								onClick={() => navigate("/settings")}
@@ -699,61 +716,65 @@ function AppShell({
 						</nav>
 
 						{/* Pinned playlists — separated from the nav above */}
-						{pinned.length > 0 && (
-							<div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-foreground/6 pt-3">
-								<div className="flex items-center gap-2 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
-									<Pin className="size-3" />
+						<Show when={pinnedState.pinned.length > 0}>
+							<div class="mt-3 flex min-h-0 flex-1 flex-col border-t border-foreground/6 pt-3">
+								<div class="flex items-center gap-2 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
+									<Pin class="size-3" />
 									<span>Pinned</span>
 								</div>
-								<div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
-									{pinned.map((playlist) => {
-										const isActive =
-											location.pathname === `/playlists/${playlist.id}`;
-										return (
-											<PlaylistContextMenu
-												isPinned
-												key={playlist.id}
-												onTogglePinned={() => unpin(playlist.id)}
-												playlist={playlist}
-											>
-												<div className="group/pin relative rounded-xl">
-													<button
-														className={cn(
-															"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
-															isActive
-																? "bg-primary/12 text-primary"
-																: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-														)}
-														onClick={() =>
-															navigate(`/playlists/${playlist.id}`)
-														}
-														type="button"
-													>
-														<PinnedThumbnail
-															key={playlist.thumbnail ?? ""}
-															thumbnail={playlist.thumbnail}
-														/>
-														<span className="truncate">{playlist.title}</span>
-													</button>
-													<button
-														aria-label={`Unpin ${playlist.title}`}
-														className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
-														onClick={() => unpin(playlist.id)}
-														type="button"
-													>
-														<X className="size-3.5" />
-													</button>
-												</div>
-											</PlaylistContextMenu>
-										);
-									})}
+								<div class="min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
+									<For each={pinnedState.pinned} keyed={(item) => item.id}>
+										{(playlist) => {
+											const isActive = () =>
+												location.pathname === `/playlists/${playlist().id}`;
+											return (
+												<PlaylistContextMenu
+													isPinned
+													onTogglePinned={() =>
+														pinnedState.unpin(playlist().id)
+													}
+													playlist={playlist()}
+												>
+													<div class="group/pin relative rounded-xl">
+														<button
+															class={cn(
+																"flex w-full items-center gap-3 rounded-xl py-2 pr-8 pl-3 text-sm transition-colors duration-200",
+																isActive()
+																	? "bg-primary/12 text-primary"
+																	: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+															)}
+															onClick={() =>
+																navigate(`/playlists/${playlist().id}`)
+															}
+															type="button"
+														>
+															<Show keyed when={playlist().thumbnail}>
+																{(thumbnail) => (
+																	<PinnedThumbnail thumbnail={thumbnail} />
+																)}
+															</Show>
+															<span class="truncate">{playlist().title}</span>
+														</button>
+														<button
+															aria-label={`Unpin ${playlist().title}`}
+															class="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
+															onClick={() => pinnedState.unpin(playlist().id)}
+															type="button"
+														>
+															<X class="size-3.5" />
+														</button>
+													</div>
+												</PlaylistContextMenu>
+											);
+										}}
+									</For>
 								</div>
 							</div>
-						)}
+						</Show>
 
 						{/* Download queue — lives at the bottom of the rail */}
-						<div className="mt-auto pt-3 pb-4">
-							<div className="border-t border-foreground/6 pt-3">
+						<div class="mt-auto pt-3 pb-4">
+							<div class="border-t border-foreground/6 pt-3">
 								<DownloadQueueButton />
 							</div>
 						</div>
@@ -761,33 +782,17 @@ function AppShell({
 				</aside>
 
 				{/* ── Main content ────────────────────────────── */}
-				<main className="relative flex-1 overflow-hidden">
-					<ScrollArea className="h-full">
+				<main class="relative flex-1 overflow-hidden">
+					<div class="h-full overflow-y-auto">
 						{/* Extra top/bottom room on mobile: status-bar safe area,
 						    plus nav bar + player clearance */}
-						<div className="max-md:pt-(--safe-area-top) pb-44 md:pb-32">
-							<div className="animate-page-in" key={location.pathname}>
-								<Routes>
-									<Route element={<HomePage />} path="/" />
-									<Route element={<HomePage />} path="/home" />
-									<Route element={<PlaylistsPage />} path="/playlists" />
-									<Route element={<PlaylistDetails />} path="/playlists/:id" />
-									<Route element={<ArtistPage />} path="/artist/:id" />
-									<Route
-										element={
-											<SettingsPage
-												handleLogin={handleLogin}
-												handleLogout={handleLogout}
-												isLoggedIn={isLoggedIn}
-												userProfile={userProfile}
-											/>
-										}
-										path="/settings"
-									/>
-								</Routes>
-							</div>
+						<div class="max-md:pt-(--safe-area-top) pb-44 md:pb-32">
+							{/* Recreated per path so the page-in animation replays. */}
+							<Show keyed when={location.pathname}>
+								{(_path) => <div class="animate-page-in">{props.children}</div>}
+							</Show>
 						</div>
-					</ScrollArea>
+					</div>
 				</main>
 
 				<NowPlayingOverlay />
@@ -800,7 +805,7 @@ function AppShell({
 			{/* Mobile has no sidebar: the active download queue floats top-right */}
 			<DownloadQueueButton
 				align="end"
-				className="fixed top-[calc(var(--safe-area-top)+0.5rem)] right-3 z-40 md:hidden"
+				class="fixed top-[calc(var(--safe-area-top)+0.5rem)] right-3 z-40 md:hidden"
 				compact
 				side="bottom"
 			/>
@@ -815,19 +820,23 @@ function AppShell({
  * broken glyph. Keyed by the URL at the call site, so a reconciled URL gets
  * a fresh attempt.
  */
-function PinnedThumbnail({ thumbnail }: { thumbnail: string | null }) {
-	const [failed, setFailed] = useState(false);
+function PinnedThumbnail(props: { thumbnail: string | null }) {
+	const [failed, setFailed] = createSignal(false);
 
-	if (!thumbnail || failed) {
-		return <Music2 className="size-4 shrink-0" />;
-	}
 	return (
-		<img
-			alt=""
-			className="size-5 shrink-0 rounded object-cover"
-			onError={() => setFailed(true)}
-			src={proxiedImageUrl(thumbnail)}
-		/>
+		<Show
+			fallback={<Music2 class="size-4 shrink-0" />}
+			when={!failed() && props.thumbnail}
+		>
+			{(thumbnail) => (
+				<img
+					alt=""
+					class="size-5 shrink-0 rounded object-cover"
+					onError={() => setFailed(true)}
+					src={proxiedImageUrl(thumbnail())}
+				/>
+			)}
+		</Show>
 	);
 }
 
@@ -842,23 +851,23 @@ function MobileNav() {
 
 	return (
 		<nav
-			className="fixed inset-x-0 bottom-0 z-45 flex min-h-[calc(3.75rem+var(--safe-area-bottom))] items-stretch border-t border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
+			class="fixed inset-x-0 bottom-0 z-45 flex min-h-[calc(3.75rem+var(--safe-area-bottom))] items-stretch border-t border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
 			data-mobile-nav
 		>
 			<MobileNavItem
-				icon={<HouseIcon className="size-5" strokeWidth={2.2} />}
+				icon={<HouseIcon class="size-5" stroke-width={2.2} />}
 				isActive={location.pathname === "/" || location.pathname === "/home"}
 				label="Home"
 				onClick={() => navigate("/")}
 			/>
 			<MobileNavItem
-				icon={<LibraryIcon className="size-5" strokeWidth={2.2} />}
+				icon={<LibraryIcon class="size-5" stroke-width={2.2} />}
 				isActive={location.pathname.startsWith("/playlists")}
 				label="Playlists"
 				onClick={() => navigate("/playlists")}
 			/>
 			<MobileNavItem
-				icon={<SettingsIcon className="size-5" strokeWidth={2.2} />}
+				icon={<SettingsIcon class="size-5" stroke-width={2.2} />}
 				isActive={location.pathname.startsWith("/settings")}
 				label="Settings"
 				onClick={() => navigate("/settings")}
@@ -867,58 +876,83 @@ function MobileNav() {
 	);
 }
 
-function MobileNavItem({ icon, label, isActive, onClick }: SidebarItemProps) {
+function MobileNavItem(props: SidebarItemProps) {
 	return (
 		<button
-			className={cn(
+			class={cn(
 				"flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200 active:scale-95",
-				isActive ? "text-primary" : "text-muted-foreground",
+				props.isActive ? "text-primary" : "text-muted-foreground",
 			)}
-			onClick={onClick}
+			onClick={props.onClick}
 			type="button"
 		>
-			{icon}
-			<span>{label}</span>
+			{props.icon}
+			<span>{props.label}</span>
 		</button>
 	);
 }
 
-function App() {
-	return (
-		<HashRouter>
-			<Layout />
-		</HashRouter>
-	);
-}
-
 interface SidebarItemProps {
-	icon: React.ReactNode;
+	icon: JSX.Element;
 	label: string;
 	isActive: boolean;
 	onClick: () => void;
 }
 
-function SidebarItem({ icon, label, isActive, onClick }: SidebarItemProps) {
+function SidebarItem(props: SidebarItemProps) {
 	return (
 		<button
-			className={cn(
+			class={cn(
 				"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
-				isActive
+				props.isActive
 					? "bg-primary/12 text-primary"
 					: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
 			)}
-			onClick={onClick}
+			onClick={props.onClick}
 			type="button"
 		>
-			{icon}
-			<span>{label}</span>
+			{props.icon}
+			<span>{props.label}</span>
 		</button>
 	);
 }
 
-const root = createRoot(document.body);
-root.render(
-	<div style={{ isolation: "isolate" }}>
-		<App />
-	</div>,
+function SettingsRoute() {
+	return (
+		<SettingsPage
+			handleLogin={handleLogin}
+			handleLogout={handleLogout}
+			isLoggedIn={isLoggedIn()}
+			userProfile={userProfile()}
+		/>
+	);
+}
+
+/** The router instance is the provider; the render-prop child is the root
+ * layout, which receives the matched route content as `props.children`. */
+const Router = createRouter({
+	history: hashHistory(),
+	routes: [
+		{ component: HomePage, path: "/" },
+		{ component: HomePage, path: "/home" },
+		{ component: PlaylistsPage, path: "/playlists" },
+		{ component: PlaylistDetails, path: "/playlists/:id" },
+		{ component: ArtistPage, path: "/artist/:id" },
+		{ component: SettingsRoute, path: "/settings" },
+	],
+});
+
+function App() {
+	return (
+		<Router>{(routeProps) => <Layout>{routeProps.children}</Layout>}</Router>
+	);
+}
+
+render(
+	() => (
+		<div style={{ isolation: "isolate" }}>
+			<App />
+		</div>
+	),
+	document.body,
 );

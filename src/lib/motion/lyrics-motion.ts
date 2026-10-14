@@ -1,10 +1,4 @@
-import {
-	type RefObject,
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useRef,
-} from "react";
+import { type Accessor, createEffect, onCleanup } from "solid-js";
 import { textRect } from "@/lib/motion/queue-drag";
 
 /** Matches Tailwind's max-md breakpoint: the lyrics toggle is mobile-only. */
@@ -106,192 +100,198 @@ function capture(page: HTMLElement): Snapshot {
  * there.
  */
 export function useLyricsMorph(
-	pageRef: RefObject<HTMLElement | null>,
-	showLyrics: boolean,
+	getPage: () => HTMLElement | null,
+	showLyrics: Accessor<boolean>,
 ) {
-	const snapshot = useRef<Snapshot | null>(null);
-	const running = useRef<Animation[]>([]);
-	const cleanup = useRef<(() => void) | null>(null);
+	let snapshot: Snapshot | null = null;
+	let running: Animation[] = [];
+	let exitCleanup: (() => void) | null = null;
 
-	const stop = useCallback(() => {
-		for (const animation of running.current) animation.cancel();
-		running.current = [];
-		cleanup.current?.();
-		cleanup.current = null;
-	}, []);
+	const stop = () => {
+		for (const animation of running) animation.cancel();
+		running = [];
+		exitCleanup?.();
+		exitCleanup = null;
+	};
 
-	const prepare = useCallback(() => {
-		const page = pageRef.current;
+	const prepare = () => {
+		const page = getPage();
 		if (
 			!page ||
 			!window.matchMedia(MOBILE_QUERY).matches ||
 			window.matchMedia("(prefers-reduced-motion: reduce)").matches
 		) {
-			snapshot.current = null;
+			snapshot = null;
 			stop();
 			return;
 		}
 		// Measure first: mid-flight positions make a re-toggle reverse smoothly.
-		snapshot.current = capture(page);
+		snapshot = capture(page);
 		stop();
 		// Keep the nested `.np-morph` transitions from easing the freshly
 		// mounted layout into place (measured metrics are written on mount).
 		page.dataset.npLyricsMorph = "true";
-	}, [pageRef, stop]);
+	};
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: runs per toggle
-	useLayoutEffect(() => {
-		const page = pageRef.current;
-		const from = snapshot.current;
-		snapshot.current = null;
-		if (!page || !from) return;
+	createEffect(
+		() => showLyrics(),
+		() => {
+			const page = getPage();
+			const from = snapshot;
+			snapshot = null;
+			if (!page || !from) return;
 
-		try {
-			// The remounted artwork/title would replay their track-change
-			// entrance; they are glided into place instead.
-			for (const element of page.querySelectorAll(".animate-track-in")) {
-				for (const animation of element.getAnimations()) {
-					if (
-						typeof CSSAnimation !== "undefined" &&
-						animation instanceof CSSAnimation
-					)
-						animation.finish();
-				}
-			}
-
-			const animations: Animation[] = [];
-			const timing: KeyframeAnimationOptions = {
-				duration: DURATION,
-				easing: EASING,
-			};
-
-			for (const { selector, text, scale } of PAIRS) {
-				const element = visible(page, selector);
-				const old = from.rects.get(selector);
-				if (!element || !old) continue;
-				const next = measure(element, text);
-				if (next.width <= 0 || next.height <= 0) continue;
-				const s = scale ? old.width / next.width : 1;
-				const dx = old.left - next.left;
-				const dy = old.top - next.top;
-				if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(s - 1) < 0.01)
-					continue;
-				animations.push(
-					element.animate(
-						[
-							{
-								transform: `translate(${dx}px, ${dy}px) scale(${s})`,
-								transformOrigin: "0 0",
-							},
-							{ transform: "none", transformOrigin: "0 0" },
-						],
-						timing,
-					),
-				);
-				// Counter-scale the corner radius so the artwork keeps its
-				// rounding instead of ballooning/flattening with the scale.
-				if (scale && s !== 1) {
-					const rounded = roundedElement(element);
-					if (rounded) {
-						const radius = getComputedStyle(rounded).borderTopLeftRadius;
-						animations.push(
-							rounded.animate(
-								[
-									{ borderRadius: `${from.coverRadius / s}px` },
-									{ borderRadius: radius },
-								],
-								timing,
-							),
-						);
+			try {
+				// The remounted artwork/title would replay their track-change
+				// entrance; they are glided into place instead.
+				for (const element of page.querySelectorAll(".animate-track-in")) {
+					for (const animation of element.getAnimations()) {
+						if (
+							typeof CSSAnimation !== "undefined" &&
+							animation instanceof CSSAnimation
+						)
+							animation.finish();
 					}
 				}
-			}
 
-			// The stage's glow is pinned to the final cover: fade it in as the
-			// artwork grows into it.
-			const glow = visible(page, "[data-np-cover-glow]");
-			if (glow && !showLyrics) {
-				animations.push(
-					glow.animate(
-						[{ opacity: 0 }, { opacity: getComputedStyle(glow).opacity }],
-						timing,
-					),
-				);
-			}
-
-			const section = page.querySelector<HTMLElement>(
-				"[data-np-lyrics-section]",
-			);
-			if (section && showLyrics) {
-				animations.push(
-					section.animate(
-						[
-							{ opacity: 0, transform: "translateY(-16px)" },
-							{ opacity: 1, transform: "none" },
-						],
-						{ ...timing, delay: 60, fill: "backwards" },
-					),
-				);
-			} else if (section && from.section) {
-				// Keep the outgoing lyrics on screen, out of flow at their old
-				// box, while they fade under the cover growing over them.
-				const { left, top, width, height } = from.section;
-				Object.assign(section.style, {
-					display: "flex",
-					height: `${height}px`,
-					left: `${left}px`,
-					margin: "0",
-					pointerEvents: "none",
-					position: "absolute",
-					top: `${top}px`,
-					width: `${width}px`,
-				});
-				const restore = () => {
-					for (const property of [
-						"display",
-						"height",
-						"left",
-						"margin",
-						"pointer-events",
-						"position",
-						"top",
-						"width",
-					])
-						section.style.removeProperty(property);
+				const animations: Animation[] = [];
+				const timing: KeyframeAnimationOptions = {
+					duration: DURATION,
+					easing: EASING,
 				};
-				const fade = section.animate(
-					[
-						{ opacity: 1, transform: "none" },
-						{ opacity: 0, transform: "translateY(-16px)" },
-					],
-					{ duration: 200, easing: EASING, fill: "forwards" },
+
+				for (const { selector, text, scale } of PAIRS) {
+					const element = visible(page, selector);
+					const old = from.rects.get(selector);
+					if (!element || !old) continue;
+					const next = measure(element, text);
+					if (next.width <= 0 || next.height <= 0) continue;
+					const s = scale ? old.width / next.width : 1;
+					const dx = old.left - next.left;
+					const dy = old.top - next.top;
+					if (
+						Math.abs(dx) < 0.5 &&
+						Math.abs(dy) < 0.5 &&
+						Math.abs(s - 1) < 0.01
+					)
+						continue;
+					animations.push(
+						element.animate(
+							[
+								{
+									transform: `translate(${dx}px, ${dy}px) scale(${s})`,
+									transformOrigin: "0 0",
+								},
+								{ transform: "none", transformOrigin: "0 0" },
+							],
+							timing,
+						),
+					);
+					// Counter-scale the corner radius so the artwork keeps its
+					// rounding instead of ballooning/flattening with the scale.
+					if (scale && s !== 1) {
+						const rounded = roundedElement(element);
+						if (rounded) {
+							const radius = getComputedStyle(rounded).borderTopLeftRadius;
+							animations.push(
+								rounded.animate(
+									[
+										{ borderRadius: `${from.coverRadius / s}px` },
+										{ borderRadius: radius },
+									],
+									timing,
+								),
+							);
+						}
+					}
+				}
+
+				// The stage's glow is pinned to the final cover: fade it in as the
+				// artwork grows into it.
+				const glow = visible(page, "[data-np-cover-glow]");
+				if (glow && !showLyrics()) {
+					animations.push(
+						glow.animate(
+							[{ opacity: 0 }, { opacity: getComputedStyle(glow).opacity }],
+							timing,
+						),
+					);
+				}
+
+				const section = page.querySelector<HTMLElement>(
+					"[data-np-lyrics-section]",
 				);
-				animations.push(fade);
-				cleanup.current = restore;
-				fade.finished
-					.then(() => {
-						if (cleanup.current !== restore) return;
-						cleanup.current = null;
-						restore();
-						fade.cancel();
-					})
-					.catch(() => undefined); // cancelled: superseded by a re-toggle
-			}
+				if (section && showLyrics()) {
+					animations.push(
+						section.animate(
+							[
+								{ opacity: 0, transform: "translateY(-16px)" },
+								{ opacity: 1, transform: "none" },
+							],
+							{ ...timing, delay: 60, fill: "backwards" },
+						),
+					);
+				} else if (section && from.section) {
+					// Keep the outgoing lyrics on screen, out of flow at their old
+					// box, while they fade under the cover growing over them.
+					const { left, top, width, height } = from.section;
+					Object.assign(section.style, {
+						display: "flex",
+						height: `${height}px`,
+						left: `${left}px`,
+						margin: "0",
+						pointerEvents: "none",
+						position: "absolute",
+						top: `${top}px`,
+						width: `${width}px`,
+					});
+					const restore = () => {
+						for (const property of [
+							"display",
+							"height",
+							"left",
+							"margin",
+							"pointer-events",
+							"position",
+							"top",
+							"width",
+						])
+							section.style.removeProperty(property);
+					};
+					const fade = section.animate(
+						[
+							{ opacity: 1, transform: "none" },
+							{ opacity: 0, transform: "translateY(-16px)" },
+						],
+						{ duration: 200, easing: EASING, fill: "forwards" },
+					);
+					animations.push(fade);
+					exitCleanup = restore;
+					fade.finished
+						.then(() => {
+							if (exitCleanup !== restore) return;
+							exitCleanup = null;
+							restore();
+							fade.cancel();
+						})
+						.catch(() => undefined); // cancelled: superseded by a re-toggle
+				}
 
-			running.current = animations;
-			for (const animation of animations) {
-				animation.finished
-					.then(() => {
-						running.current = running.current.filter((a) => a !== animation);
-					})
-					.catch(() => undefined); // cancelled: superseded by a re-toggle
+				running = animations;
+				for (const animation of animations) {
+					animation.finished
+						.then(() => {
+							running = running.filter((a) => a !== animation);
+						})
+						.catch(() => undefined); // cancelled: superseded by a re-toggle
+				}
+			} finally {
+				delete page.dataset.npLyricsMorph;
 			}
-		} finally {
-			delete page.dataset.npLyricsMorph;
-		}
-	}, [showLyrics]);
+		},
+	);
 
-	useEffect(() => stop, [stop]);
+	onCleanup(stop);
 
 	return prepare;
 }

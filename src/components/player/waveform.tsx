@@ -1,10 +1,10 @@
-import { useCallback, useRef } from "react";
+import { For } from "solid-js";
 import { cn } from "@/lib/utils/utils";
 
 interface ProgressBarProps {
 	/** Playback progress from 0 to 1 */
 	progress: number;
-	className?: string;
+	class?: string;
 	disabled?: boolean;
 	onSeekStart?: () => void;
 	/** Called continuously while scrubbing with the new percentage */
@@ -14,88 +14,81 @@ interface ProgressBarProps {
 }
 
 /** Standard seek bar: thin track, filled portion, thumb on hover. */
-export function ProgressBar({
-	progress,
-	className,
-	disabled = false,
-	onSeekStart,
-	onSeek,
-	onSeekCommit,
-}: ProgressBarProps) {
-	const trackRef = useRef<HTMLDivElement>(null);
-	const draggingRef = useRef(false);
+export function ProgressBar(props: ProgressBarProps) {
+	let track!: HTMLDivElement;
+	let dragging = false;
 
-	const clamped = Math.max(0, Math.min(1, progress));
+	const clamped = () => Math.max(0, Math.min(1, props.progress));
 
-	const percentFromClientX = useCallback((clientX: number): number => {
-		const track = trackRef.current;
+	const percentFromClientX = (clientX: number): number => {
 		if (!track) return 0;
 		const rect = track.getBoundingClientRect();
 		return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-	}, []);
-
-	const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (disabled) return;
-		e.preventDefault();
-		draggingRef.current = true;
-		trackRef.current?.setPointerCapture(e.pointerId);
-		onSeekStart?.();
-		onSeek?.(percentFromClientX(e.clientX));
 	};
 
-	const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!draggingRef.current || disabled) return;
-		onSeek?.(percentFromClientX(e.clientX));
+	const handlePointerDown = (event: PointerEvent) => {
+		if (props.disabled) return;
+		event.preventDefault();
+		dragging = true;
+		track.setPointerCapture(event.pointerId);
+		props.onSeekStart?.();
+		props.onSeek?.(percentFromClientX(event.clientX));
 	};
 
-	const finishDrag = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!draggingRef.current) return;
-		draggingRef.current = false;
-		trackRef.current?.releasePointerCapture(e.pointerId);
-		onSeekCommit?.(percentFromClientX(e.clientX));
+	const handlePointerMove = (event: PointerEvent) => {
+		if (!dragging || props.disabled) return;
+		props.onSeek?.(percentFromClientX(event.clientX));
 	};
 
-	const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-		if (disabled) return;
+	const finishDrag = (event: PointerEvent) => {
+		if (!dragging) return;
+		dragging = false;
+		track.releasePointerCapture(event.pointerId);
+		props.onSeekCommit?.(percentFromClientX(event.clientX));
+	};
+
+	const handleKeyDown = (event: KeyboardEvent) => {
+		if (props.disabled) return;
 		const step = 0.05;
-		if (e.key === "ArrowRight") {
-			e.preventDefault();
-			onSeekCommit?.(Math.min(1, clamped + step));
-		} else if (e.key === "ArrowLeft") {
-			e.preventDefault();
-			onSeekCommit?.(Math.max(0, clamped - step));
+		if (event.key === "ArrowRight") {
+			event.preventDefault();
+			props.onSeekCommit?.(Math.min(1, clamped() + step));
+		} else if (event.key === "ArrowLeft") {
+			event.preventDefault();
+			props.onSeekCommit?.(Math.max(0, clamped() - step));
 		}
 	};
 
 	return (
+		// biome-ignore lint/a11y/useFocusableInteractive: focusable unless disabled (tabindex is set below)
 		<div
 			aria-label="Seek"
 			aria-valuemax={100}
 			aria-valuemin={0}
-			aria-valuenow={Math.round(clamped * 100)}
-			className={cn(
+			aria-valuenow={Math.round(clamped() * 100)}
+			class={cn(
 				"group relative flex h-4 w-full touch-none select-none items-center",
-				disabled ? "pointer-events-none opacity-60" : "cursor-pointer",
-				className,
+				props.disabled ? "pointer-events-none opacity-60" : "cursor-pointer",
+				props.class,
 			)}
 			onKeyDown={handleKeyDown}
 			onPointerDown={handlePointerDown}
 			onPointerMove={handlePointerMove}
 			onPointerUp={finishDrag}
-			ref={trackRef}
+			ref={track}
 			role="slider"
-			tabIndex={disabled ? -1 : 0}
+			tabindex={props.disabled ? -1 : 0}
 		>
-			<div className="h-1 w-full overflow-hidden rounded-full bg-foreground/15 transition-colors group-hover:bg-foreground/25">
+			<div class="h-1 w-full overflow-hidden rounded-full bg-foreground/15 transition-colors group-hover:bg-foreground/25">
 				<div
-					className="h-full rounded-full bg-primary"
-					style={{ width: `${clamped * 100}%` }}
+					class="h-full rounded-full bg-primary"
+					style={{ width: `${clamped() * 100}%` }}
 				/>
 			</div>
 			<span
-				aria-hidden
-				className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity duration-150 group-hover:opacity-100"
-				style={{ left: `${clamped * 100}%` }}
+				aria-hidden="true"
+				class="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow transition-opacity duration-150 group-hover:opacity-100"
+				style={{ left: `${clamped() * 100}%` }}
 			/>
 		</div>
 	);
@@ -103,37 +96,36 @@ export function ProgressBar({
 
 interface EqualizerBarsProps {
 	playing?: boolean;
-	className?: string;
+	class?: string;
 }
 
 /** Small animated indicator shown next to the currently playing track. */
-export function EqualizerBars({
-	playing = true,
-	className,
-}: EqualizerBarsProps) {
+export function EqualizerBars(props: EqualizerBarsProps) {
+	const playing = () => props.playing ?? true;
 	return (
 		<span
-			aria-hidden
-			className={cn(
+			aria-hidden="true"
+			class={cn(
 				"inline-flex h-3.5 items-end gap-[2px]",
-				!playing && "opacity-40",
-				className,
+				!playing() && "opacity-40",
+				props.class,
 			)}
 		>
-			{[0, 1, 2].map((i) => (
-				<span
-					className={cn(
-						"w-[3px] rounded-full bg-current origin-bottom",
-						playing && "animate-eq",
-					)}
-					key={i}
-					style={{
-						height: `${[100, 62, 85][i]}%`,
-						animationDelay: `${i * 140}ms`,
-						animationDuration: `${0.9 + i * 0.22}s`,
-					}}
-				/>
-			))}
+			<For each={[0, 1, 2]}>
+				{(index) => (
+					<span
+						class={cn(
+							"w-[3px] rounded-full bg-current origin-bottom",
+							playing() && "animate-eq",
+						)}
+						style={{
+							height: `${[100, 62, 85][index]}%`,
+							"animation-delay": `${index * 140}ms`,
+							"animation-duration": `${0.9 + index * 0.22}s`,
+						}}
+					/>
+				)}
+			</For>
 		</span>
 	);
 }

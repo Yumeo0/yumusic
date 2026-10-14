@@ -1,4 +1,3 @@
-import { useCallback } from "react";
 import { type TitleMode, useSettings } from "../stores/settings";
 
 /**
@@ -1094,15 +1093,12 @@ export function useDisplayTitle(): (
 	keepTitle?: boolean,
 ) => string {
 	const [settings] = useSettings();
-	return useCallback(
-		(title: string, keepTitle = false) =>
-			displayTitle(
-				title,
-				keepTitle ? "both" : settings.titleMode,
-				settings.cleanTitles,
-			),
-		[settings.cleanTitles, settings.titleMode],
-	);
+	return (title: string, keepTitle = false) =>
+		displayTitle(
+			title,
+			keepTitle ? "both" : settings.titleMode,
+			settings.cleanTitles,
+		);
 }
 
 /**
@@ -1120,16 +1116,13 @@ export function useFormatTitle(): (
 	coverArtists: string[];
 } {
 	const [settings] = useSettings();
-	return useCallback(
-		(title: string, artist?: string, keepTitle = false) =>
-			formatTitleParts(
-				title,
-				keepTitle ? "both" : settings.titleMode,
-				settings.cleanTitles,
-				artist,
-			),
-		[settings.cleanTitles, settings.titleMode],
-	);
+	return (title: string, artist?: string, keepTitle = false) =>
+		formatTitleParts(
+			title,
+			keepTitle ? "both" : settings.titleMode,
+			settings.cleanTitles,
+			artist,
+		);
 }
 
 /* ─── Song tags (cover / remix / edit chips) ──────────────────── */

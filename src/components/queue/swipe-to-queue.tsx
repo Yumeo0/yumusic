@@ -1,9 +1,10 @@
-import { ListPlus } from "lucide-react";
-import { useRef, useState } from "react";
+import { ListPlus } from "@lucide/solid";
+import type { JSX } from "@solidjs/web";
+import { createSignal } from "solid-js";
 import { cn } from "@/lib/utils/utils";
 
 interface SwipeToQueueProps {
-	children: React.ReactNode;
+	children: JSX.Element;
 	/** Called when the row is released past the swipe threshold */
 	onQueue: () => void;
 }
@@ -19,42 +20,42 @@ const DRAG_START_SLOP = 8;
  * Touch-only — mouse users keep the plain row — and vertical scrolling
  * stays native via `touch-action: pan-y`.
  */
-export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
-	const [drag, setDrag] = useState(0);
-	const [queued, setQueued] = useState(false);
-	const start = useRef<{ x: number; y: number } | null>(null);
-	const axis = useRef<"horizontal" | "vertical" | null>(null);
+export function SwipeToQueue(props: SwipeToQueueProps) {
+	const [drag, setDrag] = createSignal(0);
+	const [queued, setQueued] = createSignal(false);
+	let start: { x: number; y: number } | null = null;
+	let axis: "horizontal" | "vertical" | null = null;
 
-	const handleTouchStart = (event: React.TouchEvent) => {
+	const handleTouchStart = (event: TouchEvent) => {
 		const touch = event.touches[0];
 		if (!touch) return;
-		start.current = { x: touch.clientX, y: touch.clientY };
-		axis.current = null;
+		start = { x: touch.clientX, y: touch.clientY };
+		axis = null;
 	};
 
-	const handleTouchMove = (event: React.TouchEvent) => {
+	const handleTouchMove = (event: TouchEvent) => {
 		const touch = event.touches[0];
-		const origin = start.current;
+		const origin = start;
 		if (!touch || !origin) return;
 		const dx = touch.clientX - origin.x;
 		const dy = touch.clientY - origin.y;
-		if (!axis.current) {
+		if (!axis) {
 			if (Math.abs(dx) < DRAG_START_SLOP && Math.abs(dy) < DRAG_START_SLOP) {
 				return;
 			}
 			// Lock to one axis so vertical list scrolling is never hijacked
-			axis.current = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
+			axis = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
 		}
-		if (axis.current === "horizontal") {
+		if (axis === "horizontal") {
 			setDrag(Math.max(0, Math.min(dx, MAX_DRAG)));
 		}
 	};
 
 	const handleTouchEnd = () => {
-		start.current = null;
-		axis.current = null;
-		if (drag >= QUEUE_THRESHOLD) {
-			onQueue();
+		start = null;
+		axis = null;
+		if (drag() >= QUEUE_THRESHOLD) {
+			props.onQueue();
 			setQueued(true);
 			window.setTimeout(() => setQueued(false), 1200);
 			if (typeof navigator.vibrate === "function") {
@@ -65,32 +66,32 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 	};
 
 	return (
-		<div className="cv-row relative overflow-hidden">
+		<div class="cv-row relative overflow-hidden">
 			<span
-				aria-hidden
-				className="absolute top-1/2 left-3.5 -translate-y-1/2 text-primary transition-opacity duration-100"
-				style={{ opacity: Math.min(drag / QUEUE_THRESHOLD, 1) }}
+				aria-hidden="true"
+				class="absolute top-1/2 left-3.5 -translate-y-1/2 text-primary transition-opacity duration-100"
+				style={{ opacity: Math.min(drag() / QUEUE_THRESHOLD, 1) }}
 			>
-				<ListPlus className="size-5" />
+				<ListPlus class="size-5" />
 			</span>
 			<div
-				className={cn(
+				class={cn(
 					"relative touch-pan-y",
-					queued && "bg-primary/10 transition-colors duration-300",
+					queued() && "bg-primary/10 transition-colors duration-300",
 				)}
 				onTouchEnd={handleTouchEnd}
 				onTouchMove={handleTouchMove}
 				onTouchStart={handleTouchStart}
 				style={{
-					transform: `translateX(${drag}px)`,
+					transform: `translateX(${drag()}px)`,
 					// Only the row under the finger is promoted to its own
 					// compositor layer; setting `will-change` on every row in a
 					// long playlist forces hundreds of layers and tanks hover and
 					// scroll performance.
-					willChange: drag > 0 ? "transform" : undefined,
+					"will-change": drag() > 0 ? "transform" : undefined,
 				}}
 			>
-				{children}
+				{props.children}
 			</div>
 		</div>
 	);

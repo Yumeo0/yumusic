@@ -1,4 +1,4 @@
-import { type RefObject, useLayoutEffect, useRef } from "react";
+import { type Accessor, createEffect, onSettled, untrack } from "solid-js";
 import {
 	type DismissGeometry,
 	measureDismissGeometry,
@@ -26,14 +26,16 @@ interface PlayerMotion {
 let motion: PlayerMotion | null = null;
 
 export function useNowPlayingMotion(
-	overlayRef: RefObject<HTMLElement | null>,
-	open: boolean,
+	getOverlay: () => HTMLElement | null,
+	open: Accessor<boolean>,
 ) {
-	useLayoutEffect(() => {
-		const overlay = overlayRef.current;
+	onSettled(() => {
+		const overlay = getOverlay();
 		if (!overlay) return;
 		let frame = 0;
-		let progress = getNowPlayingOpen() ? 0 : 1;
+		// Snapshot the initial state untracked; the motion reads live values
+		// imperatively from here on.
+		let progress = untrack(getNowPlayingOpen) ? 0 : 1;
 		let geometry: DismissGeometry | null = null;
 		let active = false;
 		let dragOrigin = progress;
@@ -157,11 +159,16 @@ export function useNowPlayingMotion(
 			complete(getNowPlayingOpen() ? 0 : 1);
 			if (motion === driver) motion = null;
 		};
-	}, [overlayRef]);
+	});
 
-	useLayoutEffect(() => {
-		motion?.animate(open);
-	}, [open]);
+	createEffect(
+		() => open(),
+		(isOpen) => {
+			// The animation reads player-UI state (queue open/reveal)
+			// imperatively; untracked so those reads stay warning-free.
+			untrack(() => motion?.animate(isOpen));
+		},
+	);
 }
 
 /** Locks to vertical travel and leaves seeks, lyrics scrolling and taps alone. */
@@ -169,81 +176,91 @@ export function useNowPlayingSwipe(
 	opening: boolean,
 	canStart?: QueueGestureCheck,
 ) {
-	const gesture = useRef<{
+	let gesture: {
 		x: number;
 		y: number;
 		distance: number;
 		following: boolean;
-	} | null>(null);
-	const suppressClick = useRef(false);
+	} | null = null;
+	let suppressClick = false;
 	const finish = (cancelled: boolean) => {
-		const current = gesture.current;
-		gesture.current = null;
+		const current = gesture;
+		gesture = null;
 		if (!current?.following) return;
 		motion?.settle(!cancelled && current.distance >= 64 ? opening : !opening);
 	};
-	return {
-		onClickCapture: (event: React.MouseEvent) => {
-			if (!suppressClick.current) return;
-			suppressClick.current = false;
-			event.preventDefault();
-			event.stopPropagation();
-		},
-		// Capture phase: the song context-menu trigger (long-press menu around
-		// the mini player's artwork + title) stops touchstart propagation, so
-		// a bubbling listener would never see swipes that begin on it.
-		onTouchStartCapture: (event: React.TouchEvent) => {
-			suppressClick.current = false;
-			gesture.current = null;
+	const onClickCapture = (event: MouseEvent) => {
+		if (!suppressClick) return;
+		suppressClick = false;
+		event.preventDefault();
+		event.stopPropagation();
+	};
+	// Capture phase: the song context-menu trigger (long-press menu around
+	// the mini player's artwork + title) stops touchstart propagation, so
+	// a bubbling listener would never see swipes that begin on it.
+	const onTouchStartCapture = (event: TouchEvent) => {
+		suppressClick = false;
+		gesture = null;
+		if (
+			event.touches.length !== 1 ||
+			!window.matchMedia(MOBILE_QUERY).matches ||
+			getNowPlayingOpen() === opening ||
+			getQueueOpen() ||
+			(canStart && !canStart(event)) ||
+			(event.target instanceof Element &&
+				event.target.closest(
+					'[data-swipe-dismiss-ignore], [role="slider"], input',
+				))
+		)
+			return;
+		const touch = event.touches[0];
+		gesture = {
+			x: touch.clientX,
+			y: touch.clientY,
+			distance: 0,
+			following: false,
+		};
+	};
+	const onTouchMove = (event: TouchEvent) => {
+		const current = gesture;
+		if (!current) return;
+		if (event.touches.length !== 1) {
+			finish(true);
+			return;
+		}
+		const touch = event.touches[0];
+		const dy = (touch.clientY - current.y) * (opening ? -1 : 1);
+		if (!current.following) {
 			if (
-				event.touches.length !== 1 ||
-				!window.matchMedia(MOBILE_QUERY).matches ||
-				getNowPlayingOpen() === opening ||
-				getQueueOpen() ||
-				(canStart && !canStart(event)) ||
-				(event.target instanceof Element &&
-					event.target.closest(
-						'[data-swipe-dismiss-ignore], [role="slider"], input',
-					))
-			)
-				return;
-			const touch = event.touches[0];
-			gesture.current = {
-				x: touch.clientX,
-				y: touch.clientY,
-				distance: 0,
-				following: false,
-			};
-		},
-		onTouchMove: (event: React.TouchEvent) => {
-			const current = gesture.current;
-			if (!current) return;
-			if (event.touches.length !== 1) {
-				finish(true);
+				Math.abs(touch.clientX - current.x) > Math.max(10, Math.abs(dy)) ||
+				dy < -10
+			) {
+				gesture = null;
 				return;
 			}
-			const touch = event.touches[0];
-			const dy = (touch.clientY - current.y) * (opening ? -1 : 1);
-			if (!current.following) {
-				if (
-					Math.abs(touch.clientX - current.x) > Math.max(10, Math.abs(dy)) ||
-					dy < -10
-				) {
-					gesture.current = null;
-					return;
-				}
-				if (dy < 10) return;
-				if (!motion?.begin()) {
-					gesture.current = null;
-					return;
-				}
-				current.following = true;
-				suppressClick.current = true;
+			if (dy < 10) return;
+			if (!motion?.begin()) {
+				gesture = null;
+				return;
 			}
-			current.distance = Math.max(0, dy);
-			motion?.drag(current.distance, opening);
+			current.following = true;
+			suppressClick = true;
+		}
+		current.distance = Math.max(0, dy);
+		motion?.drag(current.distance, opening);
+	};
+	return {
+		/**
+		 * Attaches the capture-phase listeners to the element the gesture
+		 * guards (click suppression after a swipe, touchstart before menus
+		 * can stop it).
+		 */
+		attach: (element: HTMLElement) => {
+			element.addEventListener("click", onClickCapture, true);
+			element.addEventListener("touchstart", onTouchStartCapture, true);
 		},
-		onTouchEnd: () => finish(false),
 		onTouchCancel: () => finish(true),
+		onTouchEnd: () => finish(false),
+		onTouchMove,
 	};
 }

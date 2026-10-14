@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { createStore } from "solid-js";
 
 const PINNED_KEY = "yumusic:pinned";
-const PINNED_EVENT = "yumusic:pinned-changed";
 
 export interface PinnedPlaylist {
 	id: string;
@@ -20,13 +19,27 @@ export function getPinnedPlaylists(): PinnedPlaylist[] {
 	}
 }
 
+/** Shared reactive list of sidebar-pinned playlists. */
+const [pinnedStore, setPinnedStore] = createStore<{ list: PinnedPlaylist[] }>({
+	list: getPinnedPlaylists(),
+});
+
 function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 	try {
 		localStorage.setItem(PINNED_KEY, JSON.stringify(pinned));
 	} catch {
 		// best-effort
 	}
-	window.dispatchEvent(new Event(PINNED_EVENT));
+	setPinnedStore((state) => {
+		state.list = pinned;
+	});
+}
+
+if (typeof window !== "undefined") {
+	// Another window changed the pins: fold the stored values in.
+	window.addEventListener("storage", () => {
+		savePinnedPlaylists(getPinnedPlaylists());
+	});
 }
 
 /**
@@ -61,23 +74,17 @@ export function reconcilePinnedPlaylists(
 	if (changed) savePinnedPlaylists(next);
 }
 
-/** Shared reactive state for sidebar-pinned playlists. */
+/**
+ * Reactive pinned playlists for the sidebar. Keep the returned object and
+ * read `pinned` where it renders (destructuring `pinned` would capture a
+ * snapshot); the action functions are stable and safe to destructure.
+ */
 export function usePinnedPlaylists() {
-	const [pinned, setPinned] = useState<PinnedPlaylist[]>(getPinnedPlaylists);
-
-	useEffect(() => {
-		const refresh = () => setPinned(getPinnedPlaylists());
-		window.addEventListener(PINNED_EVENT, refresh);
-		window.addEventListener("storage", refresh);
-		return () => {
-			window.removeEventListener(PINNED_EVENT, refresh);
-			window.removeEventListener("storage", refresh);
-		};
-	}, []);
-
 	return {
-		pinned,
-		isPinned: (id: string) => pinned.some((p) => p.id === id),
+		get pinned() {
+			return pinnedStore.list;
+		},
+		isPinned: (id: string) => pinnedStore.list.some((p) => p.id === id),
 		togglePinned: (playlist: PinnedPlaylist) => {
 			const current = getPinnedPlaylists();
 			const next = current.some((p) => p.id === playlist.id)

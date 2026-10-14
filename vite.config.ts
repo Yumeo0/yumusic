@@ -1,6 +1,6 @@
 import path from "node:path";
+import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // Set by scripts/android-dev.ps1: this machine's IPv4 that the Android
@@ -10,7 +10,7 @@ import { defineConfig } from "vite";
 const devHost = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-	plugins: [react(), tailwindcss()],
+	plugins: [solid(), tailwindcss()],
 	resolve: {
 		alias: {
 			"@": path.resolve(import.meta.dirname, "./src"),

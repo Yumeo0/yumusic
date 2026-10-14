@@ -1,6 +1,6 @@
-import { AudioLines, ChevronRight, Loader2, Shuffle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { AudioLines, ChevronRight, Loader2, Shuffle } from "@lucide/solid";
+import { useNavigate } from "@solidjs/router";
+import { createEffect, createSignal, For, Match, Show, Switch } from "solid-js";
 import { type Types, type YTMusic, YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
@@ -115,7 +115,7 @@ function entryKey(entry: SearchEntry): string {
 /** Shows and plays resolved video entries as their song version. */
 function withSongVersions(
 	entry: SearchEntry,
-	versions: ReadonlyMap<string, Song>,
+	versions: { get: (id: string) => Song | undefined },
 ): SearchEntry {
 	const song =
 		entry.kind === "playable"
@@ -383,60 +383,66 @@ function shuffledSongs(songs: Song[]): Song[] {
 	return shuffled;
 }
 
-export default function SearchResults({ query }: SearchResultsPageProps) {
-	const { play, playQueue, addToQueue, currentSong } = usePlayer();
-	const { isPlaying } = usePlayerControls();
+export default function SearchResults(props: SearchResultsPageProps) {
+	const player = usePlayer();
+	const controls = usePlayerControls();
 	// Video entries already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
 	const navigate = useNavigate();
-	const [tab, setTab] = useState<SearchTab>("all");
-	const [view, setView] = useState<TabView>({ status: "loading" });
+	const [tab, setTab] = createSignal<SearchTab>("all");
+	const [view, setView] = createSignal<TabView>({ status: "loading" });
 	// Fetched tabs of the current query, so switching tabs back and forth does
 	// not re-query YouTube. The page is keyed by query, so caches never mix.
-	const cache = useRef(new Map<SearchTab, SearchEntry[]>());
-	const filter = TABS.find((entry) => entry.id === tab)?.type;
+	const cache = new Map<SearchTab, SearchEntry[]>();
+	const filter = () => TABS.find((entry) => entry.id === tab())?.type;
 
 	// Switch the visible tab and its content in one update, so the previous
 	// tab's rows never flash under the new tab while its fetch starts.
 	const selectTab = (next: SearchTab) => {
-		if (next === tab) return;
+		if (next === tab()) return;
 		setTab(next);
-		const cached = cache.current.get(next);
+		const cached = cache.get(next);
 		setView(
 			cached ? { status: "ready", entries: cached } : { status: "loading" },
 		);
 	};
 
-	useEffect(() => {
-		if (!query || cache.current.has(tab)) return;
-		let cancelled = false;
+	createEffect(
+		() => ({ filter: filter(), query: props.query, tab: tab() }),
+		({ filter, query, tab: activeTab }) => {
+			if (!query || cache.has(activeTab)) return;
+			let cancelled = false;
 
-		(async () => {
-			try {
-				const youtube = await getYoutubeClient();
-				const search = await youtube.music.search(
-					query,
-					filter ? { type: filter } : {},
-				);
-				const entries = toEntries(search, tab);
-				await fillDurations(entries);
-				if (cancelled) return;
-				cache.current.set(tab, entries);
-				setView({ status: "ready", entries });
-			} catch (err) {
-				console.error("Search error:", err);
-				if (!cancelled) setView({ status: "error" });
-			}
-		})();
+			(async () => {
+				try {
+					const youtube = await getYoutubeClient();
+					const search = await youtube.music.search(
+						query,
+						filter ? { type: filter } : {},
+					);
+					const entries = toEntries(search, activeTab);
+					await fillDurations(entries);
+					if (cancelled) return;
+					cache.set(activeTab, entries);
+					setView({ status: "ready", entries });
+				} catch (err) {
+					console.error("Search error:", err);
+					if (!cancelled) setView({ status: "error" });
+				}
+			})();
 
-		return () => {
-			cancelled = true;
-		};
-	}, [query, tab, filter]);
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
-	const loading = view.status === "loading";
-	const failed = view.status === "error";
-	const results = view.status === "ready" ? view.entries : [];
+	const loading = () => view().status === "loading";
+	const failed = () => view().status === "error";
+	const results = () => {
+		const current = view();
+		return current.status === "ready" ? current.entries : [];
+	};
 
 	const openEntry = (entry: ArtistEntry | CollectionEntry) => {
 		if (entry.kind === "artist") navigate(`/artist/${entry.id}`);
@@ -445,7 +451,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 
 	const startShuffle = (songs: Song[]) => {
 		const shuffled = shuffledSongs(songs);
-		if (shuffled.length > 0) playQueue(shuffled, 0);
+		if (shuffled.length > 0) void player.playQueue(shuffled, 0);
 	};
 
 	const startMix = async (artistId: string) => {
@@ -454,108 +460,129 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 			showToast("Could not start mix");
 			return;
 		}
-		playQueue(songs, 0);
+		await player.playQueue(songs, 0);
 	};
 
 	return (
 		<div>
-			<div className="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-				<h2 className="flex items-baseline gap-2 text-sm text-muted-foreground">
+			<div class="mb-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+				<h2 class="flex items-baseline gap-2 text-sm text-muted-foreground">
 					<span>
-						{loading ? `Searching for "${query}"` : `Results for "${query}"`}
+						{loading()
+							? `Searching for "${props.query}"`
+							: `Results for "${props.query}"`}
 					</span>
-					{!loading && !failed && (
-						<span className="text-xs text-muted-foreground/50">
-							({results.length})
+					<Show when={!loading() && !failed()}>
+						<span class="text-xs text-muted-foreground/50">
+							({results().length})
 						</span>
-					)}
+					</Show>
 				</h2>
-				<div className="flex items-center gap-1">
-					{TABS.map((entry) => (
-						<button
-							aria-pressed={tab === entry.id}
-							className={cn(
-								"h-8 rounded-full px-3.5 text-xs font-medium transition-colors duration-150",
-								tab === entry.id
-									? "bg-primary/12 text-primary"
-									: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-							)}
-							key={entry.id}
-							onClick={() => selectTab(entry.id)}
-							type="button"
-						>
-							{entry.label}
-						</button>
-					))}
+				<div class="flex items-center gap-1">
+					<For each={TABS}>
+						{(entry) => (
+							<button
+								aria-pressed={tab() === entry.id ? "true" : "false"}
+								class={cn(
+									"h-8 rounded-full px-3.5 text-xs font-medium transition-colors duration-150",
+									tab() === entry.id
+										? "bg-primary/12 text-primary"
+										: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+								)}
+								onClick={() => selectTab(entry.id)}
+								type="button"
+							>
+								{entry.label}
+							</button>
+						)}
+					</For>
 				</div>
 			</div>
 
-			{loading ? (
-				<SearchSkeleton />
-			) : failed ? (
-				<h2 className="py-10 text-sm text-destructive">
-					Failed to search YouTube. Please try again.
-				</h2>
-			) : (
-				<>
-					<div className="space-y-0.5">
-						{results.map((entry, i) => {
-							const shown = withSongVersions(entry, versions);
-							if (shown.top) {
+			<Show fallback={<SearchSkeleton />} when={!loading()}>
+				<Show
+					fallback={
+						<h2 class="py-10 text-sm text-destructive">
+							Failed to search YouTube. Please try again.
+						</h2>
+					}
+					when={!failed()}
+				>
+					<div class="space-y-0.5">
+						<For each={results()}>
+							{(entry, i) => {
+								const shown = () => withSongVersions(entry, versions);
+								const playable = () => {
+									const current = shown();
+									return current.kind === "playable" ? current : null;
+								};
+								const artist = () => {
+									const current = shown();
+									return current.kind === "artist" ? current : null;
+								};
+								const collection = () => {
+									const current = shown();
+									return current.kind === "collection" ? current : null;
+								};
 								return (
-									<TopResultCard
-										entry={shown}
-										isPlaying={isPlaying}
-										key={entryKey(entry)}
-										onMix={startMix}
-										onOpen={() => {
-											if (shown.kind !== "playable") openEntry(shown);
-										}}
-										onPlay={(song) => play(song)}
-										onQueue={(song) => addToQueue([song])}
-										onShuffle={startShuffle}
-										playingId={currentSong?.id}
-									/>
+									<Switch>
+										<Match when={shown().top}>
+											<TopResultCard
+												entry={shown()}
+												isPlaying={controls.isPlaying()}
+												onMix={startMix}
+												onOpen={() => {
+													const current = shown();
+													if (current.kind !== "playable") openEntry(current);
+												}}
+												onPlay={(song) => void player.play(song)}
+												onQueue={(song) => player.addToQueue([song])}
+												onShuffle={startShuffle}
+												playingId={player.currentSong()?.id}
+											/>
+										</Match>
+										<Match when={!shown().top && playable()}>
+											{(current) => (
+												<PlayableRow
+													entry={current()}
+													index={i()}
+													isCurrent={
+														player.currentSong()?.id === current().song.id
+													}
+													isPlaying={controls.isPlaying()}
+													onPlay={() => void player.play(current().song)}
+													onQueue={() => player.addToQueue([current().song])}
+												/>
+											)}
+										</Match>
+										<Match when={!shown().top && artist()}>
+											{(current) => (
+												<ArtistRow
+													entry={current()}
+													onClick={() => openEntry(current())}
+												/>
+											)}
+										</Match>
+										<Match when={!shown().top && collection()}>
+											{(current) => (
+												<CollectionRow
+													entry={current()}
+													onClick={() => openEntry(current())}
+												/>
+											)}
+										</Match>
+									</Switch>
 								);
-							}
-							if (shown.kind === "playable") {
-								return (
-									<PlayableRow
-										entry={shown}
-										index={i}
-										isCurrent={currentSong?.id === shown.song.id}
-										isPlaying={isPlaying}
-										key={entryKey(entry)}
-										onPlay={() => play(shown.song)}
-										onQueue={() => addToQueue([shown.song])}
-									/>
-								);
-							}
-							if (shown.kind === "artist") {
-								return (
-									<ArtistRow
-										entry={shown}
-										key={`artist-${shown.id}`}
-										onClick={() => openEntry(shown)}
-									/>
-								);
-							}
-							return (
-								<CollectionRow
-									entry={shown}
-									key={`collection-${shown.id}`}
-									onClick={() => openEntry(shown)}
-								/>
-							);
-						})}
+							}}
+						</For>
 					</div>
-					{results.length === 0 && (
-						<p className="py-10 text-sm text-muted-foreground">
+					<Show when={results().length === 0}>
+						<p class="py-10 text-sm text-muted-foreground">
 							Nothing found — try a different search.
 						</p>
-					)}
-				</>
-			)}
+					</Show>
+				</Show>
+			</Show>
 		</div>
 	);
 }
@@ -566,16 +593,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
  * sometimes the only place the entity appears in the All list. Artist cards
  * list their associated tracks and carry YTM's Shuffle / Mix actions.
  */
-function TopResultCard({
-	entry,
-	playingId,
-	isPlaying,
-	onOpen,
-	onPlay,
-	onQueue,
-	onShuffle,
-	onMix,
-}: {
+function TopResultCard(props: {
 	entry: SearchEntry;
 	/** Id of the playing track, for the current-track highlight. */
 	playingId?: string;
@@ -586,155 +604,191 @@ function TopResultCard({
 	onShuffle: (songs: Song[]) => void;
 	onMix: (artistId: string) => Promise<void>;
 }) {
-	const [mixPending, setMixPending] = useState(false);
-	const songs = entry.songs ?? [];
-	const isArtist = entry.kind === "artist";
-	const isPlayable = entry.kind === "playable";
-	const title = isPlayable
-		? entry.song.title
-		: entry.kind === "artist"
-			? formatArtistName(entry.name)
-			: entry.title;
-	const thumbnail = isPlayable ? entry.song.thumbnail : entry.thumbnail;
-	const isCurrent = isPlayable && playingId === entry.song.id;
+	const [mixPending, setMixPending] = createSignal(false);
+	const songs = () => props.entry.songs ?? [];
+	const playable = () => {
+		const entry = props.entry;
+		return entry.kind === "playable" ? entry : null;
+	};
+	const artist = () => {
+		const entry = props.entry;
+		return entry.kind === "artist" ? entry : null;
+	};
+	const isArtist = () => props.entry.kind === "artist";
+	const title = () => {
+		const entry = props.entry;
+		if (entry.kind === "playable") return entry.song.title;
+		if (entry.kind === "artist") return formatArtistName(entry.name);
+		return entry.title;
+	};
+	const thumbnail = () => {
+		const entry = props.entry;
+		return entry.kind === "playable" ? entry.song.thumbnail : entry.thumbnail;
+	};
+	const isCurrent = () =>
+		!!playable() && props.playingId === playable()?.song.id;
 
 	const runMix = async () => {
-		if (entry.kind !== "artist" || mixPending) return;
+		const current = artist();
+		if (!current || mixPending()) return;
 		setMixPending(true);
 		try {
-			await onMix(entry.id);
+			await props.onMix(current.id);
 		} finally {
 			setMixPending(false);
 		}
 	};
 
-	const card = (
-		<div className="overflow-hidden rounded-xl border border-foreground/8 bg-foreground/3">
-			<div className="flex flex-wrap items-center gap-x-4 gap-y-3 p-3 sm:p-4">
+	const card = () => (
+		<div class="overflow-hidden rounded-xl border border-foreground/8 bg-foreground/3">
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-3 p-3 sm:p-4">
 				<button
-					className="group flex min-w-0 flex-1 items-center gap-4 text-left"
-					onClick={isPlayable ? () => onPlay(entry.song) : onOpen}
+					class="group flex min-w-0 flex-1 items-center gap-4 text-left"
+					onClick={() => {
+						const current = playable();
+						if (current) props.onPlay(current.song);
+						else props.onOpen();
+					}}
 					type="button"
 				>
-					{thumbnail ? (
-						<img
-							alt={title}
-							className={cn(
-								"size-18 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-22",
-								isArtist && "rounded-full",
-							)}
-							loading="lazy"
-							src={proxiedImageUrl(thumbnail)}
-						/>
-					) : (
-						<div
-							className={cn(
-								"size-18 shrink-0 rounded-xl bg-muted sm:size-22",
-								isArtist && "rounded-full",
-							)}
-						/>
-					)}
-					<div className="min-w-0 flex-1">
+					<Show
+						fallback={
+							<div
+								class={cn(
+									"size-18 shrink-0 rounded-xl bg-muted sm:size-22",
+									isArtist() && "rounded-full",
+								)}
+							/>
+						}
+						when={thumbnail()}
+					>
+						{(src) => (
+							<img
+								alt={title()}
+								class={cn(
+									"size-18 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-22",
+									isArtist() && "rounded-full",
+								)}
+								loading="lazy"
+								src={proxiedImageUrl(src())}
+							/>
+						)}
+					</Show>
+					<div class="min-w-0 flex-1">
 						<h3
-							className={cn(
+							class={cn(
 								"truncate text-lg font-bold tracking-tight transition-colors duration-150 group-hover:text-primary",
-								isCurrent && "text-primary",
+								isCurrent() && "text-primary",
 							)}
 						>
-							{isPlayable ? (
-								<SongTitle
-									artist={entry.song.artist}
-									keepTitle={entry.song.upload}
-									title={entry.song.title}
-								/>
-							) : (
-								title
-							)}
+							<Show fallback={title()} when={playable()}>
+								{(current) => (
+									<SongTitle
+										artist={current().song.artist}
+										keepTitle={current().song.upload}
+										title={current().song.title}
+									/>
+								)}
+							</Show>
 						</h3>
-						<p className="mt-1 truncate text-sm text-muted-foreground">
-							{isPlayable ? <ArtistLinks song={entry.song} /> : entry.subtitle}
+						<p class="mt-1 truncate text-sm text-muted-foreground">
+							<Show fallback={subtitleOf(props.entry)} when={playable()}>
+								{(current) => <ArtistLinks song={current().song} />}
+							</Show>
 						</p>
 					</div>
-					{isPlayable && (
-						<div className="flex shrink-0 items-center gap-2 pr-1">
-							<DownloadedBadge songId={entry.song.id} />
-							{isCurrent && isPlaying ? (
-								<EqualizerBars className="size-3.5 text-primary" />
-							) : (
-								<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-									{entry.song.duration}
-								</span>
-							)}
-						</div>
-					)}
+					<Show when={playable()}>
+						{(current) => (
+							<div class="flex shrink-0 items-center gap-2 pr-1">
+								<DownloadedBadge songId={current().song.id} />
+								<Show
+									fallback={
+										<span class="font-mono text-xs text-muted-foreground/70 tabular-nums">
+											{current().song.duration}
+										</span>
+									}
+									when={isCurrent() && props.isPlaying}
+								>
+									<EqualizerBars class="size-3.5 text-primary" />
+								</Show>
+							</div>
+						)}
+					</Show>
 				</button>
-				{!isPlayable && (
-					<div className="flex shrink-0 items-center gap-1.5">
-						{songs.length > 0 && (
+				<Show when={!playable()}>
+					<div class="flex shrink-0 items-center gap-1.5">
+						<Show when={songs().length > 0}>
 							<button
-								className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 active:scale-95"
-								onClick={() => onShuffle(songs)}
+								class="flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground transition-all duration-200 hover:brightness-110 active:scale-95"
+								onClick={() => props.onShuffle(songs())}
 								type="button"
 							>
-								<Shuffle className="size-4" />
+								<Shuffle class="size-4" />
 								Shuffle
 							</button>
-						)}
-						{isArtist && (
+						</Show>
+						<Show when={isArtist()}>
 							<button
-								className="flex h-9 items-center gap-1.5 rounded-full border border-foreground/12 px-4 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:opacity-60"
-								disabled={mixPending}
+								class="flex h-9 items-center gap-1.5 rounded-full border border-foreground/12 px-4 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:opacity-60"
+								disabled={mixPending()}
 								onClick={() => void runMix()}
 								type="button"
 							>
-								{mixPending ? (
-									<Loader2 className="size-4 animate-spin" />
-								) : (
-									<AudioLines className="size-4" />
-								)}
+								<Show
+									fallback={<AudioLines class="size-4" />}
+									when={mixPending()}
+								>
+									<Loader2 class="size-4 animate-spin" />
+								</Show>
 								Mix
 							</button>
-						)}
-						{entry.kind === "collection" && (
-							<ChevronRight className="size-5 text-muted-foreground/50" />
-						)}
+						</Show>
+						<Show when={props.entry.kind === "collection"}>
+							<ChevronRight class="size-5 text-muted-foreground/50" />
+						</Show>
 					</div>
-				)}
+				</Show>
 			</div>
-			{songs.length > 0 && (
-				<div className="border-t border-foreground/6 p-1">
-					{songs.map((song, i) => (
-						<PlayableRow
-							entry={{ kind: "playable", song }}
-							index={i}
-							isCurrent={playingId === song.id}
-							isPlaying={isPlaying}
-							key={song.id}
-							onPlay={() => onPlay(song)}
-							onQueue={() => onQueue(song)}
-						/>
-					))}
+			<Show when={songs().length > 0}>
+				<div class="border-t border-foreground/6 p-1">
+					<For each={songs()}>
+						{(song, i) => (
+							<PlayableRow
+								entry={{ kind: "playable", song }}
+								index={i()}
+								isCurrent={props.playingId === song.id}
+								isPlaying={props.isPlaying}
+								onPlay={() => props.onPlay(song)}
+								onQueue={() => props.onQueue(song)}
+							/>
+						)}
+					</For>
 				</div>
-			)}
+			</Show>
 		</div>
 	);
 
-	if (entry.kind !== "playable") return card;
 	return (
-		<SongContextMenu song={entry.song}>
-			<SwipeToQueue onQueue={() => onQueue(entry.song)}>{card}</SwipeToQueue>
-		</SongContextMenu>
+		<Show fallback={card()} when={playable()}>
+			{(current) => (
+				<SongContextMenu song={current().song}>
+					<SwipeToQueue onQueue={() => props.onQueue(current().song)}>
+						{card()}
+					</SwipeToQueue>
+				</SongContextMenu>
+			)}
+		</Show>
 	);
 }
 
-function PlayableRow({
-	entry,
-	index,
-	isCurrent,
-	isPlaying,
-	onPlay,
-	onQueue,
-}: {
+/** The subtitle line of a non-playable entry. */
+function subtitleOf(entry: SearchEntry): string {
+	return entry.kind === "artist" || entry.kind === "collection"
+		? entry.subtitle
+		: "";
+}
+
+function PlayableRow(props: {
 	entry: PlayableEntry;
 	index: number;
 	isCurrent: boolean;
@@ -742,55 +796,61 @@ function PlayableRow({
 	onPlay: () => void;
 	onQueue: () => void;
 }) {
-	const { song } = entry;
+	const song = () => props.entry.song;
 	return (
-		<SongContextMenu song={song}>
-			<SwipeToQueue onQueue={onQueue}>
+		<SongContextMenu song={song()}>
+			<SwipeToQueue onQueue={props.onQueue}>
 				<button
-					className={cn(
+					class={cn(
 						"group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",
-						isCurrent && "bg-primary/8",
+						props.isCurrent && "bg-primary/8",
 					)}
-					onClick={onPlay}
-					style={{ animationDelay: `${Math.min(index * 25, 300)}ms` }}
+					onClick={props.onPlay}
+					style={{ "animation-delay": `${Math.min(props.index * 25, 300)}ms` }}
 					type="button"
 				>
-					{song.thumbnail ? (
-						<img
-							alt={song.title}
-							className="size-10 rounded-md border border-foreground/10 object-cover"
-							loading="lazy"
-							src={proxiedImageUrl(song.thumbnail)}
-						/>
-					) : (
-						<div className="size-10 rounded-md bg-muted" />
-					)}
-					<div className="min-w-0">
+					<Show
+						fallback={<div class="size-10 rounded-md bg-muted" />}
+						when={song().thumbnail}
+					>
+						{(thumbnail) => (
+							<img
+								alt={song().title}
+								class="size-10 rounded-md border border-foreground/10 object-cover"
+								loading="lazy"
+								src={proxiedImageUrl(thumbnail())}
+							/>
+						)}
+					</Show>
+					<div class="min-w-0">
 						<h3
-							className={cn(
+							class={cn(
 								"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-								isCurrent && "text-primary",
+								props.isCurrent && "text-primary",
 							)}
 						>
 							<SongTitle
-								artist={song.artist}
-								keepTitle={song.upload}
-								title={song.title}
+								artist={song().artist}
+								keepTitle={song().upload}
+								title={song().title}
 							/>
 						</h3>
-						<p className="truncate text-xs text-muted-foreground">
-							<ArtistLinks song={song} />
+						<p class="truncate text-xs text-muted-foreground">
+							<ArtistLinks song={song()} />
 						</p>
 					</div>
-					<div className="flex items-center gap-2 pr-1">
-						<DownloadedBadge songId={song.id} />
-						{isCurrent && isPlaying ? (
-							<EqualizerBars className="size-3.5 text-primary" />
-						) : (
-							<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-								{song.duration}
-							</span>
-						)}
+					<div class="flex items-center gap-2 pr-1">
+						<DownloadedBadge songId={song().id} />
+						<Show
+							fallback={
+								<span class="font-mono text-xs text-muted-foreground/70 tabular-nums">
+									{song().duration}
+								</span>
+							}
+							when={props.isCurrent && props.isPlaying}
+						>
+							<EqualizerBars class="size-3.5 text-primary" />
+						</Show>
 					</div>
 				</button>
 			</SwipeToQueue>
@@ -798,95 +858,89 @@ function PlayableRow({
 	);
 }
 
-function ArtistRow({
-	entry,
-	onClick,
-}: {
-	entry: ArtistEntry;
-	onClick: () => void;
-}) {
+function ArtistRow(props: { entry: ArtistEntry; onClick: () => void }) {
 	return (
 		<button
-			className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
-			onClick={onClick}
+			class="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
+			onClick={props.onClick}
 			type="button"
 		>
-			{entry.thumbnail ? (
-				<img
-					alt={entry.name}
-					className="size-10 rounded-full border border-foreground/10 object-cover"
-					loading="lazy"
-					src={proxiedImageUrl(entry.thumbnail)}
-				/>
-			) : (
-				<div className="size-10 rounded-full bg-muted" />
-			)}
-			<div className="min-w-0">
-				<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
-					{formatArtistName(entry.name)}
+			<Show
+				fallback={<div class="size-10 rounded-full bg-muted" />}
+				when={props.entry.thumbnail}
+			>
+				{(thumbnail) => (
+					<img
+						alt={props.entry.name}
+						class="size-10 rounded-full border border-foreground/10 object-cover"
+						loading="lazy"
+						src={proxiedImageUrl(thumbnail())}
+					/>
+				)}
+			</Show>
+			<div class="min-w-0">
+				<h3 class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+					{formatArtistName(props.entry.name)}
 				</h3>
-				<p className="truncate text-xs text-muted-foreground">
-					{entry.subtitle}
+				<p class="truncate text-xs text-muted-foreground">
+					{props.entry.subtitle}
 				</p>
 			</div>
-			<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
+			<ChevronRight class="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
 		</button>
 	);
 }
 
-function CollectionRow({
-	entry,
-	onClick,
-}: {
-	entry: CollectionEntry;
-	onClick: () => void;
-}) {
+function CollectionRow(props: { entry: CollectionEntry; onClick: () => void }) {
 	return (
 		<button
-			className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
-			onClick={onClick}
+			class="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
+			onClick={props.onClick}
 			type="button"
 		>
-			{entry.thumbnail ? (
-				<img
-					alt={entry.title}
-					className="size-10 rounded-md border border-foreground/10 object-cover"
-					loading="lazy"
-					src={proxiedImageUrl(entry.thumbnail)}
-				/>
-			) : (
-				<div className="size-10 rounded-md bg-muted" />
-			)}
-			<div className="min-w-0">
-				<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
-					{entry.title}
+			<Show
+				fallback={<div class="size-10 rounded-md bg-muted" />}
+				when={props.entry.thumbnail}
+			>
+				{(thumbnail) => (
+					<img
+						alt={props.entry.title}
+						class="size-10 rounded-md border border-foreground/10 object-cover"
+						loading="lazy"
+						src={proxiedImageUrl(thumbnail())}
+					/>
+				)}
+			</Show>
+			<div class="min-w-0">
+				<h3 class="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+					{props.entry.title}
 				</h3>
-				<p className="truncate text-xs text-muted-foreground">
-					{entry.subtitle}
+				<p class="truncate text-xs text-muted-foreground">
+					{props.entry.subtitle}
 				</p>
 			</div>
-			<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
+			<ChevronRight class="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
 		</button>
 	);
 }
 
 function SearchSkeleton() {
 	return (
-		<div className="space-y-2">
-			{Array.from({ length: 8 }, (_, i) => (
-				<div
-					className="animate-track-in flex items-center gap-3 px-2.5"
-					// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-					key={i}
-					style={{ animationDelay: `${i * 45}ms` }}
-				>
-					<div className="shimmer-surface size-10 rounded-md" />
-					<div className="min-w-0 flex-1">
-						<div className="shimmer-surface h-4 w-2/5 rounded-md" />
-						<div className="shimmer-surface mt-2 h-3 w-1/4 rounded-md" />
+		<div class="space-y-2">
+			<For each={[0, 1, 2, 3, 4, 5, 6, 7]}>
+				{(row) => (
+					<div
+						class="animate-track-in flex items-center gap-3 px-2.5"
+						style={{ "animation-delay": `${row * 45}ms` }}
+					>
+						<div class="shimmer-surface size-10 rounded-md" />
+						<div class="min-w-0 flex-1">
+							<div class="shimmer-surface h-4 w-2/5 rounded-md" />
+							<div class="shimmer-surface mt-2 h-3 w-1/4 rounded-md" />
+						</div>
 					</div>
-				</div>
-			))}
+				)}
+			</For>
 		</div>
 	);
 }

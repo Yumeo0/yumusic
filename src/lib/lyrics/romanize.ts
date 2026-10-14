@@ -1,5 +1,10 @@
 import { createRomanizer } from "lyric-romanizer";
-import { useEffect, useMemo, useState } from "react";
+import {
+	type Accessor,
+	createEffect,
+	createMemo,
+	createSignal,
+} from "solid-js";
 
 const romanizer = createRomanizer();
 
@@ -64,36 +69,41 @@ export async function romanizeLine(text: string): Promise<string | null> {
 }
 
 /**
- * Computes romanizations for a list of lines reactively. Returns null while
- * pending, then a line-index → reading map (empty when there is nothing to
- * show, e.g. lyrics already in Latin script).
+ * Computes romanizations for a list of lines reactively. Returns an accessor;
+ * its value is null while disabled or pending, then a line-index → reading
+ * map (empty when there is nothing to show, e.g. lyrics already in Latin
+ * script).
  */
 export function useRomanizedLines(
-	lines: string[],
-	enabled: boolean,
-): Map<number, string> | null {
-	const needed = useMemo(
-		() => enabled && lines.length > 0 && needsRomanization(lines),
-		[enabled, lines],
+	lines: Accessor<string[]>,
+	enabled: Accessor<boolean>,
+): Accessor<Map<number, string> | null> {
+	const needed = createMemo(
+		() => enabled() && lines().length > 0 && needsRomanization(lines()),
 	);
-	const [map, setMap] = useState<Map<number, string> | null>(null);
+	const [map, setMap] = createSignal<Map<number, string> | null>(null);
 
-	useEffect(() => {
-		if (!needed) {
+	createEffect(
+		() => (needed() ? lines() : null),
+		(currentLines) => {
+			if (!currentLines) {
+				setMap(null);
+				return;
+			}
+			let cancelled = false;
 			setMap(null);
-			return;
-		}
-		let cancelled = false;
-		setMap(null);
-		romanizeLines(lines).then((result) => {
-			if (!cancelled) setMap(result);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [needed, lines]);
+			romanizeLines(currentLines).then((result) => {
+				if (!cancelled) setMap(result);
+			});
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
-	if (!enabled) return null;
-	// Nothing to romanize: settle immediately, no pending state to wait on.
-	return needed ? map : EMPTY;
+	return () => {
+		if (!enabled()) return null;
+		// Nothing to romanize: settle immediately, no pending state to wait on.
+		return needed() ? map() : EMPTY;
+	};
 }

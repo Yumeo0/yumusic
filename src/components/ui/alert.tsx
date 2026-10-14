@@ -1,5 +1,6 @@
+import type { ComponentProps } from "@solidjs/web";
 import { cva, type VariantProps } from "class-variance-authority";
-import type * as React from "react";
+import { omit } from "solid-js";
 
 import { cn } from "@/lib/utils/utils";
 
@@ -19,56 +20,55 @@ const alertVariants = cva(
 	},
 );
 
-function Alert({
-	className,
-	variant,
-	...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
+function Alert(
+	props: ComponentProps<"div"> & VariantProps<typeof alertVariants>,
+) {
+	const rest = omit(props, "class", "variant");
 	return (
 		<div
-			className={cn(alertVariants({ variant }), className)}
+			class={cn(alertVariants({ variant: props.variant }), props.class)}
 			data-slot="alert"
 			role="alert"
-			{...props}
+			{...rest}
 		/>
 	);
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
+function AlertTitle(props: ComponentProps<"div">) {
+	const rest = omit(props, "class");
 	return (
 		<div
-			className={cn(
+			class={cn(
 				"font-medium group-has-[>svg]/alert:col-start-2 [&_a]:hover:text-foreground [&_a]:underline [&_a]:underline-offset-3",
-				className,
+				props.class,
 			)}
 			data-slot="alert-title"
-			{...props}
+			{...rest}
 		/>
 	);
 }
 
-function AlertDescription({
-	className,
-	...props
-}: React.ComponentProps<"div">) {
+function AlertDescription(props: ComponentProps<"div">) {
+	const rest = omit(props, "class");
 	return (
 		<div
-			className={cn(
+			class={cn(
 				"text-muted-foreground text-sm text-balance md:text-pretty [&_p:not(:last-child)]:mb-4 [&_a]:hover:text-foreground [&_a]:underline [&_a]:underline-offset-3",
-				className,
+				props.class,
 			)}
 			data-slot="alert-description"
-			{...props}
+			{...rest}
 		/>
 	);
 }
 
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
+function AlertAction(props: ComponentProps<"div">) {
+	const rest = omit(props, "class");
 	return (
 		<div
-			className={cn("absolute top-2.5 right-3", className)}
+			class={cn("absolute top-2.5 right-3", props.class)}
 			data-slot="alert-action"
-			{...props}
+			{...rest}
 		/>
 	);
 }

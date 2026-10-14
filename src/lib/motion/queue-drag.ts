@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { useQueueSheetRef } from "@/contexts/player-context";
 import {
 	getQueueOpen,
@@ -84,14 +83,14 @@ function settleSheet(
 }
 
 /** Optional predicate a queue gesture consults before taking a touch. */
-export type QueueGestureCheck = (event: React.TouchEvent) => boolean;
+export type QueueGestureCheck = (event: TouchEvent) => boolean;
 
 /** Touch handlers a queue gesture exposes; they can be spread on one element. */
 export interface TouchHandlers {
-	onTouchCancel: (event: React.TouchEvent) => void;
-	onTouchEnd: (event: React.TouchEvent) => void;
-	onTouchMove: (event: React.TouchEvent) => void;
-	onTouchStart: (event: React.TouchEvent) => void;
+	onTouchCancel: (event: TouchEvent) => void;
+	onTouchEnd: (event: TouchEvent) => void;
+	onTouchMove: (event: TouchEvent) => void;
+	onTouchStart: (event: TouchEvent) => void;
 }
 
 /**
@@ -100,7 +99,7 @@ export interface TouchHandlers {
  * at once (only one of them accepts a given touch, based on the queue state).
  */
 export function mergeTouchHandlers(...sets: TouchHandlers[]): TouchHandlers {
-	const run = (event: React.TouchEvent, key: keyof TouchHandlers) => {
+	const run = (event: TouchEvent, key: keyof TouchHandlers) => {
 		for (const set of sets) set[key](event);
 	};
 	return {
@@ -121,16 +120,14 @@ export function mergeTouchHandlers(...sets: TouchHandlers[]): TouchHandlers {
  */
 export function useQueueDragGesture(canStart?: QueueGestureCheck) {
 	const sheetRef = useQueueSheetRef();
-	const startY = useRef<number | null>(null);
-	const following = useRef(false);
-	const upDistance = useRef(0);
-	const snapTimer = useRef<number | null>(null);
-	const canStartRef = useRef(canStart);
-	canStartRef.current = canStart;
+	let startY: number | null = null;
+	let following = false;
+	let upDistance = 0;
+	let snapTimer: number | null = null;
 
 	const finish = (state: QueueState) => {
-		startY.current = null;
-		following.current = false;
+		startY = null;
+		following = false;
 		setMorphDragging(false);
 		setQueueState(state);
 		// setQueueState is a no-op when the state is unchanged (e.g. a short
@@ -141,29 +138,29 @@ export function useQueueDragGesture(canStart?: QueueGestureCheck) {
 		if (!sheet) return;
 		// Tailwind's translate-y-* utilities drive the CSS `translate`
 		// property, so the inline animation must target that property.
-		if (snapTimer.current !== null) window.clearTimeout(snapTimer.current);
+		if (snapTimer !== null) window.clearTimeout(snapTimer);
 		const height = sheet.offsetHeight || window.innerHeight;
-		snapTimer.current = settleSheet(sheet, QUEUE_DETENTS[state] * height);
+		snapTimer = settleSheet(sheet, QUEUE_DETENTS[state] * height);
 	};
 
-	const onTouchStart = (event: React.TouchEvent) => {
+	const onTouchStart = (event: TouchEvent) => {
 		const touch = event.touches[0];
 		if (!touch || getQueueOpen()) return;
 		if (!isMobile()) return;
-		if (canStartRef.current && !canStartRef.current(event)) return;
-		startY.current = touch.clientY;
-		following.current = false;
-		upDistance.current = 0;
+		if (canStart && !canStart(event)) return;
+		startY = touch.clientY;
+		following = false;
+		upDistance = 0;
 	};
 
-	const onTouchMove = (event: React.TouchEvent) => {
-		if (startY.current === null) return;
+	const onTouchMove = (event: TouchEvent) => {
+		if (startY === null) return;
 		const touch = event.touches[0];
 		if (!touch) return;
-		const delta = startY.current - touch.clientY;
-		if (!following.current) {
+		const delta = startY - touch.clientY;
+		if (!following) {
 			if (delta < DRAG_START_SLOP) return;
-			following.current = true;
+			following = true;
 			// Freeze the page morph before the state flips, so the layout
 			// tracks the finger from the first frame instead of easing open.
 			setMorphDragging(true);
@@ -172,13 +169,13 @@ export function useQueueDragGesture(canStart?: QueueGestureCheck) {
 			// the sheet is still following the finger.
 			setQueueState("half");
 			const sheet = sheetRef?.current;
-			if (snapTimer.current !== null) {
-				window.clearTimeout(snapTimer.current);
-				snapTimer.current = null;
+			if (snapTimer !== null) {
+				window.clearTimeout(snapTimer);
+				snapTimer = null;
 			}
 			if (sheet) sheet.style.transition = "none";
 		}
-		upDistance.current = delta;
+		upDistance = delta;
 		const sheet = sheetRef?.current;
 		if (!sheet) return;
 		const height = sheet.offsetHeight || window.innerHeight;
@@ -195,12 +192,12 @@ export function useQueueDragGesture(canStart?: QueueGestureCheck) {
 	};
 
 	const onTouchEnd = () => {
-		if (startY.current === null) return;
-		if (!following.current) {
-			startY.current = null;
+		if (startY === null) return;
+		if (!following) {
+			startY = null;
 			return;
 		}
-		finish(detentAfterDrag("closed", upDistance.current));
+		finish(detentAfterDrag("closed", upDistance));
 	};
 
 	return {
@@ -222,18 +219,16 @@ export function useQueueDragGesture(canStart?: QueueGestureCheck) {
  */
 export function useQueueSheetGesture(canStart?: QueueGestureCheck) {
 	const sheetRef = useQueueSheetRef();
-	const startY = useRef<number | null>(null);
-	const restingOffset = useRef(0);
-	const restingState = useRef<QueueState>("closed");
-	const upDistance = useRef(0);
-	const following = useRef(false);
-	const snapTimer = useRef<number | null>(null);
-	const canStartRef = useRef(canStart);
-	canStartRef.current = canStart;
+	let startY: number | null = null;
+	let restingOffset = 0;
+	let restingState: QueueState = "closed";
+	let upDistance = 0;
+	let following = false;
+	let snapTimer: number | null = null;
 
 	const finish = (state: QueueState) => {
-		startY.current = null;
-		following.current = false;
+		startY = null;
+		following = false;
 		// Re-enable the morph's easing before the state flips so the snap
 		// animates; the explicit reveal write covers releases that land on
 		// the detent the state already holds.
@@ -242,60 +237,60 @@ export function useQueueSheetGesture(canStart?: QueueGestureCheck) {
 		setQueueReveal(state === "closed" ? 0 : 1);
 		const sheet = sheetRef?.current;
 		if (!sheet) return;
-		if (snapTimer.current !== null) window.clearTimeout(snapTimer.current);
+		if (snapTimer !== null) window.clearTimeout(snapTimer);
 		const height = sheet.offsetHeight || window.innerHeight;
-		snapTimer.current = settleSheet(sheet, QUEUE_DETENTS[state] * height);
+		snapTimer = settleSheet(sheet, QUEUE_DETENTS[state] * height);
 	};
 
-	const onTouchStart = (event: React.TouchEvent) => {
+	const onTouchStart = (event: TouchEvent) => {
 		const touch = event.touches[0];
 		if (!touch || !getQueueOpen()) return;
 		if (!isMobile()) return;
-		if (canStartRef.current && !canStartRef.current(event)) return;
+		if (canStart && !canStart(event)) return;
 		const sheet = sheetRef?.current;
 		if (!sheet) return;
 		const height = sheet.offsetHeight || window.innerHeight;
-		restingState.current = getQueueState();
-		restingOffset.current = QUEUE_DETENTS[restingState.current] * height;
-		upDistance.current = 0;
-		startY.current = touch.clientY;
-		following.current = false;
+		restingState = getQueueState();
+		restingOffset = QUEUE_DETENTS[restingState] * height;
+		upDistance = 0;
+		startY = touch.clientY;
+		following = false;
 	};
 
-	const onTouchMove = (event: React.TouchEvent) => {
-		if (startY.current === null) return;
+	const onTouchMove = (event: TouchEvent) => {
+		if (startY === null) return;
 		const touch = event.touches[0];
 		if (!touch) return;
-		const delta = touch.clientY - startY.current;
-		if (!following.current) {
+		const delta = touch.clientY - startY;
+		if (!following) {
 			if (Math.abs(delta) < DRAG_START_SLOP) return;
-			following.current = true;
+			following = true;
 			// Freeze the morph easing while the finger drives the sheet.
 			setMorphDragging(true);
 			const sheet = sheetRef?.current;
-			if (snapTimer.current !== null) {
-				window.clearTimeout(snapTimer.current);
-				snapTimer.current = null;
+			if (snapTimer !== null) {
+				window.clearTimeout(snapTimer);
+				snapTimer = null;
 			}
 			if (sheet) sheet.style.transition = "none";
 		}
-		upDistance.current = -delta;
+		upDistance = -delta;
 		const sheet = sheetRef?.current;
 		if (!sheet) return;
 		const height = sheet.offsetHeight || window.innerHeight;
-		const offset = Math.min(Math.max(restingOffset.current + delta, 0), height);
+		const offset = Math.min(Math.max(restingOffset + delta, 0), height);
 		// Feed the layout blend so the page follows the sheet both ways.
 		setQueueReveal((1 - offset / height) * 2);
 		sheet.style.translate = `0 ${offset}px`;
 	};
 
 	const onTouchEnd = () => {
-		if (startY.current === null) return;
-		if (!following.current) {
-			startY.current = null;
+		if (startY === null) return;
+		if (!following) {
+			startY = null;
 			return;
 		}
-		finish(detentAfterDrag(restingState.current, upDistance.current));
+		finish(detentAfterDrag(restingState, upDistance));
 	};
 
 	return {

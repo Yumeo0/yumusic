@@ -2,19 +2,20 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import { getPinnedPlaylists, reconcilePinnedPlaylists } from "./pinned";
 
 const storage = new Map<string, string>();
-/** Change events emitted by the store; counts actual storage writes. */
-let dispatched = 0;
+/** localStorage writes performed by the store; counts actual persistence. */
+let writes = 0;
 
 /** Minimal browser globals the pinned store touches. */
 function installBrowserStubs() {
 	storage.clear();
-	dispatched = 0;
+	writes = 0;
 	Object.defineProperty(globalThis, "localStorage", {
 		configurable: true,
 		writable: true,
 		value: {
 			getItem: (key: string) => storage.get(key) ?? null,
 			setItem: (key: string, value: string) => {
+				writes += 1;
 				storage.set(key, value);
 			},
 			removeItem: (key: string) => {
@@ -26,10 +27,9 @@ function installBrowserStubs() {
 		configurable: true,
 		writable: true,
 		value: {
-			dispatchEvent: () => {
-				dispatched += 1;
-				return true;
-			},
+			dispatchEvent: () => true,
+			addEventListener: () => undefined,
+			removeEventListener: () => undefined,
 		},
 	});
 }
@@ -55,7 +55,7 @@ describe("reconcilePinnedPlaylists", () => {
 		expect(getPinnedPlaylists()).toEqual([
 			{ id: "PL1", title: "New title", thumbnail: LIVE_COVER },
 		]);
-		expect(dispatched).toBe(1);
+		expect(writes).toBe(1);
 	});
 
 	test("keeps the stored thumbnail when fresh data has none", () => {
@@ -64,7 +64,7 @@ describe("reconcilePinnedPlaylists", () => {
 		reconcilePinnedPlaylists([{ id: "PL1", title: "Same", thumbnail: null }]);
 
 		expect(getPinnedPlaylists()[0].thumbnail).toBe(DEAD_COVER);
-		expect(dispatched).toBe(0);
+		expect(writes).toBe(0);
 	});
 
 	test("ignores entries that are not in the fresh list", () => {
@@ -89,6 +89,6 @@ describe("reconcilePinnedPlaylists", () => {
 			{ id: "PL1", title: "Same", thumbnail: LIVE_COVER },
 		]);
 
-		expect(dispatched).toBe(0);
+		expect(writes).toBe(0);
 	});
 });

@@ -1,4 +1,4 @@
-import { Dialog } from "@base-ui/react/dialog";
+import { Dialog } from "@kobalte/core/dialog";
 import {
 	CircleX,
 	Download,
@@ -11,8 +11,8 @@ import {
 	Share2,
 	Trash2,
 	X,
-} from "lucide-react";
-import { useEffect, useState } from "react";
+} from "@lucide/solid";
+import { createEffect, createSignal, onSettled, Show } from "solid-js";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import {
@@ -34,12 +34,7 @@ import { ArtistLinks } from "./artist-link";
 import { SongTitle } from "./song-title";
 
 /** One button of the preview's action grid; Play gets the primary styling. */
-function ActionButton({
-	icon: Icon,
-	label,
-	onClick,
-	primary = false,
-}: {
+function ActionButton(props: {
 	icon: LucideIcon;
 	label: string;
 	onClick: () => void;
@@ -47,17 +42,17 @@ function ActionButton({
 }) {
 	return (
 		<button
-			className={cn(
+			class={cn(
 				"flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 active:scale-95",
-				primary
+				props.primary
 					? "bg-primary font-semibold text-primary-foreground hover:brightness-110"
 					: "border border-foreground/10 bg-foreground/4 text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
 			)}
-			onClick={onClick}
+			onClick={props.onClick}
 			type="button"
 		>
-			<Icon className="size-4 shrink-0" />
-			<span className="truncate">{label}</span>
+			<props.icon class="size-4 shrink-0" />
+			<span class="truncate">{props.label}</span>
 		</button>
 	);
 }
@@ -89,16 +84,16 @@ function downloadAction(
  * will use. Mobile has no paste flow — its share sheet handles links instead.
  */
 export function LinkPreviewDialog() {
-	const { addToQueue, currentSong, play, playNext, queue } = usePlayer();
+	const player = usePlayer();
 	const downloads = useDownloads();
-	const [videoId, setVideoId] = useState<string | null>(null);
-	const [preview, setPreview] = useState<SongPreview | null>(null);
-	const [failed, setFailed] = useState(false);
-	const [playlistSong, setPlaylistSong] = useState<Song | null>(null);
+	const [videoId, setVideoId] = createSignal<string | null>(null);
+	const [preview, setPreview] = createSignal<SongPreview | null>(null);
+	const [failed, setFailed] = createSignal(false);
+	const [playlistSong, setPlaylistSong] = createSignal<Song | null>(null);
 
 	// Global paste listener: clipboard text containing a YouTube link opens
 	// the preview, replacing whatever the modal showed before.
-	useEffect(() => {
+	onSettled(() => {
 		if (IS_MOBILE) return;
 		const onPaste = (event: ClipboardEvent) => {
 			const id = findVideoId(event.clipboardData?.getData("text") ?? "");
@@ -108,47 +103,54 @@ export function LinkPreviewDialog() {
 		};
 		window.addEventListener("paste", onPaste);
 		return () => window.removeEventListener("paste", onPaste);
-	}, []);
+	});
 
 	// Resolve the pasted id while the modal shows its loading state.
-	useEffect(() => {
-		if (!videoId) return;
-		let cancelled = false;
-		setPreview(null);
-		setFailed(false);
-		getSongPreview(videoId).then(
-			(result) => {
-				if (cancelled) return;
-				if (result) setPreview(result);
-				else setFailed(true);
-			},
-			() => {
-				if (!cancelled) setFailed(true);
-			},
-		);
-		return () => {
-			cancelled = true;
-		};
-	}, [videoId]);
-
-	const song = preview?.song ?? null;
-	const download = downloadAction(
-		song ? downloads.entries.get(song.id) : undefined,
-		song ? downloads.statuses.get(song.id) : undefined,
+	createEffect(
+		() => videoId(),
+		(id) => {
+			if (!id) return;
+			let cancelled = false;
+			setPreview(null);
+			setFailed(false);
+			getSongPreview(id).then(
+				(result) => {
+					if (cancelled) return;
+					if (result) setPreview(result);
+					else setFailed(true);
+				},
+				() => {
+					if (!cancelled) setFailed(true);
+				},
+			);
+			return () => {
+				cancelled = true;
+			};
+		},
 	);
-	const details = [song?.duration, preview?.album?.name]
-		.filter((detail): detail is string => !!detail)
-		.join(" · ");
+
+	const song = () => preview()?.song ?? null;
+	const download = () => {
+		const selected = song();
+		return downloadAction(
+			selected ? downloads.entries.get(selected.id) : undefined,
+			selected ? downloads.statuses.get(selected.id) : undefined,
+		);
+	};
+	const details = () =>
+		[song()?.duration, preview()?.album?.name]
+			.filter((detail): detail is string => !!detail)
+			.join(" · ");
 
 	const close = () => setVideoId(null);
 
 	const playNow = (selected: Song) => {
-		play(selected);
+		void player.play(selected);
 		close();
 	};
 
 	const playNextTo = (selected: Song) => {
-		playNext(selected);
+		player.playNext(selected);
 		showToast("Playing next");
 		close();
 	};
@@ -156,10 +158,10 @@ export function LinkPreviewDialog() {
 	const queueSong = (selected: Song) => {
 		// Nothing playing and nothing queued: there is no queue to add behind,
 		// so start the song instead (same as the row menu).
-		if (!currentSong && queue.length === 0) {
-			play(selected);
+		if (!player.currentSong() && player.queue().length === 0) {
+			void player.play(selected);
 		} else {
-			addToQueue([selected]);
+			player.addToQueue([selected]);
 			showToast("Added to queue");
 		}
 		close();
@@ -180,112 +182,122 @@ export function LinkPreviewDialog() {
 
 	return (
 		<>
-			<Dialog.Root
+			<Dialog
 				onOpenChange={(open) => {
 					if (!open) close();
 				}}
-				open={videoId !== null}
+				open={videoId() !== null}
 			>
 				<Dialog.Portal>
-					<Dialog.Backdrop className="fixed inset-0 z-100 bg-black/50 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-					<Dialog.Popup className="fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
-						<Dialog.Close
+					<Dialog.Overlay class="fixed inset-0 z-100 bg-black/50 backdrop-blur-xs transition-opacity duration-150 data-[closed]:opacity-0" />
+					<Dialog.Content class="fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-[closed]:scale-95 data-[closed]:opacity-0">
+						<Dialog.CloseButton
 							aria-label="Close"
-							className="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
+							class="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
 						>
-							<X className="size-4" />
-						</Dialog.Close>
+							<X class="size-4" />
+						</Dialog.CloseButton>
 
-						{song ? (
-							<>
-								<div className="flex items-center gap-3.5 pr-7">
-									<img
-										alt=""
-										className="size-20 shrink-0 rounded-lg border border-foreground/8 object-cover"
-										src={proxiedImageUrl(song.thumbnail)}
-									/>
-									<div className="min-w-0 flex-1">
-										<Dialog.Title className="text-sm leading-snug font-semibold">
-											<SongTitle
-												artist={song.artist}
-												keepTitle={song.upload}
-												title={song.title}
-											/>
-										</Dialog.Title>
-										<p className="mt-0.5 truncate text-sm text-muted-foreground">
-											<ArtistLinks song={song} />
-										</p>
-										{details && (
-											<p className="mt-1 truncate text-xs text-muted-foreground/80">
-												{details}
+						<Show
+							fallback={
+								<>
+									<Dialog.Title class="pr-7 text-sm font-semibold">
+										Song preview
+									</Dialog.Title>
+									<Show
+										fallback={
+											<p class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+												<Loader2 class="size-3.5 animate-spin" />
+												Loading song…
 											</p>
-										)}
+										}
+										when={failed()}
+									>
+										<p class="mt-2 text-xs break-all text-muted-foreground">
+											Couldn't load{" "}
+											<span class="text-foreground/80">
+												https://music.youtube.com/watch?v={videoId()}
+											</span>
+											. Check the link and your connection.
+										</p>
+									</Show>
+								</>
+							}
+							when={song()}
+						>
+							{(current) => (
+								<>
+									<div class="flex items-center gap-3.5 pr-7">
+										<img
+											alt=""
+											class="size-20 shrink-0 rounded-lg border border-foreground/8 object-cover"
+											src={proxiedImageUrl(current().thumbnail)}
+										/>
+										<div class="min-w-0 flex-1">
+											<Dialog.Title class="text-sm leading-snug font-semibold">
+												<SongTitle
+													artist={current().artist}
+													keepTitle={current().upload}
+													title={current().title}
+												/>
+											</Dialog.Title>
+											<p class="mt-0.5 truncate text-sm text-muted-foreground">
+												<ArtistLinks song={current()} />
+											</p>
+											<Show when={details()}>
+												{(info) => (
+													<p class="mt-1 truncate text-xs text-muted-foreground/80">
+														{info()}
+													</p>
+												)}
+											</Show>
+										</div>
 									</div>
-								</div>
-								<div className="mt-4 grid grid-cols-2 gap-2">
-									<ActionButton
-										icon={Play}
-										label="Play"
-										onClick={() => playNow(song)}
-										primary
-									/>
-									<ActionButton
-										icon={ListStart}
-										label="Play next"
-										onClick={() => playNextTo(song)}
-									/>
-									<ActionButton
-										icon={ListPlus}
-										label="Add to queue"
-										onClick={() => queueSong(song)}
-									/>
-									<ActionButton
-										icon={ListMusic}
-										label="Add to playlist"
-										onClick={() => setPlaylistSong(song)}
-									/>
-									<ActionButton
-										icon={download.icon}
-										label={download.label}
-										onClick={() => toggleDownload(song)}
-									/>
-									<ActionButton
-										icon={Share2}
-										label="Share"
-										onClick={() => void shareSong(song)}
-									/>
-								</div>
-							</>
-						) : (
-							<>
-								<Dialog.Title className="pr-7 text-sm font-semibold">
-									Song preview
-								</Dialog.Title>
-								{failed ? (
-									<p className="mt-2 text-xs break-all text-muted-foreground">
-										Couldn't load{" "}
-										<span className="text-foreground/80">
-											https://music.youtube.com/watch?v={videoId}
-										</span>
-										. Check the link and your connection.
-									</p>
-								) : (
-									<p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-										<Loader2 className="size-3.5 animate-spin" />
-										Loading song…
-									</p>
-								)}
-							</>
-						)}
-					</Dialog.Popup>
+									<div class="mt-4 grid grid-cols-2 gap-2">
+										<ActionButton
+											icon={Play}
+											label="Play"
+											onClick={() => playNow(current())}
+											primary
+										/>
+										<ActionButton
+											icon={ListStart}
+											label="Play next"
+											onClick={() => playNextTo(current())}
+										/>
+										<ActionButton
+											icon={ListPlus}
+											label="Add to queue"
+											onClick={() => queueSong(current())}
+										/>
+										<ActionButton
+											icon={ListMusic}
+											label="Add to playlist"
+											onClick={() => setPlaylistSong(current())}
+										/>
+										<ActionButton
+											icon={download().icon}
+											label={download().label}
+											onClick={() => toggleDownload(current())}
+										/>
+										<ActionButton
+											icon={Share2}
+											label="Share"
+											onClick={() => void shareSong(current())}
+										/>
+									</div>
+								</>
+							)}
+						</Show>
+					</Dialog.Content>
 				</Dialog.Portal>
-			</Dialog.Root>
+			</Dialog>
 			<AddToPlaylistDialog
 				onOpenChange={(open) => {
 					if (!open) setPlaylistSong(null);
 				}}
-				open={playlistSong !== null}
-				song={playlistSong}
+				open={playlistSong() !== null}
+				song={playlistSong()}
 			/>
 		</>
 	);

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createStore, reconcile } from "solid-js";
 import {
 	DEFAULT_LYRICS_PROVIDER_ORDER,
 	type LyricsProviderId,
@@ -54,7 +54,6 @@ export interface Settings {
 }
 
 const SETTINGS_KEY = "yumusic:settings:v1";
-const SETTINGS_EVENT = "yumusic:settings-changed";
 const DEFAULTS: Settings = {
 	romanizeLyrics: true,
 	discordRpc: false,
@@ -95,6 +94,13 @@ export function getSettings(): Settings {
 	}
 }
 
+/**
+ * Shared reactive settings. localStorage stays the persisted source of truth
+ * (imperative `getSettings()` reads see writes immediately), while this store
+ * drives reactivity; every write updates both.
+ */
+const [settings, setSettings] = createStore<Settings>(getSettings());
+
 export function updateSettings(patch: Partial<Settings>): Settings {
 	const next = { ...getSettings(), ...patch };
 	try {
@@ -102,23 +108,18 @@ export function updateSettings(patch: Partial<Settings>): Settings {
 	} catch {
 		// best-effort
 	}
-	window.dispatchEvent(new Event(SETTINGS_EVENT));
+	setSettings(reconcile(next));
 	return next;
+}
+
+if (typeof window !== "undefined") {
+	// Another window changed the settings: fold the stored values in.
+	window.addEventListener("storage", () =>
+		setSettings(reconcile(getSettings())),
+	);
 }
 
 /** Reactive settings bound to localStorage. */
 export function useSettings(): [Settings, (patch: Partial<Settings>) => void] {
-	const [settings, setSettings] = useState<Settings>(getSettings);
-
-	useEffect(() => {
-		const refresh = () => setSettings(getSettings());
-		window.addEventListener(SETTINGS_EVENT, refresh);
-		window.addEventListener("storage", refresh);
-		return () => {
-			window.removeEventListener(SETTINGS_EVENT, refresh);
-			window.removeEventListener("storage", refresh);
-		};
-	}, []);
-
 	return [settings, updateSettings];
 }

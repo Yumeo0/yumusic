@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { type Accessor, createEffect, createSignal, untrack } from "solid-js";
 import { proxiedImageUrl } from "./tauri";
 
 const MAX_VOLUME = 0.15;
@@ -17,7 +17,7 @@ export { MAX_VOLUME };
 
 /**
  * Tracks currentTime / duration of a media element via timeupdate events.
- * Keeps re-renders local to the calling component (no context churn at 4Hz).
+ * Keeps updates local to the calling component (no context churn at 4Hz).
  * `resetKey` (e.g. the song id) zeroes both values immediately when it
  * changes, so the UI shows 00:00 while the next track is still loading.
  * `knownDuration` (seconds from YouTube metadata, when available) takes
@@ -25,53 +25,55 @@ export { MAX_VOLUME };
  * length shown in listings.
  */
 export function useMediaTime(
-	videoElementRef: React.RefObject<HTMLVideoElement | null> | null,
-	resetKey?: string,
-	knownDuration?: number,
+	getElement: () => HTMLVideoElement | null,
+	resetKey?: Accessor<string | undefined>,
+	knownDuration?: Accessor<number>,
 ) {
-	const [currentTime, setCurrentTime] = useState(0);
-	const [mediaDuration, setMediaDuration] = useState(0);
-
-	useEffect(() => {
-		// Skip only when no track has played yet (state is already zero)
-		if (resetKey === undefined) return;
-		setCurrentTime(0);
-		setMediaDuration(0);
-	}, [resetKey]);
+	const [currentTime, setCurrentTime] = createSignal(0);
+	const [mediaDuration, setMediaDuration] = createSignal(0);
 
 	// Re-attach on `resetKey` too: after a crossfade handover the active
-	// element behind `videoElementRef` changes without the ref itself doing
+	// element behind the getter changes without the ref itself doing
 	// so, and the media clock must follow the deck that is now audible.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is an intentional re-attach trigger, not a read value
-	useEffect(() => {
-		const videoEl = videoElementRef?.current;
-		if (!videoEl) return;
+	// The element is snapshotted in the compute phase so the (reactive)
+	// getter is only read inside tracking scope.
+	createEffect(
+		() => ({ element: getElement(), key: resetKey?.() }),
+		({ element: videoEl }) => {
+			setCurrentTime(0);
+			setMediaDuration(0);
 
-		const handleLoadedMetadata = () => {
-			if (Number.isFinite(videoEl.duration)) setMediaDuration(videoEl.duration);
-		};
-		const handleTimeUpdate = () => {
-			setCurrentTime(videoEl.currentTime);
+			if (!videoEl) return;
+
+			const handleLoadedMetadata = () => {
+				if (Number.isFinite(videoEl.duration))
+					setMediaDuration(videoEl.duration);
+			};
+			const handleTimeUpdate = () => {
+				setCurrentTime(videoEl.currentTime);
+				if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
+					setMediaDuration(videoEl.duration);
+				}
+			};
+
+			handleLoadedMetadata();
 			if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
 				setMediaDuration(videoEl.duration);
 			}
-		};
 
-		handleLoadedMetadata();
-		if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-			setMediaDuration(videoEl.duration);
-		}
+			videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
+			videoEl.addEventListener("timeupdate", handleTimeUpdate);
+			return () => {
+				videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
+				videoEl.removeEventListener("timeupdate", handleTimeUpdate);
+			};
+		},
+	);
 
-		videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
-		videoEl.addEventListener("timeupdate", handleTimeUpdate);
-		return () => {
-			videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
-			videoEl.removeEventListener("timeupdate", handleTimeUpdate);
-		};
-	}, [videoElementRef, resetKey]);
-
-	const duration =
-		knownDuration && knownDuration > 0 ? knownDuration : mediaDuration;
+	const duration = () => {
+		const known = knownDuration?.();
+		return known && known > 0 ? known : mediaDuration();
+	};
 
 	return { currentTime, duration };
 }
@@ -200,45 +202,53 @@ async function extractFromUrl(url: string): Promise<string | null> {
  * Results are cached in memory + localStorage; failures are negative-cached
  * for the session so rate-limited (429) URLs are never hammered.
  */
-export function useAmbientColor(imageUrl: string | undefined): string {
-	const [color, setColor] = useState(
-		() => (imageUrl && ambientCache.get(imageUrl)) || "rgb(255, 19, 74)",
+export function useAmbientColor(
+	imageUrl: Accessor<string | undefined>,
+): Accessor<string> {
+	const [color, setColor] = createSignal(
+		untrack(() => {
+			const url = imageUrl();
+			return (url && ambientCache.get(url)) || "rgb(255, 19, 74)";
+		}),
 	);
 
-	useEffect(() => {
-		if (!imageUrl) return;
-		const cached = ambientCache.get(imageUrl);
-		if (cached) {
-			setColor(cached);
-			return;
-		}
-		if (ambientFailures.has(imageUrl)) return;
-		let cancelled = false;
-		let request = ambientInflight.get(imageUrl);
-		if (!request) {
-			request = extractFromUrl(imageUrl)
-				.then((extracted) => {
-					if (extracted) {
-						ambientCache.set(imageUrl, extracted);
-						persistAmbientCache();
-					} else {
-						ambientFailures.add(imageUrl);
-						console.warn("[ambient] failed to extract color from", imageUrl);
-					}
-					return extracted;
-				})
-				.finally(() => {
-					ambientInflight.delete(imageUrl);
-				});
-			ambientInflight.set(imageUrl, request);
-		}
-		request.then((extracted) => {
-			if (!cancelled && extracted) setColor(extracted);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [imageUrl]);
+	createEffect(
+		() => imageUrl(),
+		(url) => {
+			if (!url) return;
+			const cached = ambientCache.get(url);
+			if (cached) {
+				setColor(cached);
+				return;
+			}
+			if (ambientFailures.has(url)) return;
+			let cancelled = false;
+			let request = ambientInflight.get(url);
+			if (!request) {
+				request = extractFromUrl(url)
+					.then((extracted) => {
+						if (extracted) {
+							ambientCache.set(url, extracted);
+							persistAmbientCache();
+						} else {
+							ambientFailures.add(url);
+							console.warn("[ambient] failed to extract color from", url);
+						}
+						return extracted;
+					})
+					.finally(() => {
+						ambientInflight.delete(url);
+					});
+				ambientInflight.set(url, request);
+			}
+			request.then((extracted) => {
+				if (!cancelled && extracted) setColor(extracted);
+			});
+			return () => {
+				cancelled = true;
+			};
+		},
+	);
 
 	return color;
 }

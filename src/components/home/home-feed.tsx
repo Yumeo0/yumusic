@@ -1,6 +1,6 @@
-import { ArrowUpRight, Disc3, ListMusic } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { ArrowUpRight, Disc3, ListMusic } from "@lucide/solid";
+import { useNavigate } from "@solidjs/router";
+import { createMemo, createSignal, For, onSettled, Show } from "solid-js";
 import { YTNodes } from "youtubei.js/web";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -195,86 +195,110 @@ function toFeedItem(
 	}
 }
 
-function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
-	const isArtist = item.kind === "artist";
-	const title =
-		item.kind === "song"
-			? item.song.title
-			: item.kind === "artist"
-				? formatArtistName(item.name)
-				: item.title;
-	const subtitle = item.kind === "song" ? item.song.artist : item.subtitle;
-	const thumbnail = item.kind === "song" ? item.song.thumbnail : item.thumbnail;
+function FeedCard(props: { item: FeedItem; onClick: () => void }) {
+	const isArtist = () => props.item.kind === "artist";
+	const title = () => {
+		const item = props.item;
+		if (item.kind === "song") return item.song.title;
+		if (item.kind === "artist") return formatArtistName(item.name);
+		return item.title;
+	};
+	const subtitle = () => {
+		const item = props.item;
+		return item.kind === "song" ? item.song.artist : item.subtitle;
+	};
+	const thumbnail = () => {
+		const item = props.item;
+		return item.kind === "song" ? item.song.thumbnail : item.thumbnail;
+	};
 
 	return (
 		<button
-			className={cn(
+			class={cn(
 				"group w-32 shrink-0 text-left md:w-44",
-				isArtist && "text-center",
+				isArtist() && "text-center",
 			)}
-			onClick={onClick}
+			onClick={props.onClick}
 			type="button"
 		>
 			<div
-				className={cn(
+				class={cn(
 					"relative aspect-square overflow-hidden border border-foreground/8 bg-card",
-					isArtist ? "rounded-full" : "rounded-xl",
+					isArtist() ? "rounded-full" : "rounded-xl",
 				)}
 			>
-				{thumbnail && (
-					<img
-						alt={title}
-						className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-						loading="lazy"
-						src={proxiedImageUrl(thumbnail)}
-					/>
-				)}
-				{(item.kind === "playlist" || item.kind === "album") && (
-					<span className="pointer-events-none absolute bottom-2 left-2 grid size-7 place-items-center rounded-md bg-black/60 text-white shadow-sm backdrop-blur-xs">
-						{item.kind === "playlist" ? (
-							<ListMusic className="size-4" />
-						) : (
-							<Disc3 className="size-4" />
-						)}
+				<Show when={thumbnail()}>
+					{(src) => (
+						<img
+							alt={title()}
+							class="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+							loading="lazy"
+							src={proxiedImageUrl(src())}
+						/>
+					)}
+				</Show>
+				<Show
+					when={props.item.kind === "playlist" || props.item.kind === "album"}
+				>
+					<span class="pointer-events-none absolute bottom-2 left-2 grid size-7 place-items-center rounded-md bg-black/60 text-white shadow-sm backdrop-blur-xs">
+						<Show
+							fallback={<Disc3 class="size-4" />}
+							when={props.item.kind === "playlist"}
+						>
+							<ListMusic class="size-4" />
+						</Show>
 					</span>
-				)}
-				{item.kind === "song" ? (
-					<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+				</Show>
+				<Show
+					fallback={
+						<span class="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+							<ArrowUpRight class="size-4" />
+						</span>
+					}
+					when={props.item.kind === "song"}
+				>
+					<span class="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
 						<svg
-							aria-hidden
-							className="size-4 translate-x-px fill-current"
+							aria-hidden="true"
+							class="size-4 translate-x-px fill-current"
 							viewBox="0 0 24 24"
 						>
 							<path d="M8 5.14v13.72c0 1.23 1.34 1.98 2.39 1.36l11.02-6.86a1.6 1.6 0 0 0 0-2.72L10.39 3.78C9.34 3.16 8 3.91 8 5.14Z" />
 						</svg>
 					</span>
-				) : (
-					<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-						<ArrowUpRight className="size-4" />
-					</span>
-				)}
+				</Show>
 			</div>
-			<h3 className="mt-2.5 flex items-center gap-1.5 text-sm font-medium transition-colors group-hover:text-primary">
-				<span className="line-clamp-1 min-w-0">
-					{item.kind === "song" ? (
-						<SongTitle
-							artist={item.song.artist}
-							keepTitle={item.song.upload}
-							title={item.song.title}
-						/>
-					) : (
-						title
-					)}
+			<h3 class="mt-2.5 flex items-center gap-1.5 text-sm font-medium transition-colors group-hover:text-primary">
+				<span class="line-clamp-1 min-w-0">
+					<Show
+						fallback={title()}
+						when={props.item.kind === "song" ? props.item : null}
+					>
+						{(song) => (
+							<SongTitle
+								artist={song().song.artist}
+								keepTitle={song().song.upload}
+								title={song().song.title}
+							/>
+						)}
+					</Show>
 				</span>
-				{item.kind === "song" && <DownloadedBadge songId={item.song.id} />}
+				<Show when={props.item.kind === "song" ? props.item : null}>
+					{(song) => <DownloadedBadge songId={song().song.id} />}
+				</Show>
 			</h3>
 			<p
-				className={cn(
+				class={cn(
 					"mt-0.5 line-clamp-1 text-xs text-muted-foreground",
-					isArtist && "text-center",
+					isArtist() && "text-center",
 				)}
 			>
-				{item.kind === "song" ? <ArtistLinks song={item.song} /> : subtitle}
+				<Show
+					fallback={subtitle()}
+					when={props.item.kind === "song" ? props.item : null}
+				>
+					{(song) => <ArtistLinks song={song().song} />}
+				</Show>
 			</p>
 		</button>
 	);
@@ -287,19 +311,27 @@ function feedSongs(sections: FeedSection[]): Song[] {
 	);
 }
 
-/** Replaces one song wherever it appears in the feed. */
+/** Replaces one song wherever it appears in the feed. Sections and items that
+ * are not affected keep their identity, so `<For>` reuses their DOM. */
 function withUpdatedSong(
 	sections: FeedSection[],
 	updated: Song,
 ): FeedSection[] {
-	return sections.map((section) => ({
-		...section,
-		items: section.items.map((item) =>
-			item.kind === "song" && item.song.id === updated.id
-				? { ...item, song: updated }
-				: item,
-		),
-	}));
+	let anyChanged = false;
+	const next = sections.map((section) => {
+		let sectionChanged = false;
+		const items = section.items.map((item) => {
+			if (item.kind === "song" && item.song.id === updated.id) {
+				sectionChanged = true;
+				return { ...item, song: updated };
+			}
+			return item;
+		});
+		if (!sectionChanged) return section;
+		anyChanged = true;
+		return { ...section, items };
+	});
+	return anyChanged ? next : sections;
 }
 
 /**
@@ -308,25 +340,21 @@ function withUpdatedSong(
  * signed out.
  */
 export function HomeFeed() {
-	const { play, currentSong } = usePlayer();
+	const player = usePlayer();
 	const navigate = useNavigate();
 	const [settings] = useSettings();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
-	const [sections, setSections] = useState<FeedSection[] | null>(null);
-	const [failed, setFailed] = useState(false);
+	const [sections, setSections] = createSignal<FeedSection[] | null>(null);
+	const [failed, setFailed] = createSignal(false);
 	// Description prefetch: uploader descriptions carry the real song credits
 	// ("Singer: X / Song: Y") and resolve the ambiguous titles the raw
 	// pipeline leaves alone. Rows update as each description lands.
-	const enrichCancelRef = useRef<(() => void) | null>(null);
-	const uploadCancelRef = useRef<(() => void) | null>(null);
-	// Read at prefetch start; whatever is playing gets its description from
-	// the player response, so fetching it here would be a duplicate request.
-	const playingIdRef = useRef(currentSong?.id);
-	playingIdRef.current = currentSong?.id;
+	let enrichCancel: (() => void) | null = null;
+	let uploadCancel: (() => void) | null = null;
 	// Video cards already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
 
-	const removeFeedItem = (id: string) =>
+	const removeFeedItem = (id: string) => {
 		setSections((prev) =>
 			prev
 				? prev.map((section) => ({
@@ -340,8 +368,9 @@ export function HomeFeed() {
 					}))
 				: prev,
 		);
+	};
 
-	useEffect(() => {
+	onSettled(() => {
 		let cancelled = false;
 		(async () => {
 			try {
@@ -370,21 +399,21 @@ export function HomeFeed() {
 				if (cancelled) return;
 				setSections(out);
 				setFailed(out.length === 0);
-				const playingId = playingIdRef.current;
+				// Read at prefetch start; whatever is playing gets its
+				// description from the player response, so fetching it here
+				// would be a duplicate request.
+				const playingId = player.currentSong()?.id;
 				const applyUpdatedSong = (updated: Song): void => {
 					setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
 				};
-				enrichCancelRef.current = enrichSongsWithDescriptions(
+				enrichCancel = enrichSongsWithDescriptions(
 					feedSongs(out),
 					applyUpdatedSong,
 					playingId ? new Set([playingId]) : undefined,
 				);
 				// Reuploads (no release) keep their raw titles; the player
 				// marks what it plays, this covers the rest of the feed.
-				uploadCancelRef.current = enrichSongsWithUploads(
-					feedSongs(out),
-					applyUpdatedSong,
-				);
+				uploadCancel = enrichSongsWithUploads(feedSongs(out), applyUpdatedSong);
 			} catch (error) {
 				console.warn("[HomeFeed] failed to load recommendations:", error);
 				if (cancelled) return;
@@ -394,119 +423,135 @@ export function HomeFeed() {
 		})();
 		return () => {
 			cancelled = true;
-			enrichCancelRef.current?.();
-			uploadCancelRef.current?.();
+			enrichCancel?.();
+			uploadCancel?.();
 		};
-	}, []);
+	});
 
-	if (sections === null) {
-		return (
-			<div className="space-y-10">
-				{[0, 1].map((row) => (
-					<div key={`feed-skeleton-${row}`}>
-						<div className="shimmer-surface mb-4 h-4 w-40 rounded-md" />
-						<div className="flex gap-4">
-							{Array.from({ length: 5 }, (_, i) => (
-								<div
-									// biome-ignore lint/suspicious/noArrayIndexKey: static skeleton placeholders
-									key={`s-${row}-${i}`}
-								>
-									<div className="shimmer-surface aspect-square w-32 rounded-xl md:w-44" />
-									<div className="shimmer-surface mt-2.5 h-4 w-24 rounded-md md:w-32" />
-									<div className="shimmer-surface mt-2 h-3 w-16 rounded-md md:w-24" />
-								</div>
-							))}
-						</div>
-					</div>
-				))}
-			</div>
-		);
-	}
-
-	if (failed) {
-		return (
-			<p className="text-sm text-muted-foreground/70">
-				Recommendations unavailable — log in to see your mix.
-			</p>
-		);
-	}
-
-	const visibleSections = sections.filter(
-		(section) =>
-			!(settings.hideTodaysBiggestHits && isHiddenSectionTitle(section.title)),
+	const visibleSections = createMemo(() =>
+		(sections() ?? []).filter(
+			(section) =>
+				!(
+					settings.hideTodaysBiggestHits && isHiddenSectionTitle(section.title)
+				),
+		),
 	);
 
 	return (
-		<div>
-			{visibleSections.map((section, si) => (
-				<section
-					className="animate-track-in pb-3"
-					// biome-ignore lint/suspicious/noArrayIndexKey: home feed sections may repeat titles
-					key={`feed-${section.title}-${si}`}
-					style={{ animationDelay: `${si * 80}ms` }}
-				>
-					<div className="mb-4 flex items-center gap-2">
-						<h2 className="text-sm font-medium text-muted-foreground">
-							{section.title}
-						</h2>
-						<span className="h-px flex-1 bg-linear-to-r from-border to-transparent" />
-					</div>
-					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
-						{section.items.map((item, i) => {
-							// A video resolved to its album track while playing
-							// is shown and played as that song.
-							const song =
-								item.kind === "song"
-									? (versions.get(item.song.id) ?? item.song)
-									: null;
-							const onOpen =
-								item.kind === "song"
-									? () => {
-											const queue = section.items
-												.slice(i + 1)
-												.flatMap((next) =>
-													next.kind === "song" ? [next.song] : [],
-												);
-											play(song ?? item.song, queue);
-										}
-									: item.kind === "artist"
-										? () => navigate(`/artist/${item.id}`)
-										: () => navigate(`/playlists/${item.id}`);
-							const key = `${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`;
-							if (item.kind === "song") {
-								return (
-									<SongContextMenu key={key} song={song ?? item.song}>
-										<FeedCard
-											item={{ ...item, song: song ?? item.song }}
-											onClick={onOpen}
-										/>
-									</SongContextMenu>
-								);
-							}
-							if (item.kind === "playlist" || item.kind === "album") {
-								return (
-									<PlaylistContextMenu
-										isPinned={isPinned(item.id)}
-										key={key}
-										onDeleted={() => removeFeedItem(item.id)}
-										onTogglePinned={() =>
-											togglePinned({
-												id: item.id,
-												thumbnail: item.thumbnail,
-												title: item.title,
-											})
-										}
-										playlist={item}
-									>
-										<FeedCard item={item} onClick={onOpen} />
-									</PlaylistContextMenu>
-								);
-							}
-							return <FeedCard item={item} key={key} onClick={onOpen} />;
-						})}
-					</div>
-				</section>
-			))}
-		</div>
+		<Show
+			fallback={
+				<div class="space-y-10">
+					<For each={[0, 1]}>
+						{() => (
+							<div>
+								<div class="shimmer-surface mb-4 h-4 w-40 rounded-md" />
+								<div class="flex gap-4">
+									<For each={[0, 1, 2, 3, 4]}>
+										{() => (
+											<div>
+												<div class="shimmer-surface aspect-square w-32 rounded-xl md:w-44" />
+												<div class="shimmer-surface mt-2.5 h-4 w-24 rounded-md md:w-32" />
+												<div class="shimmer-surface mt-2 h-3 w-16 rounded-md md:w-24" />
+											</div>
+										)}
+									</For>
+								</div>
+							</div>
+						)}
+					</For>
+				</div>
+			}
+			when={sections() !== null}
+		>
+			<Show
+				fallback={
+					<p class="text-sm text-muted-foreground/70">
+						Recommendations unavailable — log in to see your mix.
+					</p>
+				}
+				when={!failed()}
+			>
+				<div>
+					<For each={visibleSections()}>
+						{(section, si) => (
+							<section
+								class="animate-track-in pb-3"
+								style={{ "animation-delay": `${si() * 80}ms` }}
+							>
+								<div class="mb-4 flex items-center gap-2">
+									<h2 class="text-sm font-medium text-muted-foreground">
+										{section.title}
+									</h2>
+									<span class="h-px flex-1 bg-linear-to-r from-border to-transparent" />
+								</div>
+								<div class="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
+									<For each={section.items}>
+										{(item, i) => {
+											// A video resolved to its album track while playing
+											// is shown and played as that song.
+											const song = () =>
+												item.kind === "song"
+													? (versions.get(item.song.id) ?? item.song)
+													: null;
+											const onOpen =
+												item.kind === "song"
+													? () => {
+															const upcoming = section.items
+																.slice(i() + 1)
+																.flatMap((next) =>
+																	next.kind === "song" ? [next.song] : [],
+																);
+															void player.play(song() ?? item.song, upcoming);
+														}
+													: item.kind === "artist"
+														? () => navigate(`/artist/${item.id}`)
+														: () => navigate(`/playlists/${item.id}`);
+											return (
+												<Show
+													fallback={
+														item.kind === "playlist" ||
+														item.kind === "album" ? (
+															<PlaylistContextMenu
+																isPinned={isPinned(item.id)}
+																onDeleted={() => removeFeedItem(item.id)}
+																onTogglePinned={() =>
+																	togglePinned({
+																		id: item.id,
+																		thumbnail: item.thumbnail,
+																		title: item.title,
+																	})
+																}
+																playlist={item}
+															>
+																<FeedCard item={item} onClick={onOpen} />
+															</PlaylistContextMenu>
+														) : (
+															<FeedCard item={item} onClick={onOpen} />
+														)
+													}
+													when={item.kind === "song" ? item : null}
+												>
+													{(playable) => (
+														<SongContextMenu song={song() ?? playable().song}>
+															<FeedCard
+																item={{
+																	...playable(),
+																	song: song() ?? playable().song,
+																}}
+																onClick={onOpen}
+															/>
+														</SongContextMenu>
+													)}
+												</Show>
+											);
+										}}
+									</For>
+								</div>
+							</section>
+						)}
+					</For>
+				</div>
+			</Show>
+		</Show>
 	);
 }

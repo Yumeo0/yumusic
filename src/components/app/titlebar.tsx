@@ -1,6 +1,6 @@
+import { Copy, Minus, Square, X } from "@lucide/solid";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Square, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { createSignal, onSettled, Show } from "solid-js";
 import { IS_MOBILE } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 
@@ -11,69 +11,69 @@ const appWindow = getCurrentWindow();
  * maximize button reflects the window state via the resize event.
  */
 export function Titlebar() {
-	const [maximized, setMaximized] = useState(false);
+	if (IS_MOBILE) return null;
 
-	useEffect(() => {
+	const [maximized, setMaximized] = createSignal(false);
+
+	onSettled(() => {
 		let unlisten: (() => void) | undefined;
+		let disposed = false;
 		appWindow
 			.onResized(async () => {
 				setMaximized(await appWindow.isMaximized());
 			})
 			.then((dispose) => {
-				unlisten = dispose;
+				if (disposed) dispose();
+				else unlisten = dispose;
 			});
 		appWindow
 			.isMaximized()
 			.then(setMaximized)
 			.catch(() => undefined);
 		return () => {
+			disposed = true;
 			unlisten?.();
 		};
-	}, []);
-
-	// Mobile platforms keep their system window chrome.
-	if (IS_MOBILE) return null;
+	});
 
 	return (
 		<div
-			className="relative z-[70] flex h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none"
+			class="relative z-[70] flex h-9 shrink-0 items-center justify-between bg-sidebar pl-2 select-none"
 			data-tauri-drag-region
 		>
-			<div className="pointer-events-none flex items-center gap-2 pl-1">
-				<img alt="" className="size-5 rounded-md" src="/icon-637.png" />
-				<span className="text-sm font-semibold tracking-tight">YuMusic</span>
+			<div class="pointer-events-none flex items-center gap-2 pl-1">
+				<img alt="" class="size-5 rounded-md" src="/icon-637.png" />
+				<span class="text-sm font-semibold tracking-tight">YuMusic</span>
 			</div>
-			<div className="flex items-center gap-0.5 pr-1">
+			<div class="flex items-center gap-0.5 pr-1">
 				<button
 					aria-label="Minimize window"
-					className={cn(TitlebarButtonClass)}
+					class={cn(TitlebarButtonClass)}
 					onClick={() => appWindow.minimize()}
 					type="button"
 				>
-					<Minus className="size-4" />
+					<Minus class="size-4" />
 				</button>
 				<button
-					aria-label={maximized ? "Restore window" : "Maximize window"}
-					className={cn(TitlebarButtonClass)}
+					aria-label={maximized() ? "Restore window" : "Maximize window"}
+					class={cn(TitlebarButtonClass)}
 					onClick={() => appWindow.toggleMaximize()}
 					type="button"
 				>
-					{maximized ? (
-						<Copy className="size-3.5 -scale-x-100" />
-					) : (
-						<Square className="size-3" />
-					)}
+					<Show fallback={<Square class="size-3" />} when={maximized()}>
+						<Copy class="size-3.5 -scale-x-100" />
+					</Show>
 				</button>
 				<button
 					aria-label="Close window"
-					className={cn(
+					class={cn(
 						TitlebarButtonClass,
 						"hover:bg-destructive hover:text-white",
 					)}
 					onClick={() => appWindow.close()}
 					type="button"
 				>
-					<X className="size-4" />
+					<X class="size-4" />
 				</button>
 			</div>
 		</div>
