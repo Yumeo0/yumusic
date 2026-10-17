@@ -16,14 +16,20 @@ import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
+import {
+	SongRowHover,
+	SongRowRating,
+} from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
+import { songRatingEntry } from "@/lib/youtube/playlist-data";
 import {
 	artistListOf,
 	artistNames,
@@ -34,6 +40,7 @@ import {
 	getMixSongs,
 	getYoutubeClient,
 	type MixSource,
+	type SongRating,
 } from "@/lib/youtube/youtube-client";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
@@ -137,6 +144,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	}
 
 	const shelves: ArtistShelf[] = [];
+	const ratings: Array<{ id: string; rating: SongRating }> = [];
 	let songs: Song[] = [];
 	let songsTitle = "Songs";
 
@@ -146,6 +154,8 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			const shelfSongs: Song[] = [];
 			for (const item of section.contents ?? []) {
 				if (item.is(YTNodes.MusicResponsiveListItem)) {
+					const rating = songRatingEntry(item);
+					if (rating) ratings.push(rating);
 					const song = toSong(item);
 					if (song.id) shelfSongs.push(song);
 				}
@@ -169,6 +179,8 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			const items: ShelfItem[] = [];
 			for (const item of section.contents ?? []) {
 				if (item.is(YTNodes.MusicResponsiveListItem)) {
+					const rating = songRatingEntry(item);
+					if (rating) ratings.push(rating);
 					const song = toSong(item);
 					if (!song.id) continue;
 					items.push({
@@ -196,6 +208,9 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			}
 		}
 	}
+
+	// The artist page response carries the account's rating for every row.
+	seedSongRatings(ratings);
 
 	const view: ArtistView = {
 		name,
@@ -399,63 +414,70 @@ export default function ArtistPage() {
 									song={song}
 								>
 									<SwipeToQueue onQueue={() => addToQueue([song])}>
-										<button
-											className={cn(
-												"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.05]",
-												isCurrent && "bg-primary/[0.08]",
-											)}
-											onClick={() => playQueue(artist.songs, index)}
-											type="button"
-										>
-											<span className="relative grid place-items-center">
-												{isCurrent ? (
-													<EqualizerBars
-														className="size-3.5 text-primary"
-														playing={isPlaying}
-													/>
-												) : (
-													<>
-														<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-															{index + 1}
-														</span>
-														<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
-													</>
+										<SongRowHover songId={song.id}>
+											<div
+												className={cn(
+													"flex items-center gap-3 rounded-lg px-2.5 py-2",
+													isCurrent && "bg-primary/[0.08]",
 												)}
-											</span>
-											{song.thumbnail ? (
-												<img
-													alt={song.title}
-													className="size-10 rounded-md border border-foreground/10 object-cover"
-													loading="lazy"
-													src={proxiedImageUrl(song.thumbnail)}
-												/>
-											) : (
-												<div className="size-10 rounded-md bg-muted" />
-											)}
-											<div className="min-w-0">
-												<h3
-													className={cn(
-														"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-														isCurrent && "text-primary",
-													)}
+											>
+												<button
+													className="grid min-w-0 flex-1 grid-cols-[2rem_2.5rem_1fr] items-center gap-3 text-left"
+													onClick={() => playQueue(artist.songs, index)}
+													type="button"
 												>
-													<SongTitle
-														artist={song.artist}
-														keepTitle={song.upload}
-														title={song.title}
-													/>
-												</h3>
-												<p className="truncate text-xs text-muted-foreground">
-													<ArtistLinks song={song} />
-												</p>
+													<span className="relative grid place-items-center">
+														{isCurrent ? (
+															<EqualizerBars
+																className="size-3.5 text-primary"
+																playing={isPlaying}
+															/>
+														) : (
+															<>
+																<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+																	{index + 1}
+																</span>
+																<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
+															</>
+														)}
+													</span>
+													{song.thumbnail ? (
+														<img
+															alt={song.title}
+															className="size-10 rounded-md border border-foreground/10 object-cover"
+															loading="lazy"
+															src={proxiedImageUrl(song.thumbnail)}
+														/>
+													) : (
+														<div className="size-10 rounded-md bg-muted" />
+													)}
+													<div className="min-w-0">
+														<h3
+															className={cn(
+																"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+																isCurrent && "text-primary",
+															)}
+														>
+															<SongTitle
+																artist={song.artist}
+																keepTitle={song.upload}
+																title={song.title}
+															/>
+														</h3>
+														<p className="truncate text-xs text-muted-foreground">
+															<ArtistLinks song={song} />
+														</p>
+													</div>
+												</button>
+												<div className="flex shrink-0 items-center gap-2 pr-2">
+													<DownloadedBadge songId={song.id} />
+													<SongRowRating songId={song.id} />
+													<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+														{song.duration}
+													</span>
+												</div>
 											</div>
-											<div className="flex items-center gap-2 pr-2">
-												<DownloadedBadge songId={song.id} />
-												<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-													{song.duration}
-												</span>
-											</div>
-										</button>
+										</SongRowHover>
 									</SwipeToQueue>
 								</SongContextMenu>
 							);

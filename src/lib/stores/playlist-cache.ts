@@ -12,6 +12,9 @@ export const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // localized (e.g. Japanese) auto-playlist name.
 export const LIBRARY_CACHE_KEY = "yumusic:library:v7";
 
+// v12: clears views cached before like/dislike states were read from the
+// playlist response, so the next visit seeds them once (v11 views would only
+// learn a row's rating through a hover lookup);
 // v11: cached tracks carry the description-resolved artists' channel ids
 // (v10 could cache adopted artists without their channel links);
 // v10: playlist covers resolve to the largest variant (v9 and earlier could
@@ -19,7 +22,7 @@ export const LIBRARY_CACHE_KEY = "yumusic:library:v7";
 // v9: album tracks inherit the header artist (v8 cached "Unknown Artist");
 // v8: cached playlists carry a reliable editable flag so own playlists offer
 // "Remove from playlist" (v7 could cache a false negative).
-export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v11:";
+export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v12:";
 
 /** Plain-data snapshot of a playlist (JSON-safe for persistence). */
 export interface PlaylistView {

@@ -19,6 +19,7 @@ import {
 	useState,
 } from "react";
 import { LyricsPanel } from "@/components/lyrics/lyrics";
+import { RatingButtons } from "@/components/player/rating-buttons";
 import { VolumeControl } from "@/components/player/volume-control";
 import { ProgressBar } from "@/components/player/waveform";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -223,6 +224,11 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 					transformOrigin: "top right",
 				}}
 			>
+				{/* Mobile: the transport's left slot carries the lyrics toggle,
+				    so the rating pair sits here beside the queue button. */}
+				<div className="md:hidden">
+					<RatingButtons songId={currentSong.id} />
+				</div>
 				<button
 					aria-label="Toggle queue"
 					className={cn(
@@ -487,6 +493,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									onToggle={toggle}
 									onToggleLyrics={toggleLyrics}
 									showLyrics={showLyrics}
+									songId={currentSong.id}
 								/>
 							</div>
 
@@ -594,6 +601,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							onToggle={toggle}
 							onToggleLyrics={toggleLyrics}
 							showLyrics={showLyrics}
+							songId={currentSong.id}
 						/>
 					</div>
 
@@ -724,6 +732,7 @@ function TransportRow({
 	onToggle,
 	onToggleLyrics,
 	showLyrics,
+	songId,
 }: {
 	hasNext: boolean;
 	hasPrevious: boolean;
@@ -733,6 +742,7 @@ function TransportRow({
 	onToggle: () => void;
 	onToggleLyrics: () => void;
 	showLyrics: boolean;
+	songId: string;
 }) {
 	// Width the row needs before the volume slider may expand sideways: the
 	// transport (176px) plus the expanded volume control (124px) on both
@@ -754,11 +764,36 @@ function TransportRow({
 	}, []);
 
 	return (
-		<div
-			className="grid w-full max-w-md grid-cols-[1fr_auto_1fr] items-center"
-			ref={rowRef}
-		>
-			<div className="col-start-2 row-start-1 flex items-center gap-4">
+		<div className="flex w-full max-w-md items-center" ref={rowRef}>
+			{/* Left slot: the rating pair on desktop, the lyrics toggle on
+			    mobile (where the top-right chrome carries the ratings). */}
+			<div className="flex min-w-0 flex-1 items-center justify-start">
+				<div className="max-md:hidden">
+					<RatingButtons collapse songId={songId} />
+				</div>
+				<button
+					aria-label="Toggle lyrics"
+					className={cn(
+						"np-morph grid size-11 place-items-center rounded-full transition-colors duration-200 md:hidden",
+						showLyrics
+							? "bg-primary/15 text-primary"
+							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
+					)}
+					data-np-lyrics
+					onClick={onToggleLyrics}
+					style={{
+						transform:
+							"translateX(calc(var(--np-dismiss, 0) * -70px)) scale(max(0, 1 - var(--np-dismiss, 0) * 2.2))",
+					}}
+					title="Lyrics"
+					type="button"
+				>
+					<MicVocal className="size-5" />
+				</button>
+			</div>
+
+			{/* Transport — kept centered by the two equal flex side slots. */}
+			<div className="flex shrink-0 items-center gap-4">
 				<button
 					aria-label="Previous"
 					className="np-morph grid size-11 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 active:origin-center! disabled:pointer-events-none disabled:opacity-25"
@@ -796,40 +831,18 @@ function TransportRow({
 					<SkipForward className="size-5.5 fill-current" />
 				</button>
 			</div>
-			{/* Lyrics toggle — mobile layout only, anchored to the row's left
-			    edge so the transport stays centered. It shrinks out through
-			    the left edge (motion, no fade) while the player minimizes so
-			    it never lands on the mini player's controls. */}
-			<button
-				aria-label="Toggle lyrics"
-				className={cn(
-					"np-morph col-start-1 row-start-1 grid size-11 place-items-center justify-self-start rounded-full transition-colors duration-200 md:hidden",
-					showLyrics
-						? "bg-primary/15 text-primary"
-						: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
-				)}
-				data-np-lyrics
-				onClick={onToggleLyrics}
-				style={{
-					transform:
-						"translateX(calc(var(--np-dismiss, 0) * -70px)) scale(max(0, 1 - var(--np-dismiss, 0) * 2.2))",
-				}}
-				title="Lyrics"
-				type="button"
-			>
-				<MicVocal className="size-5" />
-			</button>
-			{/* Volume — expands leftward on hover, anchored to the row's right
-			    edge. Its own grid track keeps the slider from ever clipping
-			    the transport; when the row is too narrow for that, it pops up
-			    vertically over a backdrop instead. Hidden on touch devices,
-			    where the hardware volume keys apply, but shown on narrow
-			    desktop windows too. */}
-			<VolumeControl
-				className="col-start-3 row-start-1 justify-self-end pointer-coarse:hidden"
-				reverse
-				vertical={narrow}
-			/>
+
+			{/* Right slot: volume. It expands leftward on hover; when the row
+			    is too narrow for that it pops up vertically over a backdrop
+			    instead. Hidden on touch devices, where the hardware volume
+			    keys apply, but shown on narrow desktop windows too. */}
+			<div className="flex min-w-0 flex-1 items-center justify-end">
+				<VolumeControl
+					className="pointer-coarse:hidden"
+					reverse
+					vertical={narrow}
+				/>
+			</div>
 		</div>
 	);
 }

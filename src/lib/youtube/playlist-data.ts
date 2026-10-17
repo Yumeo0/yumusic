@@ -1,5 +1,6 @@
 import { YTNodes } from "youtubei.js/web";
 import type { Song } from "@/contexts/player-context";
+import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
 import { artistListOf, isAlbumId, videoIdOf } from "./youtube.utils";
@@ -9,6 +10,7 @@ import {
 	getPlaylist,
 	loadPlaylistContinuation,
 	type Playlist,
+	type SongRating,
 } from "./youtube-client";
 
 /** Whether parsed credits name a real artist, not the unknown placeholder. */
@@ -48,6 +50,26 @@ function toSong(
 	};
 }
 
+/**
+ * The account's rating for a playlist/album row. List responses carry a
+ * `LikeButton` per track whose `like_status` is the current rating, so these
+ * pages know every row's state without extra requests.
+ */
+export function songRatingEntry(
+	item: YTNodes.MusicResponsiveListItem,
+): { id: string; rating: SongRating } | null {
+	const button = item.menu?.top_level_buttons?.find(
+		(entry): entry is YTNodes.LikeButton => entry.is(YTNodes.LikeButton),
+	);
+	const id = button?.target?.video_id;
+	if (!id) return null;
+	const status = button.like_status;
+	if (status === "LIKE") return { id, rating: "like" };
+	if (status === "DISLIKE") return { id, rating: "dislike" };
+	if (status === "INDIFFERENT") return { id, rating: null };
+	return null;
+}
+
 export function collectSongs(
 	items: Iterable<
 		| YTNodes.MusicResponsiveListItem
@@ -57,12 +79,18 @@ export function collectSongs(
 	fallback?: RowFallback,
 ): Song[] {
 	const songs: Song[] = [];
+	const ratings: Array<{ id: string; rating: SongRating }> = [];
 	for (const item of items) {
 		if (item.is(YTNodes.MusicResponsiveListItem)) {
+			const rating = songRatingEntry(item);
+			if (rating) ratings.push(rating);
 			const song = toSong(item, fallback);
 			if (song.id) songs.push(song);
 		}
 	}
+	// Seed before the caller renders the rows, so their buttons open with the
+	// real state instead of neutral.
+	seedSongRatings(ratings);
 	return songs;
 }
 

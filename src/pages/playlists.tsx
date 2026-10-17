@@ -32,6 +32,10 @@ import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
+import {
+	SongRowHover,
+	SongRowRating,
+} from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
@@ -896,70 +900,77 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 			song={displaySong}
 		>
 			<SwipeToQueue onQueue={() => onQueue([displaySong])}>
-				<button
-					className={cn(
-						"group grid w-full grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-lg px-4 py-2 text-left transition-colors duration-150 hover:bg-foreground/5 sm:px-2.5",
-						isCurrent && "bg-primary/8",
-					)}
-					onClick={() => onPlay(position)}
-					type="button"
-				>
-					{/* Index / play / EQ */}
-					<span className="relative grid place-items-center">
-						{isCurrent ? (
-							<EqualizerBars
-								className="size-3.5 text-primary"
-								playing={isPlaying}
-							/>
-						) : (
-							<>
-								<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-									{number}
-								</span>
-								<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
-							</>
+				<SongRowHover songId={displaySong.id}>
+					<div
+						className={cn(
+							"flex items-center gap-3 rounded-lg px-4 py-2 sm:px-2.5",
+							isCurrent && "bg-primary/8",
 						)}
-					</span>
-
-					{/* Thumbnail */}
-					{displaySong.thumbnail ? (
-						<img
-							alt={displaySong.title}
-							className="size-10 rounded-md border border-foreground/10 object-cover"
-							loading="lazy"
-							src={proxiedImageUrl(displaySong.thumbnail)}
-						/>
-					) : (
-						<div className="size-10 rounded-md bg-muted" />
-					)}
-
-					{/* Title + artists */}
-					<div className="min-w-0">
-						<h3
-							className={cn(
-								"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-								isCurrent && "text-primary",
-							)}
+					>
+						<button
+							className="grid min-w-0 flex-1 grid-cols-[2rem_2.5rem_1fr] items-center gap-3 text-left"
+							onClick={() => onPlay(position)}
+							type="button"
 						>
-							<SongTitle
-								artist={displaySong.artist}
-								keepTitle={displaySong.upload}
-								title={displaySong.title}
-							/>
-						</h3>
-						<p className="truncate text-xs text-muted-foreground">
-							<ArtistLinks song={displaySong} />
-						</p>
-					</div>
+							{/* Index / play / EQ */}
+							<span className="relative grid place-items-center">
+								{isCurrent ? (
+									<EqualizerBars
+										className="size-3.5 text-primary"
+										playing={isPlaying}
+									/>
+								) : (
+									<>
+										<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+											{number}
+										</span>
+										<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
+									</>
+								)}
+							</span>
 
-					{/* Downloaded marker + duration */}
-					<div className="flex items-center gap-2 pr-2">
-						<DownloadedBadge songId={displaySong.id} />
-						<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-							{displaySong.duration}
-						</span>
+							{/* Thumbnail */}
+							{displaySong.thumbnail ? (
+								<img
+									alt={displaySong.title}
+									className="size-10 rounded-md border border-foreground/10 object-cover"
+									loading="lazy"
+									src={proxiedImageUrl(displaySong.thumbnail)}
+								/>
+							) : (
+								<div className="size-10 rounded-md bg-muted" />
+							)}
+
+							{/* Title + artists */}
+							<div className="min-w-0">
+								<h3
+									className={cn(
+										"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+										isCurrent && "text-primary",
+									)}
+								>
+									<SongTitle
+										artist={displaySong.artist}
+										keepTitle={displaySong.upload}
+										title={displaySong.title}
+									/>
+								</h3>
+								<p className="truncate text-xs text-muted-foreground">
+									<ArtistLinks song={displaySong} />
+								</p>
+							</div>
+						</button>
+
+						{/* Downloaded marker + rating + duration */}
+						<div className="flex shrink-0 items-center gap-2 pr-2">
+							<DownloadedBadge songId={displaySong.id} />
+							<SongRowRating songId={displaySong.id} />
+							<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+								{displaySong.duration}
+							</span>
+						</div>
 					</div>
-				</button>
+				</SongRowHover>
 			</SwipeToQueue>
 		</SongContextMenu>
 	);

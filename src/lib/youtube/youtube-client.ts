@@ -284,6 +284,73 @@ export async function getUserPlaylists() {
 	}
 }
 
+/** The account's rating for a song; null means "not rated". */
+export type SongRating = "like" | "dislike" | null;
+
+/**
+ * Sets the signed-in account's rating for a video; null clears it. YouTube
+ * treats repeating the current rating as a no-op, so callers can toggle
+ * without tracking the previous state.
+ *
+ * youtubei.js' InteractionManager passes the video id as a bare string, which
+ * the like endpoints now reject ("Invalid value at 'target'"); the API wants
+ * a `LikeTarget` object (`{ videoId }`). The endpoints are called directly
+ * with the YouTube Music context, matching its web player.
+ */
+export async function setSongRating(
+	videoId: string,
+	rating: SongRating,
+): Promise<void> {
+	const client = await getYoutubeClient();
+	if (!client.session.logged_in) {
+		throw new Error("You must be signed in to rate songs.");
+	}
+	const endpoint =
+		rating === "like"
+			? "/like/like"
+			: rating === "dislike"
+				? "/like/dislike"
+				: "/like/removelike";
+	const response = await client.actions.execute(endpoint, {
+		target: { videoId },
+		client: "YTMUSIC",
+	});
+	if (!response.success) {
+		throw new Error(`Rating update failed (HTTP ${response.status_code})`);
+	}
+}
+
+/**
+ * Reads the account's current rating for a video. The web watch-next response
+ * omits the rating, but the TV client's transport controls carry a
+ * `likeButtonRenderer` whose `likeStatus` is the account's rating. Resolves
+ * to `undefined` when it cannot be determined (signed out or no button), so
+ * callers can leave the buttons neutral.
+ */
+export async function getSongRating(
+	videoId: string,
+): Promise<SongRating | undefined> {
+	try {
+		const client = await getYoutubeClient();
+		if (!client.session.logged_in) return undefined;
+		const response = await client.actions.execute("/next", {
+			videoId,
+			client: "TV",
+		});
+		const likeButton = findKey(response.data, "likeButtonRenderer") as
+			| { likeStatus?: string }
+			| undefined;
+		const status = likeButton?.likeStatus;
+		if (status === "LIKE") return "like";
+		if (status === "DISLIKE") return "dislike";
+		if (status === "INDIFFERENT") return null;
+		return undefined;
+	} catch (error) {
+		console.warn("[YuMusic] failed to read the song rating:", error);
+		return undefined;
+	}
+}
+
 export async function getPlaylist(id: string) {
 	const client = await getYoutubeClient();
 	try {

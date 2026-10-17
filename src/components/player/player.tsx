@@ -7,6 +7,7 @@ import {
 	SkipForward,
 } from "lucide-react";
 import { type RefObject, useRef } from "react";
+import { RatingButtons } from "@/components/player/rating-buttons";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -188,6 +189,14 @@ export function Player() {
 						songId={currentSong.id}
 						videoElementRef={videoElementRef}
 					/>
+					{/* Rating clicks must not open the fullscreen. Hidden on
+					    narrower windows, where the title needs the room. */}
+					<div
+						className="player-ctl max-lg:hidden"
+						onClick={(e) => e.stopPropagation()}
+					>
+						<RatingButtons songId={currentSong.id} />
+					</div>
 					<button
 						aria-label="Toggle queue"
 						className={cn(
