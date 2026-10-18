@@ -11,8 +11,8 @@
 //   RELEASE_TAG         tag being released, e.g. v0.2.0
 //   RELEASE_VERSION     tag without the leading "v"
 //   BUNDLE_DIR          Tauri bundle output (publish only)
-//   UPDATER_TARGET      override the updater platform key (e.g. when a
-//                       Windows build is cross-compiled on Linux)
+//   UPDATER_TARGET      override the updater platform key (defaults to the
+//                       build machine's platform)
 //   RELEASE_NOTES       optional override of the generated commit notes
 
 import { execFileSync } from "node:child_process";

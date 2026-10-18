@@ -12,11 +12,10 @@ name: Build and Release
 # The key used here has no password. If you regenerate it with one, add a
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret and pass it to the build step.
 #
-# Windows bundles are cross-compiled on the Linux runner with cargo-xwin.
-# Tauri does not officially support cross-compilation, so treat that entry as
-# experimental; if a Windows runner is available, use `os: windows-latest`
-# instead (drop `cross`, `rust-target` and `build-args`).
-# macOS cannot be cross-compiled from Linux and is not built here.
+# Windows bundles are built natively on a `windows-latest` runner. That runner
+# needs Rust (with the MSVC toolchain), Git for Windows (the steps run under
+# bash) and the Visual Studio C++ build tools; Tauri downloads NSIS and WiX
+# itself for the installers. macOS is not built here.
 
 on:
   push:
@@ -39,13 +38,10 @@ jobs:
             target: linux-x86_64
             bundles: deb,rpm,appimage
             bundle-dir: src-tauri/target/release/bundle
-          - os: ubuntu-latest
+          - os: windows-latest
             target: windows-x86_64
-            bundles: nsis
-            bundle-dir: src-tauri/target/x86_64-pc-windows-msvc/release/bundle
-            rust-target: x86_64-pc-windows-msvc
-            build-args: --runner cargo-xwin --target x86_64-pc-windows-msvc
-            cross: true
+            bundles: nsis,msi
+            bundle-dir: src-tauri/target/release/bundle
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +54,7 @@ jobs:
           bun-version: latest
 
       - name: Install base dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -70,24 +67,13 @@ jobs:
             libayatana-appindicator3-dev librsvg2-dev libssl-dev \
             libwebkit2gtk-4.1-dev libxdo-dev patchelf
 
-      - name: Install Windows cross-compile dependencies
-        if: matrix.cross
-        run: |
-          # llvm provides llvm-lib, which cc-rs (ring, via rustls) uses as the
-          # archiver for MSVC targets.
-          sudo apt-get install -y --no-install-recommends clang lld llvm nsis
-
-      - name: Set up Rust
+      - name: Set up Rust (Linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
             sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-      - name: Add Rust target
-        if: matrix.rust-target
-        shell: bash
-        run: rustup target add ${{ matrix.rust-target }}
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -99,21 +85,6 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
-
-      - name: Cache cargo-xwin
-        if: matrix.cross
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/cargo-xwin
-          key: ${{ runner.os }}-xwin
-
-      - name: Install cargo-xwin
-        if: matrix.cross
-        shell: bash
-        run: |
-          if ! command -v cargo-xwin >/dev/null 2>&1; then
-            cargo install cargo-xwin --locked
-          fi
 
       - name: Install dependencies
         shell: bash
@@ -144,17 +115,11 @@ jobs:
         shell: bash
         run: rm -rf "${{ matrix.bundle-dir }}"
 
-      # XWIN_CROSS_COMPILER: the Windows build uses cargo-xwin's clang
-      # backend, whose sysroot is a GitHub release asset. The default clang-cl
-      # backend downloads the MSVC CRT/SDK from download.visualstudio.microsoft.com,
-      # which the runner's job network may not be able to route.
       - name: Build bundles
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          XWIN_ACCEPT_LICENSE: "1"
-          XWIN_CROSS_COMPILER: clang
-        run: bunx tauri build --bundles ${{ matrix.bundles }} ${{ matrix.build-args }}
+        run: bunx tauri build --bundles ${{ matrix.bundles }}
 
       - name: Publish release assets
         shell: bash
