@@ -8,7 +8,7 @@ import {
 	installUpdate,
 	updaterSupported,
 } from "@/lib/services/updater";
-import { showToast } from "@/lib/stores/toast";
+import { dismissToast, showToast, updateToast } from "@/lib/stores/toast";
 import { cn } from "@/lib/utils/utils";
 
 type UpdateStatus =
@@ -19,25 +19,83 @@ type UpdateStatus =
 	| "installing"
 	| "error";
 
+/** How long the startup notification waits for a click before fading out. */
+const NOTIFICATION_DURATION_MS = 30_000;
+
+/** Download completion percentage, or null while the total size is unknown. */
+function downloadPercent({
+	downloaded,
+	total,
+}: DownloadProgress): number | null {
+	if (!total) return null;
+	return Math.min(100, Math.round((downloaded / total) * 100));
+}
+
 /**
- * Silent startup check: when a newer release exists, nudge the user towards
- * Settings → Updates. Only runs in release desktop builds.
+ * Downloads and installs a release announced by the startup notification,
+ * reporting progress in the notification itself.
+ */
+async function installFromNotification(update: Update, toastId: number) {
+	updateToast(toastId, {
+		message: `Downloading YuMusic ${update.version}…`,
+		onClick: undefined,
+		durationMs: null,
+	});
+	try {
+		await installUpdate(update, (progress) => {
+			const percent = downloadPercent(progress);
+			updateToast(toastId, {
+				message:
+					percent === null
+						? `Downloading YuMusic ${update.version}…`
+						: `Downloading YuMusic ${update.version}… ${percent}%`,
+			});
+		});
+		// installUpdate relaunches into the new build; on Windows the installer
+		// may exit the app first, so nothing after this runs.
+	} catch (error) {
+		console.error("[YuMusic] update failed:", error);
+		dismissToast(toastId);
+		showToast("Could not install the update");
+	}
+}
+
+/**
+ * Silent startup check: when a newer release exists, announce it in a toast
+ * that downloads, installs and relaunches into it when clicked. Only runs in
+ * release desktop builds.
  */
 export function UpdateNotifier() {
 	useEffect(() => {
 		if (!import.meta.env.PROD || !updaterSupported()) return;
 		let cancelled = false;
+		let update: Update | null = null;
+
 		checkForUpdate()
-			.then((update) => {
-				if (cancelled || !update) return;
-				showToast(
-					`YuMusic ${update.version} is available — install it from Settings`,
+			.then((next) => {
+				if (cancelled || !next) {
+					void next?.close();
+					return;
+				}
+				update = next;
+				const id = showToast(
+					`YuMusic ${next.version} is available — click to install`,
+					{
+						durationMs: NOTIFICATION_DURATION_MS,
+						onClick: () => {
+							// The install consumes the update handle; keep the
+							// unmount cleanup below from closing it mid-download.
+							update = null;
+							void installFromNotification(next, id);
+						},
+					},
 				);
-				void update.close();
 			})
 			.catch(() => undefined);
+
 		return () => {
 			cancelled = true;
+			void update?.close();
 		};
 	}, []);
 	return null;
@@ -89,9 +147,7 @@ export function UpdatesSection() {
 		}
 	}, [update]);
 
-	const percent = progress.total
-		? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
-		: null;
+	const percent = downloadPercent(progress);
 
 	const statusText = {
 		idle: "Check for a newer release.",
