@@ -1091,6 +1091,40 @@ export async function getTrackDurations(
 	return durations;
 }
 
+/**
+ * Search-bar completions YouTube Music suggests for a partial query. Returns
+ * the query strings only, de-duplicated; failures resolve to an empty list so
+ * typing never breaks when suggestions are unavailable.
+ */
+export async function getSearchCompletions(query: string): Promise<string[]> {
+	const trimmed = query.trim();
+	if (!trimmed) return [];
+	try {
+		const client = await getYoutubeClient();
+		const sections = await client.music.getSearchSuggestions(trimmed);
+		const seen = new Set<string>();
+		const suggestions: string[] = [];
+		for (const section of sections) {
+			for (const node of section.contents ?? []) {
+				const text = (
+					node as unknown as { suggestion?: { toString(): string } }
+				).suggestion
+					?.toString()
+					.trim();
+				if (!text) continue;
+				const key = text.toLowerCase();
+				if (seen.has(key)) continue;
+				seen.add(key);
+				suggestions.push(text);
+			}
+		}
+		return suggestions;
+	} catch (error) {
+		console.warn("[search] failed to load completions:", error);
+		return [];
+	}
+}
+
 export async function getSongStream(videoId: string) {
 	const client = await getYoutubeClient();
 
