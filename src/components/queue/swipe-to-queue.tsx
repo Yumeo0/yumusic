@@ -1,5 +1,5 @@
 import { ListPlus } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils/utils";
 
 interface SwipeToQueueProps {
@@ -11,6 +11,8 @@ interface SwipeToQueueProps {
 const QUEUE_THRESHOLD = 80;
 const MAX_DRAG = 112;
 const DRAG_START_SLOP = 8;
+/** How long a completed swipe keeps suppressing the synthetic click. */
+const CLICK_SUPPRESS_MS = 350;
 
 /**
  * Spotify-style gesture wrapper for track rows: dragging the row to the
@@ -24,12 +26,30 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 	const [queued, setQueued] = useState(false);
 	const start = useRef<{ x: number; y: number } | null>(null);
 	const axis = useRef<"horizontal" | "vertical" | null>(null);
+	// A completed swipe must not also fire the row's tap-to-play. Browsers
+	// synthesize a click after touchend, so swallow clicks until it passed.
+	const suppressClick = useRef(false);
+	const suppressTimer = useRef<number | null>(null);
+
+	useEffect(
+		() => () => {
+			if (suppressTimer.current !== null) {
+				window.clearTimeout(suppressTimer.current);
+			}
+		},
+		[],
+	);
 
 	const handleTouchStart = (event: React.TouchEvent) => {
 		const touch = event.touches[0];
 		if (!touch) return;
 		start.current = { x: touch.clientX, y: touch.clientY };
 		axis.current = null;
+		suppressClick.current = false;
+		if (suppressTimer.current !== null) {
+			window.clearTimeout(suppressTimer.current);
+			suppressTimer.current = null;
+		}
 	};
 
 	const handleTouchMove = (event: React.TouchEvent) => {
@@ -42,10 +62,11 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 			if (Math.abs(dx) < DRAG_START_SLOP && Math.abs(dy) < DRAG_START_SLOP) {
 				return;
 			}
-			// Lock to one axis so vertical list scrolling is never hijacked
+			// Lock to one axis so vertical list scrolling is never hijacked.
 			axis.current = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
 		}
 		if (axis.current === "horizontal") {
+			suppressClick.current = true;
 			setDrag(Math.max(0, Math.min(dx, MAX_DRAG)));
 		}
 	};
@@ -61,7 +82,27 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 				navigator.vibrate(15);
 			}
 		}
+		if (suppressClick.current) {
+			// The click follows this handler in the same task; reset shortly
+			// after so the next intentional tap plays normally.
+			suppressTimer.current = window.setTimeout(() => {
+				suppressClick.current = false;
+				suppressTimer.current = null;
+			}, CLICK_SUPPRESS_MS);
+		}
 		setDrag(0);
+	};
+
+	const handleTouchCancel = () => {
+		start.current = null;
+		axis.current = null;
+		setDrag(0);
+	};
+
+	const handleClickCapture = (event: React.MouseEvent) => {
+		if (!suppressClick.current) return;
+		event.preventDefault();
+		event.stopPropagation();
 	};
 
 	return (
@@ -78,6 +119,8 @@ export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
 					"relative touch-pan-y",
 					queued && "bg-primary/10 transition-colors duration-300",
 				)}
+				onClickCapture={handleClickCapture}
+				onTouchCancel={handleTouchCancel}
 				onTouchEnd={handleTouchEnd}
 				onTouchMove={handleTouchMove}
 				onTouchStart={handleTouchStart}

@@ -16,6 +16,27 @@ export function volumeToLinear(volume: number): number {
 export { MAX_VOLUME };
 
 /**
+ * Tracks a CSS media query. Starts from the current match so the first paint
+ * already uses the right layout, then follows viewport changes. Safe outside a
+ * browser (returns false).
+ */
+export function useMediaQuery(query: string): boolean {
+	const [matches, setMatches] = useState(
+		() => typeof window !== "undefined" && window.matchMedia(query).matches,
+	);
+
+	useEffect(() => {
+		const media = window.matchMedia(query);
+		const update = () => setMatches(media.matches);
+		update();
+		media.addEventListener("change", update);
+		return () => media.removeEventListener("change", update);
+	}, [query]);
+
+	return matches;
+}
+
+/**
  * Tracks currentTime / duration of a media element via timeupdate events.
  * Keeps re-renders local to the calling component (no context churn at 4Hz).
  * `resetKey` (e.g. the song id) zeroes both values immediately when it
