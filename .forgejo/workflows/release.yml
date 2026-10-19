@@ -75,7 +75,10 @@ jobs:
             sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-      - name: Cache Cargo
+      # Linux runs in a container, so the workspace path is stable across runs
+      # and the cached `target` stays valid.
+      - name: Cache Cargo (Linux)
+        if: runner.os == 'Linux'
         uses: actions/cache@v4
         with:
           path: |
@@ -85,6 +88,25 @@ jobs:
           key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      # The Windows runner uses the host executor, which gets a fresh random
+      # workspace directory for every job (and deletes it afterwards). A cached
+      # `target` dir is not relocatable: Tauri's ACL build scripts record
+      # absolute paths to the workspace they ran in, so a restored `target`
+      # makes the next build fail with "failed to read plugin permissions".
+      # Only the path-independent registry caches are kept here. The
+      # `cargo-registry` key segment also keeps the old `cargo-*` caches
+      # (which contain `target`) from being restored.
+      - name: Cache Cargo registry (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-registry-
 
       - name: Install dependencies
         shell: bash
