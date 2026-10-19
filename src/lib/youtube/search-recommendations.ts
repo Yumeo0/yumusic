@@ -1,5 +1,4 @@
-import { YTNodes } from "youtubei.js/web";
-import { type FeedItem, toFeedItem } from "./feed-items";
+import { type FeedItem, feedItemKey, homeSectionsFromFeed } from "./feed-items";
 import { getYoutubeClient } from "./youtube-client";
 
 /** How many personalised entries the search bar suggests. */
@@ -28,15 +27,11 @@ async function loadRecommendations(): Promise<FeedItem[]> {
 	const feed = await client.music.getHomeFeed();
 	const items: FeedItem[] = [];
 	const seen = new Set<string>();
-	for (const section of feed.sections ?? []) {
-		if (!section.is(YTNodes.MusicCarouselShelf)) continue;
-		for (const item of section.contents ?? []) {
-			if (!item.is(YTNodes.MusicResponsiveListItem, YTNodes.MusicTwoRowItem))
-				continue;
-			const feedItem = toFeedItem(item);
-			if (!feedItem) continue;
-			const id = feedItem.kind === "song" ? feedItem.song.id : feedItem.id;
-			const key = `${feedItem.kind}:${id}`;
+	for (const section of homeSectionsFromFeed(feed)) {
+		for (const feedItem of section.items) {
+			// Browse chips are not playable/openable picks.
+			if (feedItem.kind === "navigation") continue;
+			const key = feedItemKey(feedItem);
 			if (seen.has(key)) continue;
 			seen.add(key);
 			items.push(feedItem);

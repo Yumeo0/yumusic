@@ -4,6 +4,7 @@ import {
 	type LyricsProviderId,
 	normalizeProviderOrder,
 } from "../lyrics/lyrics-providers";
+import { normalizeHiddenHomeSections } from "./home-sections";
 
 export type TitleMode = "both" | "original" | "translation";
 
@@ -34,8 +35,8 @@ export interface Settings {
 	preferSyncedLyrics: boolean;
 	/** LRCLIB: also search by title alone when artist+title finds nothing. */
 	lrclibLooseMatch: boolean;
-	/** Hide the "Today's biggest hits" row from the home feed. */
-	hideTodaysBiggestHits: boolean;
+	/** Home-feed section titles the user chose to hide. */
+	hiddenHomeSections: string[];
 	/** Keep playing similar songs when the queue ends. */
 	autoplay: boolean;
 	/** Fade the end of a song into the start of the next one. */
@@ -65,7 +66,7 @@ const DEFAULTS: Settings = {
 	lyricsProviderOrder: [...DEFAULT_LYRICS_PROVIDER_ORDER],
 	preferSyncedLyrics: true,
 	lrclibLooseMatch: true,
-	hideTodaysBiggestHits: true,
+	hiddenHomeSections: [],
 	autoplay: true,
 	crossfade: true,
 	crossfadeSeconds: CROSSFADE_DEFAULT_SECONDS,
@@ -78,10 +79,18 @@ export function getSettings(): Settings {
 	try {
 		const raw = localStorage.getItem(SETTINGS_KEY);
 		if (!raw) return { ...DEFAULTS };
-		const parsed = JSON.parse(raw) as Partial<Settings>;
+		const parsed = JSON.parse(raw) as Partial<Settings> & {
+			/** Pre-generic list flag, migrated on read. */
+			hideTodaysBiggestHits?: boolean;
+		};
+		const { hideTodaysBiggestHits, ...stored } = parsed;
 		return {
 			...DEFAULTS,
-			...parsed,
+			...stored,
+			hiddenHomeSections: normalizeHiddenHomeSections(
+				stored.hiddenHomeSections,
+				hideTodaysBiggestHits,
+			),
 			lyricsProviderOrder: normalizeProviderOrder(parsed.lyricsProviderOrder),
 			crossfadeSeconds: clampCrossfadeSeconds(parsed.crossfadeSeconds),
 			downloadedPlaylists: Array.isArray(parsed.downloadedPlaylists)

@@ -1,15 +1,19 @@
+import { Menu } from "@base-ui/react/menu";
 import {
 	ArrowUpRight,
 	ChevronDown,
 	ChevronUp,
+	Compass,
 	Disc3,
+	Ellipsis,
+	EyeOff,
 	ListMusic,
 	ListPlus,
+	Loader2,
 	X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { YTNodes } from "youtubei.js/web";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -18,25 +22,31 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import {
+	hideHomeSection,
+	isHomeSectionHidden,
+	normalizeHomeSectionTitle,
+	showHomeSection,
+} from "@/lib/stores/home-sections";
 import { usePinnedPlaylists } from "@/lib/stores/pinned";
-import { useSettings } from "@/lib/stores/settings";
+import { getSettings, useSettings } from "@/lib/stores/settings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { useMediaQuery } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { cn } from "@/lib/utils/utils";
-import { type FeedItem, toFeedItem } from "@/lib/youtube/feed-items";
+import {
+	type FeedItem,
+	feedItemKey,
+	type HomeSection,
+	homeSectionsFromFeed,
+} from "@/lib/youtube/feed-items";
 import {
 	enrichSongsWithDescriptions,
 	enrichSongsWithUploads,
 } from "@/lib/youtube/song-description";
 import { getYoutubeClient } from "@/lib/youtube/youtube-client";
-
-interface FeedSection {
-	title: string;
-	items: FeedItem[];
-}
 
 /** Matches Tailwind's `md` breakpoint; below it the feed uses compact rows. */
 const MOBILE_QUERY = "(max-width: 767.98px)";
@@ -45,19 +55,56 @@ const TOUCH_QUERY = "(any-pointer: coarse)";
 /** Rows per home section on phones before "Show more". */
 const MOBILE_SECTION_PREVIEW = 5;
 const SWIPE_HINT_KEY = "yumusic:swipe-queue-hint";
+/** Safety cap for the feed's continuation pages. */
+const MAX_HOME_CONTINUATION_PAGES = 10;
 
-/** Home sections the user can hide (normalized titles, see below). */
-const HIDDEN_SECTION_TITLES = new Set(["today's biggest hits"]);
-
-function isHiddenSectionTitle(title: string): boolean {
-	const normalized = title
-		.trim()
-		.toLowerCase()
-		.replace(/[\u2018\u2019]/g, "'");
-	return HIDDEN_SECTION_TITLES.has(normalized);
+/** Per-section menu; currently exposes hiding the row. */
+function SectionMenu({ title, onHide }: { title: string; onHide: () => void }) {
+	return (
+		<Menu.Root>
+			<Menu.Trigger
+				aria-label={`Options for ${title}`}
+				className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground/60 transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
+				title="Section options"
+			>
+				<Ellipsis className="size-4" />
+			</Menu.Trigger>
+			<Menu.Portal>
+				<Menu.Positioner
+					align="end"
+					className="z-90 outline-none"
+					sideOffset={6}
+				>
+					<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+						<Menu.Item
+							className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+							onClick={onHide}
+						>
+							<EyeOff className="size-4 text-muted-foreground" />
+							Hide this section
+						</Menu.Item>
+					</Menu.Popup>
+				</Menu.Positioner>
+			</Menu.Portal>
+		</Menu.Root>
+	);
 }
 
 function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
+	if (item.kind === "navigation") {
+		return (
+			<button
+				className="group flex aspect-square w-32 shrink-0 flex-col justify-between rounded-xl border border-foreground/8 bg-foreground/3 p-4 text-left transition-colors duration-200 hover:border-primary/30 hover:bg-foreground/6 md:w-44"
+				onClick={onClick}
+				type="button"
+			>
+				<ArrowUpRight className="size-4 text-muted-foreground/70 transition-colors group-hover:text-primary" />
+				<span className="line-clamp-3 text-base leading-tight font-semibold transition-colors group-hover:text-primary">
+					{item.label}
+				</span>
+			</button>
+		);
+	}
 	const isArtist = item.kind === "artist";
 	const title =
 		item.kind === "song"
@@ -159,6 +206,28 @@ function FeedRow({
 	swipeEnabled?: boolean;
 	onClick: () => void;
 }) {
+	if (item.kind === "navigation") {
+		return (
+			<button
+				className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 active:bg-foreground/5"
+				onClick={onClick}
+				type="button"
+			>
+				<span className="grid size-10 shrink-0 place-items-center rounded-md bg-foreground/6 text-muted-foreground">
+					<Compass className="size-5" />
+				</span>
+				<span className="min-w-0 flex-1">
+					<span className="block truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+						{item.label}
+					</span>
+					<span className="mt-0.5 block truncate text-xs text-muted-foreground">
+						Browse
+					</span>
+				</span>
+				<ArrowUpRight className="size-4 shrink-0 text-muted-foreground/60" />
+			</button>
+		);
+	}
 	const isArtist = item.kind === "artist";
 	const title =
 		item.kind === "song"
@@ -276,7 +345,7 @@ function swipeHintDismissed(): boolean {
 }
 
 /** Every playable song in the feed, for the description prefetch. */
-function feedSongs(sections: FeedSection[]): Song[] {
+function feedSongs(sections: HomeSection[]): Song[] {
 	return sections.flatMap((section) =>
 		section.items.flatMap((item) => (item.kind === "song" ? [item.song] : [])),
 	);
@@ -284,9 +353,9 @@ function feedSongs(sections: FeedSection[]): Song[] {
 
 /** Replaces one song wherever it appears in the feed. */
 function withUpdatedSong(
-	sections: FeedSection[],
+	sections: HomeSection[],
 	updated: Song,
-): FeedSection[] {
+): HomeSection[] {
 	return sections.map((section) => ({
 		...section,
 		items: section.items.map((item) =>
@@ -306,24 +375,20 @@ function withUpdatedSong(
 export function HomeFeed() {
 	const { play, addToQueue, currentSong, queue } = usePlayer();
 	const navigate = useNavigate();
-	const [settings] = useSettings();
+	const [settings, update] = useSettings();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const isMobile = useMediaQuery(MOBILE_QUERY);
 	const hasTouch = useMediaQuery(TOUCH_QUERY);
 	// Only touch devices can perform the swipe; a narrow desktop window gets
 	// the compact rows without the gesture hint or affordance.
 	const swipeEnabled = isMobile && hasTouch;
-	const [sections, setSections] = useState<FeedSection[] | null>(null);
+	const [sections, setSections] = useState<HomeSection[] | null>(null);
 	const [failed, setFailed] = useState(false);
+	const [loadingMore, setLoadingMore] = useState(false);
 	const [expandedSections, setExpandedSections] = useState<Set<string>>(
 		() => new Set(),
 	);
 	const [swipeHint, setSwipeHint] = useState(() => !swipeHintDismissed());
-	// Description prefetch: uploader descriptions carry the real song credits
-	// ("Singer: X / Song: Y") and resolve the ambiguous titles the raw
-	// pipeline leaves alone. Rows update as each description lands.
-	const enrichCancelRef = useRef<(() => void) | null>(null);
-	const uploadCancelRef = useRef<(() => void) | null>(null);
 	// Read at prefetch start; whatever is playing gets its description from
 	// the player response, so fetching it here would be a duplicate request.
 	const playingIdRef = useRef(currentSong?.id);
@@ -340,6 +405,7 @@ export function HomeFeed() {
 							(entry) =>
 								entry.kind === "song" ||
 								entry.kind === "artist" ||
+								entry.kind === "navigation" ||
 								entry.id !== id,
 						),
 					}))
@@ -364,6 +430,23 @@ export function HomeFeed() {
 		});
 	};
 
+	/** Hides any home row; the toast offers an immediate undo. */
+	const hideSection = (title: string) => {
+		update({
+			hiddenHomeSections: hideHomeSection(settings.hiddenHomeSections, title),
+		});
+		showToast(`“${title}” hidden — click to undo`, {
+			durationMs: 5000,
+			onClick: () =>
+				update({
+					hiddenHomeSections: showHomeSection(
+						getSettings().hiddenHomeSections,
+						title,
+					),
+				}),
+		});
+	};
+
 	/**
 	 * Swipe action for a home row. Mirrors the context menu: with nothing
 	 * playing or queued there is no queue to append to, so the song starts.
@@ -379,7 +462,7 @@ export function HomeFeed() {
 	};
 
 	/** Plays a row and queues the rest of its section behind it. */
-	const playFromSection = (section: FeedSection, index: number, song: Song) => {
+	const playFromSection = (section: HomeSection, index: number, song: Song) => {
 		const rest = section.items
 			.slice(index + 1)
 			.flatMap((next) => (next.kind === "song" ? [next.song] : []));
@@ -388,59 +471,93 @@ export function HomeFeed() {
 
 	useEffect(() => {
 		let cancelled = false;
+		let totalSections = 0;
+		const cancels: Array<() => void> = [];
+		const applyUpdatedSong = (updated: Song): void => {
+			setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
+		};
+		// Descriptions resolve ambiguous credits and upload detection keeps
+		// reuploads raw; each continuation page feeds both pipelines.
+		const enrich = (list: HomeSection[]) => {
+			const songs = feedSongs(list);
+			if (songs.length === 0) return;
+			const playingId = playingIdRef.current;
+			cancels.push(
+				enrichSongsWithDescriptions(
+					songs,
+					applyUpdatedSong,
+					playingId ? new Set([playingId]) : undefined,
+				),
+				enrichSongsWithUploads(songs, applyUpdatedSong),
+			);
+		};
+		const sectionKey = (section: HomeSection) =>
+			`${normalizeHomeSectionTitle(section.title)}::${
+				section.items[0] ? feedItemKey(section.items[0]) : ""
+			}`;
+
 		(async () => {
 			try {
 				const client = await getYoutubeClient();
-				const feed = await client.music.getHomeFeed();
-
-				const out: FeedSection[] = [];
-				for (const section of feed.sections ?? []) {
-					if (!section.is(YTNodes.MusicCarouselShelf)) continue;
-					const title = section.header?.title?.text || "";
-					const items: FeedItem[] = [];
-					for (const item of section.contents ?? []) {
-						if (
-							!item.is(YTNodes.MusicResponsiveListItem, YTNodes.MusicTwoRowItem)
-						) {
-							continue;
-						}
-						const feedItem = toFeedItem(item);
-						if (feedItem) items.push(feedItem);
+				let feed = await client.music.getHomeFeed();
+				const seen = new Set<string>();
+				const accept = (incoming: HomeSection[]): HomeSection[] => {
+					const fresh: HomeSection[] = [];
+					for (const section of incoming) {
+						const key = sectionKey(section);
+						if (seen.has(key)) continue;
+						seen.add(key);
+						fresh.push(section);
 					}
-					if (items.length > 0) {
-						out.push({ title, items });
+					return fresh;
+				};
+
+				const initial = accept(homeSectionsFromFeed(feed));
+				totalSections = initial.length;
+				if (cancelled) return;
+				setSections(initial);
+				setFailed(false);
+				enrich(initial);
+
+				// YouTube Music paginates the home feed; keep appending until the
+				// continuation ends so every available row is shown.
+				for (
+					let page = 0;
+					page < MAX_HOME_CONTINUATION_PAGES && feed.has_continuation;
+					page++
+				) {
+					if (cancelled) return;
+					setLoadingMore(true);
+					try {
+						feed = await feed.getContinuation();
+					} catch (error) {
+						console.warn("[HomeFeed] failed to load more sections:", error);
+						break;
+					}
+					if (cancelled) return;
+					const next = accept(homeSectionsFromFeed(feed));
+					if (next.length > 0) {
+						totalSections += next.length;
+						setSections((prev) => (prev ? [...prev, ...next] : next));
+						enrich(next);
 					}
 				}
-
-				if (cancelled) return;
-				setSections(out);
-				setFailed(out.length === 0);
-				const playingId = playingIdRef.current;
-				const applyUpdatedSong = (updated: Song): void => {
-					setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
-				};
-				enrichCancelRef.current = enrichSongsWithDescriptions(
-					feedSongs(out),
-					applyUpdatedSong,
-					playingId ? new Set([playingId]) : undefined,
-				);
-				// Reuploads (no release) keep their raw titles; the player
-				// marks what it plays, this covers the rest of the feed.
-				uploadCancelRef.current = enrichSongsWithUploads(
-					feedSongs(out),
-					applyUpdatedSong,
-				);
 			} catch (error) {
 				console.warn("[HomeFeed] failed to load recommendations:", error);
 				if (cancelled) return;
 				setSections([]);
 				setFailed(true);
+			} finally {
+				if (!cancelled) {
+					setLoadingMore(false);
+					if (totalSections === 0) setFailed(true);
+				}
 			}
 		})();
+
 		return () => {
 			cancelled = true;
-			enrichCancelRef.current?.();
-			uploadCancelRef.current?.();
+			for (const cancel of cancels) cancel();
 		};
 	}, []);
 
@@ -504,7 +621,7 @@ export function HomeFeed() {
 
 	const visibleSections = sections.filter(
 		(section) =>
-			!(settings.hideTodaysBiggestHits && isHiddenSectionTitle(section.title)),
+			!isHomeSectionHidden(section.title, settings.hiddenHomeSections),
 	);
 	const firstSongSection = visibleSections.findIndex((section) =>
 		section.items.some((item) => item.kind === "song"),
@@ -512,6 +629,11 @@ export function HomeFeed() {
 
 	return (
 		<div>
+			{visibleSections.length === 0 && !loadingMore && (
+				<p className="py-6 text-sm text-muted-foreground/70">
+					All home sections are hidden. Restore them in Settings → Home feed.
+				</p>
+			)}
 			{visibleSections.map((section, si) => {
 				const sectionKey = `feed-section-${si}`;
 				const expanded = expandedSections.has(sectionKey);
@@ -528,11 +650,17 @@ export function HomeFeed() {
 						key={`feed-${section.title}-${si}`}
 						style={{ animationDelay: `${si * 80}ms` }}
 					>
-						<div className="mb-4 flex items-center gap-2">
+						<div className="group/section mb-4 flex items-center gap-2">
 							<h2 className="text-sm font-medium text-muted-foreground">
 								{section.title}
 							</h2>
 							<span className="h-px flex-1 bg-linear-to-r from-border to-transparent" />
+							{section.title && (
+								<SectionMenu
+									onHide={() => hideSection(section.title)}
+									title={section.title}
+								/>
+							)}
 						</div>
 						{isMobile ? (
 							<div className="space-y-0.5">
@@ -549,8 +677,11 @@ export function HomeFeed() {
 											? () => playFromSection(section, i, song ?? item.song)
 											: item.kind === "artist"
 												? () => navigate(`/artist/${item.id}`)
-												: () => navigate(`/playlists/${item.id}`);
-									const key = `${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`;
+												: item.kind === "navigation"
+													? () =>
+															navigate(`/?q=${encodeURIComponent(item.label)}`)
+													: () => navigate(`/playlists/${item.id}`);
+									const key = `${feedItemKey(item)}-${i}`;
 									if (item.kind === "song") {
 										const row = (
 											<FeedRow
@@ -628,8 +759,11 @@ export function HomeFeed() {
 											? () => playFromSection(section, i, song ?? item.song)
 											: item.kind === "artist"
 												? () => navigate(`/artist/${item.id}`)
-												: () => navigate(`/playlists/${item.id}`);
-									const key = `${item.kind}-${item.kind === "song" ? item.song.id : item.id}-${i}`;
+												: item.kind === "navigation"
+													? () =>
+															navigate(`/?q=${encodeURIComponent(item.label)}`)
+													: () => navigate(`/playlists/${item.id}`);
+									const key = `${feedItemKey(item)}-${i}`;
 									if (item.kind === "song") {
 										return (
 											<SongContextMenu key={key} song={song ?? item.song}>
@@ -666,6 +800,12 @@ export function HomeFeed() {
 					</section>
 				);
 			})}
+			{loadingMore && (
+				<div className="mt-2 flex items-center justify-center gap-2 py-3 text-xs text-muted-foreground/70">
+					<Loader2 className="size-4 animate-spin" />
+					Loading more sections…
+				</div>
+			)}
 		</div>
 	);
 }

@@ -22,6 +22,7 @@ import {
 } from "@/lib/lyrics/lyrics-providers";
 import { validateListenbrainzToken } from "@/lib/services/listenbrainz";
 import { updaterSupported } from "@/lib/services/updater";
+import { showHomeSection } from "@/lib/stores/home-sections";
 import {
 	CROSSFADE_MAX_SECONDS,
 	CROSSFADE_MIN_SECONDS,
@@ -206,37 +207,58 @@ export default function SettingsPage({
 				<h2 className="mb-3 text-sm font-semibold text-foreground">
 					Home feed
 				</h2>
-				<div className="divide-y divide-foreground/6 overflow-hidden rounded-xl border border-foreground/8 bg-card">
-					<div className="flex items-center justify-between gap-6 p-4">
-						<div className="min-w-0">
-							<p className="text-sm font-medium">Hide "Today's biggest hits"</p>
-							<p className="mt-0.5 text-xs text-muted-foreground">
-								Remove the "Today's biggest hits" row from the home page.
-							</p>
-						</div>
-						<button
-							aria-label="Toggle Today's biggest hits row"
-							aria-pressed={settings.hideTodaysBiggestHits}
-							className={cn(
-								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
-								settings.hideTodaysBiggestHits
-									? "bg-primary"
-									: "bg-foreground/15",
+				<div className="overflow-hidden rounded-xl border border-foreground/8 bg-card">
+					<div className="p-4">
+						<div className="flex items-start justify-between gap-6">
+							<div className="min-w-0">
+								<p className="text-sm font-medium">Hidden sections</p>
+								<p className="mt-0.5 text-xs text-muted-foreground">
+									Use the “…” menu on any home section to hide it. Hidden
+									sections can be restored here.
+								</p>
+							</div>
+							{settings.hiddenHomeSections.length > 0 && (
+								<button
+									className="shrink-0 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+									onClick={() => update({ hiddenHomeSections: [] })}
+									type="button"
+								>
+									Restore all
+								</button>
 							)}
-							onClick={() =>
-								update({
-									hideTodaysBiggestHits: !settings.hideTodaysBiggestHits,
-								})
-							}
-							type="button"
-						>
-							<span
-								className={cn(
-									"absolute top-0.5 left-0.5 size-5 rounded-full bg-white shadow transition-transform duration-200",
-									settings.hideTodaysBiggestHits && "translate-x-5",
-								)}
-							/>
-						</button>
+						</div>
+						{settings.hiddenHomeSections.length === 0 ? (
+							<p className="mt-3 rounded-lg border border-dashed border-foreground/10 px-3 py-2.5 text-xs text-muted-foreground/70">
+								No sections are hidden.
+							</p>
+						) : (
+							<ul className="mt-3 space-y-1">
+								{settings.hiddenHomeSections.map((title) => (
+									<li
+										className="flex items-center justify-between gap-3 rounded-lg bg-foreground/4 px-3 py-2"
+										key={title}
+									>
+										<span className="min-w-0 truncate text-sm">{title}</span>
+										<button
+											aria-label={`Show ${title}`}
+											className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
+											onClick={() =>
+												update({
+													hiddenHomeSections: showHomeSection(
+														settings.hiddenHomeSections,
+														title,
+													),
+												})
+											}
+											type="button"
+										>
+											<Eye className="size-3.5" />
+											Show
+										</button>
+									</li>
+								))}
+							</ul>
+						)}
 					</div>
 				</div>
 			</section>

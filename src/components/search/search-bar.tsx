@@ -42,15 +42,20 @@ type Suggestion =
 function recommendationTitle(item: FeedItem): string {
 	if (item.kind === "song") return item.song.title;
 	if (item.kind === "artist") return formatArtistName(item.name);
+	if (item.kind === "navigation") return item.label;
 	return item.title;
 }
 
 function recommendationSubtitle(item: FeedItem): string {
-	return item.kind === "song" ? item.song.artist : item.subtitle;
+	if (item.kind === "song") return item.song.artist;
+	if (item.kind === "navigation") return "Browse";
+	return item.subtitle;
 }
 
 function recommendationThumbnail(item: FeedItem): string {
-	return item.kind === "song" ? item.song.thumbnail : item.thumbnail;
+	if (item.kind === "song") return item.song.thumbnail;
+	if (item.kind === "navigation") return "";
+	return item.thumbnail;
 }
 
 /**
@@ -183,6 +188,8 @@ export function SearchBar({ query, onSearch }: SearchBarProps) {
 			play(item.song);
 		} else if (item.kind === "artist") {
 			navigate(`/artist/${item.id}`);
+		} else if (item.kind === "navigation") {
+			navigate(`/?q=${encodeURIComponent(item.label)}`);
 		} else {
 			navigate(`/playlists/${item.id}`);
 		}
@@ -440,7 +447,11 @@ export function SearchBar({ query, onSearch }: SearchBarProps) {
 												<div
 													className={optionClass(row.index, "h-12")}
 													key={`recommendation-${item.kind}-${
-														item.kind === "song" ? item.song.id : item.id
+														item.kind === "song"
+															? item.song.id
+															: item.kind === "navigation"
+																? item.label
+																: item.id
 													}`}
 													{...optionProps(row)}
 												>

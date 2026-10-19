@@ -9,12 +9,14 @@ import {
 	artistIdOf,
 	artistListOf,
 	artistNames,
+	isVideoId,
 	videoIdOf,
 } from "@/lib/youtube/youtube.utils";
+import type { HomeFeed } from "./youtube-client";
 
 /**
- * One card in a home feed row. Carousels mix tracks with playlists, albums
- * and artists; each kind renders its own card and click behavior.
+ * One card in a home feed row. Carousels mix tracks with playlists, albums,
+ * artists and browse chips; each kind renders its own card and click behavior.
  */
 export type FeedItem =
 	| { kind: "song"; song: Song }
@@ -31,10 +33,26 @@ export type FeedItem =
 			name: string;
 			subtitle: string;
 			thumbnail: string;
-	  };
+	  }
+	/** A moods/genres chip; opens a search rather than a detail page. */
+	| { kind: "navigation"; label: string };
+
+export interface HomeSection {
+	title: string;
+	items: FeedItem[];
+}
 
 export function lastThumb(urls: ThumbCandidate[] | undefined): string {
 	return hiResThumb(biggestThumb(urls)?.url);
+}
+
+/** Stable identity of an entry, for keys and continuation de-duplication. */
+export function feedItemKey(item: FeedItem): string {
+	if (item.kind === "song") return `song:${item.song.id}`;
+	if (item.kind === "navigation") {
+		return `navigation:${item.label.trim().toLowerCase()}`;
+	}
+	return `${item.kind}:${item.id}`;
 }
 
 /** A playable card from a responsive list item (song/video/non-music track). */
@@ -57,44 +75,45 @@ function responsiveSong(
 	};
 }
 
-/** Parses a home/library carousel entry into the app's feed shape. */
-export function toFeedItem(
-	item: YTNodes.MusicResponsiveListItem | YTNodes.MusicTwoRowItem,
+/** Parses a single-column shelf row. */
+function responsiveFeedItem(
+	item: YTNodes.MusicResponsiveListItem,
 ): FeedItem | null {
-	if (item.is(YTNodes.MusicResponsiveListItem)) {
-		switch (item.item_type) {
-			case "song":
-			case "video":
-			case "non_music_track":
-				return responsiveSong(item);
-			case "playlist":
-			case "album":
-				if (!item.id) return null;
-				return {
-					kind: item.item_type,
-					id: item.id,
-					title: item.title ?? "Unknown Title",
-					subtitle:
-						item.item_type === "playlist"
-							? (item.item_count ?? item.author?.name ?? "")
-							: (item.author?.name ?? item.year ?? ""),
-					thumbnail: lastThumb(item.thumbnail?.contents),
-				};
-			case "artist":
-			case "library_artist":
-				if (!item.id) return null;
-				return {
-					kind: "artist",
-					id: item.id,
-					name: item.name ?? item.title ?? "Unknown Artist",
-					subtitle: item.subscribers ?? "Artist",
-					thumbnail: lastThumb(item.thumbnail?.contents),
-				};
-			default:
-				return null;
-		}
+	switch (item.item_type) {
+		case "song":
+		case "video":
+		case "non_music_track":
+			return responsiveSong(item);
+		case "playlist":
+		case "album":
+			if (!item.id) return null;
+			return {
+				kind: item.item_type,
+				id: item.id,
+				title: item.title ?? "Unknown Title",
+				subtitle:
+					item.item_type === "playlist"
+						? (item.item_count ?? item.author?.name ?? "")
+						: (item.author?.name ?? item.year ?? ""),
+				thumbnail: lastThumb(item.thumbnail?.contents),
+			};
+		case "artist":
+		case "library_artist":
+			if (!item.id) return null;
+			return {
+				kind: "artist",
+				id: item.id,
+				name: item.name ?? item.title ?? "Unknown Artist",
+				subtitle: item.subscribers ?? "Artist",
+				thumbnail: lastThumb(item.thumbnail?.contents),
+			};
+		default:
+			return null;
 	}
+}
 
+/** Parses a two-row (card) shelf entry. */
+function twoRowFeedItem(item: YTNodes.MusicTwoRowItem): FeedItem | null {
 	const thumbnail = lastThumb(item.thumbnail);
 	switch (item.item_type) {
 		case "song":
@@ -158,4 +177,105 @@ export function toFeedItem(
 		default:
 			return null;
 	}
+}
+
+/**
+ * Parses a multi-row shelf entry. YouTube Music uses these for mixed-in
+ * personalised cards (playlists with a description, occasional tracks) that
+ * the simpler row parsers leave empty.
+ */
+function multiRowFeedItem(
+	item: YTNodes.MusicMultiRowListItem,
+): FeedItem | null {
+	const payload = item.on_tap?.payload;
+	const title = item.title?.toString().trim() || "Unknown Title";
+	const subtitle =
+		item.subtitle?.toString().trim() ||
+		item.second_title?.toString().trim() ||
+		item.description?.toString().trim() ||
+		"";
+	const thumbnail = lastThumb(item.thumbnail?.contents);
+
+	const videoId = payload?.videoId;
+	if (isVideoId(videoId)) {
+		return {
+			kind: "song",
+			song: {
+				id: videoId,
+				title,
+				artist: subtitle || "Unknown Artist",
+				thumbnail,
+			},
+		};
+	}
+
+	const browseId = payload?.browseId;
+	if (!browseId) return null;
+	const pageType =
+		payload?.browseEndpointContextSupportedConfigs
+			?.browseEndpointContextMusicConfig?.pageType;
+	if (pageType === "MUSIC_PAGE_TYPE_ARTIST" && browseId.startsWith("UC")) {
+		return {
+			kind: "artist",
+			id: browseId,
+			name: title,
+			subtitle: subtitle || "Artist",
+			thumbnail,
+		};
+	}
+	return {
+		kind: pageType === "MUSIC_PAGE_TYPE_ALBUM" ? "album" : "playlist",
+		id: browseId,
+		title,
+		subtitle,
+		thumbnail,
+	};
+}
+
+/** Parses a mood/genre browse chip. */
+function navigationFeedItem(
+	item: YTNodes.MusicNavigationButton,
+): FeedItem | null {
+	const label = item.button_text?.trim();
+	return label ? { kind: "navigation", label } : null;
+}
+
+/** Parses any entry a home-feed carousel can contain. */
+export function toFeedItem(
+	item:
+		| YTNodes.MusicResponsiveListItem
+		| YTNodes.MusicTwoRowItem
+		| YTNodes.MusicMultiRowListItem
+		| YTNodes.MusicNavigationButton,
+): FeedItem | null {
+	if (item.is(YTNodes.MusicResponsiveListItem)) {
+		return responsiveFeedItem(item);
+	}
+	if (item.is(YTNodes.MusicTwoRowItem)) {
+		return twoRowFeedItem(item);
+	}
+	if (item.is(YTNodes.MusicMultiRowListItem)) {
+		return multiRowFeedItem(item);
+	}
+	if (item.is(YTNodes.MusicNavigationButton)) {
+		return navigationFeedItem(item);
+	}
+	return null;
+}
+
+/** Converts one home-feed page into the app's section shape. */
+export function homeSectionsFromFeed(feed: HomeFeed): HomeSection[] {
+	const sections: HomeSection[] = [];
+	for (const section of feed.sections ?? []) {
+		// Tastebuilder shelves are an onboarding prompt, not a content row.
+		if (!section.is(YTNodes.MusicCarouselShelf)) continue;
+		const title = section.header?.title?.text || "";
+		const items: FeedItem[] = [];
+		for (const item of section.contents ?? []) {
+			const feedItem = toFeedItem(item);
+			if (feedItem) items.push(feedItem);
+		}
+		if (items.length > 0) sections.push({ title, items });
+	}
+	return sections;
 }

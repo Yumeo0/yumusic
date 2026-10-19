@@ -37,6 +37,7 @@ async function bodyToBase64(body: BodyInit): Promise<string | null> {
 
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
 export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
+export type HomeFeed = Awaited<ReturnType<Innertube["music"]["getHomeFeed"]>>;
 
 interface ClientSlot {
 	instance: Innertube | null;
