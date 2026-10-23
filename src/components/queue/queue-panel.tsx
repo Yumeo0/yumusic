@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ListMusic, X } from "lucide-react";
+import { ListMusic, Shuffle, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
@@ -31,8 +31,14 @@ import { ArtistLinks } from "../song/artist-link";
  * so opening the fullscreen player doesn't re-render the app layout.
  */
 export function QueuePanel() {
-	const { queue, currentIndex, autoplayTracks, play, playAutoplayAt } =
-		usePlayer();
+	const {
+		queue,
+		currentIndex,
+		autoplayTracks,
+		play,
+		playAutoplayAt,
+		shuffleQueue,
+	} = usePlayer();
 	const { isPlaying } = usePlayerControls();
 	// Video entries already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
@@ -43,6 +49,8 @@ export function QueuePanel() {
 	const open = queueState !== "closed";
 	const fullscreen = useNowPlayingOpen();
 	const onClose = () => setQueueOpen(false);
+	// Shuffling mixes only the upcoming tracks, so it needs at least two.
+	const canShuffle = queue.length - currentIndex - 1 > 1;
 
 	// The queue can hold thousands of tracks; only render the visible rows.
 	// The panel stays mounted even when closed (for the drag-follow reveal),
@@ -153,14 +161,26 @@ export function QueuePanel() {
 						</span>
 					)}
 				</div>
-				<button
-					aria-label="Close queue"
-					className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
-					onClick={onClose}
-					type="button"
-				>
-					<X className="size-4" />
-				</button>
+				<div className="flex items-center gap-1">
+					<button
+						aria-label="Shuffle queue"
+						className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+						disabled={!canShuffle}
+						onClick={shuffleQueue}
+						title="Shuffle queue"
+						type="button"
+					>
+						<Shuffle className="size-4" />
+					</button>
+					<button
+						aria-label="Close queue"
+						className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
+						onClick={onClose}
+						type="button"
+					>
+						<X className="size-4" />
+					</button>
+				</div>
 			</div>
 
 			<div

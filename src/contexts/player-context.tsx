@@ -19,6 +19,7 @@ import {
 	getDownloadEntry,
 } from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
+import { shuffleFrom } from "@/lib/player/shuffle";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import {
 	rememberSongVersion,
@@ -97,6 +98,8 @@ interface PlayerContextType {
 	playNext: (song: Song) => void;
 	/** Remove the entry at `index`; advances playback when it was current. */
 	removeFromQueueAt: (index: number) => void;
+	/** Shuffles the tracks after the current one; playback stays untouched. */
+	shuffleQueue: () => void;
 	next: () => void;
 	previous: () => void;
 	hasNext: boolean;
@@ -1529,6 +1532,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[queue, currentIndex, playSong],
 	);
 
+	const shuffleQueue = useCallback(() => {
+		// Shuffle only what comes after the current song: the playing entry
+		// keeps its slot, the played part stays put, and the next track is
+		// picked from a fresh random order.
+		setQueueState((prev) => shuffleFrom(prev, currentIndex + 1));
+	}, [currentIndex]);
+
 	const setQueue = useCallback((songs: Song[]) => {
 		setQueueState(songs);
 	}, []);
@@ -1558,6 +1568,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setQueue,
 			playNext,
 			removeFromQueueAt,
+			shuffleQueue,
 			next,
 			previous,
 			hasNext,
@@ -1580,6 +1591,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setQueue,
 			playNext,
 			removeFromQueueAt,
+			shuffleQueue,
 			next,
 			previous,
 			hasNext,

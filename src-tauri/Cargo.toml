@@ -18,17 +18,16 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.12.1", features = ["protocol-asset"] }
+tauri = { version = "2.12.3", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-os = "2"
-playwire = "1"
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
+playwire = "2"
+reqwest = { version = "0.13", default-features = false, features = [
   "http2",
 ] }
 tokio = { version = "1", features = ["sync", "time"] }
@@ -42,4 +41,4 @@ tauri-plugin-process = "2"
 # The native media session identifies the app by AUMID; setting it on the
 # process lets Windows resolve the name and icon from the installed shortcut.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Win32_UI_Shell"] }
+windows = { version = "0.61", features = ["Win32_UI_Shell"] }
