@@ -16,16 +16,14 @@ import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
-import {
-	SongRowHover,
-	SongRowRating,
-} from "@/components/song/song-row-hover";
+import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
+import { LruCache } from "@/lib/utils/lru-cache";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
@@ -71,7 +69,10 @@ interface ArtistView {
 	mix: MixSource | null;
 }
 
-const artistCache = new Map<string, { timestamp: number; data: ArtistView }>();
+const artistCache = new LruCache<
+	string,
+	{ timestamp: number; data: ArtistView }
+>(12);
 
 function toSong(item: YTNodes.MusicResponsiveListItem): Song {
 	return {

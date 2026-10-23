@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { platform } from "@tauri-apps/plugin-os";
 import packageJson from "../../../package.json";
+import { hiResThumb } from "./utils";
 
 // The shim exists only in the app window; tests and plain-browser tooling
 // import this module without one.
@@ -69,7 +70,10 @@ export const NEEDS_BODY_HEADER = OS === "android";
  * once per <img> mount, which is what gets images rate-limited. Data,
  * blob, relative and already-proxied URLs pass through unchanged.
  */
-export function proxiedImageUrl(url: string | undefined | null): string {
+export function proxiedImageUrl(
+	url: string | undefined | null,
+	size = 384,
+): string {
 	if (!url || url.startsWith(PROXY_ORIGIN) || url.startsWith("proxy://")) {
 		return url ?? "";
 	}
@@ -81,7 +85,13 @@ export function proxiedImageUrl(url: string | undefined | null): string {
 		return url;
 	}
 	try {
-		const parsed = new URL(url);
+		const parsed = new URL(hiResThumb(url, size));
+		// Keep the frame's aspect ratio so the existing square crop stays valid.
+		if (size <= 192 && parsed.hostname === "i.ytimg.com") {
+			parsed.pathname = parsed.pathname
+				.replace(/\/(?:maxresdefault|hq720)\./, "/mqdefault.")
+				.replace(/\/sddefault\./, "/hqdefault.");
+		}
 		const proxied = new URL(
 			`${PROXY_ORIGIN}${parsed.pathname}${parsed.search}`,
 		);

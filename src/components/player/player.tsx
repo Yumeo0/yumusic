@@ -97,7 +97,7 @@ export function Player() {
 									alt={currentSong.title}
 									className="size-11 rounded-md border border-foreground/10 object-cover"
 									key={currentSong.id}
-									src={proxiedImageUrl(currentSong.thumbnail)}
+									src={proxiedImageUrl(currentSong.thumbnail, 96)}
 								/>
 							) : (
 								<div className="size-11 rounded-md bg-muted" />

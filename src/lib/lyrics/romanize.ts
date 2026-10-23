@@ -1,7 +1,12 @@
-import { createRomanizer } from "lyric-romanizer";
 import { useEffect, useMemo, useState } from "react";
+import { RomanizeClient } from "./romanize-client";
 
-const romanizer = createRomanizer();
+const romanizer = new RomanizeClient(
+	() =>
+		new Worker(new URL("./romanize.worker.ts", import.meta.url), {
+			type: "module",
+		}),
+);
 
 /** Shared empty result: nothing worth showing under the lines. */
 const EMPTY: Map<number, string> = new Map();
@@ -35,12 +40,13 @@ function needsRomanization(lines: string[]): boolean {
  */
 export async function romanizeLines(
 	lines: string[],
+	signal?: AbortSignal,
 ): Promise<Map<number, string>> {
 	const map = new Map<number, string>();
 	if (lines.length === 0) return map;
 	try {
-		const result = await romanizer.romanizeLines(lines);
-		result.lines.forEach((line, i) => {
+		const result = await romanizer.request(lines, signal);
+		result.forEach((line, i) => {
 			const trimmed = line?.trim();
 			if (trimmed) map.set(i, trimmed);
 		});
@@ -55,7 +61,7 @@ export async function romanizeLines(
 
 export async function romanizeLine(text: string): Promise<string | null> {
 	try {
-		const result = await romanizer.romanizeLine(text);
+		const [result] = await romanizer.request([text]);
 		const trimmed = result?.trim();
 		return trimmed && readingKey(trimmed) !== readingKey(text) ? trimmed : null;
 	} catch {
@@ -84,12 +90,14 @@ export function useRomanizedLines(
 			return;
 		}
 		let cancelled = false;
+		const controller = new AbortController();
 		setMap(null);
-		romanizeLines(lines).then((result) => {
+		romanizeLines(lines, controller.signal).then((result) => {
 			if (!cancelled) setMap(result);
 		});
 		return () => {
 			cancelled = true;
+			controller.abort();
 		};
 	}, [needed, lines]);
 

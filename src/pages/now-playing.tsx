@@ -204,7 +204,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						<img
 							alt=""
 							className="size-full scale-125 object-cover opacity-30 blur-3xl"
-							src={proxiedImageUrl(currentSong.thumbnail)}
+							src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 						/>
 						<div className="absolute inset-0 bg-background/60" />
 					</div>
@@ -424,7 +424,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 												className="animate-track-in absolute inset-0 size-full object-cover"
 												draggable={false}
 												key={`hero-${currentSong.id}`}
-												src={proxiedImageUrl(currentSong.thumbnail)}
+												src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 												style={{
 													objectViewBox: coverViewBox(currentSong.thumbnail),
 												}}
@@ -527,7 +527,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 											alt=""
 											className="size-16 shrink-0 rounded-xl border border-foreground/10 object-cover"
 											draggable={false}
-											src={proxiedImageUrl(currentSong.thumbnail)}
+											src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 										/>
 									) : (
 										<div className="grid size-16 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card">
@@ -564,7 +564,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 										className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
 										draggable={false}
 										key={`art-${currentSong.id}`}
-										src={proxiedImageUrl(currentSong.thumbnail)}
+										src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 									/>
 								) : (
 									<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
@@ -961,7 +961,7 @@ function QueueRow({
 						alt={song.title}
 						className="size-9 shrink-0 rounded-md object-cover"
 						loading="lazy"
-						src={proxiedImageUrl(song.thumbnail)}
+						src={proxiedImageUrl(song.thumbnail, 96)}
 					/>
 				) : (
 					<div className="size-9 shrink-0 rounded-md bg-muted" />

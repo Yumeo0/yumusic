@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
+import { LruCache } from "@/lib/utils/lru-cache";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	getSongRating,
@@ -38,14 +39,14 @@ interface PersistedRating {
 	at: number;
 }
 
-const states = new Map<string, SongRatingState>();
+const states = new LruCache<string, SongRatingState>(MAX_ENTRIES);
 /** When each state was last confirmed, for the persistence TTL. */
-const updatedAt = new Map<string, number>();
+const updatedAt = new LruCache<string, number>(MAX_ENTRIES);
 const listeners = new Set<() => void>();
 /** In-flight rating reads, so concurrent hovers share one request. */
 const reads = new Map<string, Promise<void>>();
 /** Songs the user rated this session: a late read/seed must not undo it. */
-const touched = new Set<string>();
+const touched = new LruCache<string, true>(MAX_ENTRIES);
 
 function restore() {
 	if (typeof localStorage === "undefined") return;
@@ -87,15 +88,16 @@ function persist() {
 					isVideoId(songId)
 				);
 			})
-			.map(
-				([songId, state]): [string, PersistedRating] => [
-					songId,
-					{ rating: state.rating, at: updatedAt.get(songId) ?? now },
-				],
-			)
+			.map(([songId, state]): [string, PersistedRating] => [
+				songId,
+				{ rating: state.rating, at: updatedAt.get(songId) ?? now },
+			])
 			.sort((a, b) => a[1].at - b[1].at)
 			.slice(-MAX_ENTRIES);
-		localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(entries)));
+		localStorage.setItem(
+			STORAGE_KEY,
+			JSON.stringify(Object.fromEntries(entries)),
+		);
 	} catch (error) {
 		console.warn("[YuMusic] failed to persist song ratings:", error);
 	}
@@ -199,7 +201,7 @@ export function rateSong(songId: string, next: "like" | "dislike"): void {
 	if (state.busy) return;
 	const previous = state.rating;
 	const target: SongRating = previous === next ? null : next;
-	touched.add(songId);
+	touched.set(songId, true);
 	setState(songId, { rating: target, busy: true, loaded: state.loaded });
 	void setSongRating(songId, target)
 		.then(() => {

@@ -7,6 +7,8 @@
  * credit doesn't carry ("沙花叉クロヱ").
  */
 
+import { LruCache } from "../utils/lru-cache";
+
 const LB_API = "https://api.listenbrainz.org/1";
 const MB_API = "https://musicbrainz.org/ws/2";
 const MBID_CACHE_KEY = "yumusic:mbids";
@@ -29,9 +31,9 @@ export interface ListenPayload {
 	listenedAt?: number;
 }
 
-const memoryCache = new Map<string, RecordingMbids | null>();
+const memoryCache = new LruCache<string, RecordingMbids | null>(CACHE_MAX);
 /** Session-scoped negative cache so failed lookups aren't hammered. */
-const failedLookups = new Set<string>();
+const failedLookups = new LruCache<string, true>(CACHE_MAX);
 
 function readCache<T>(key: string): Record<string, T> {
 	try {
@@ -110,9 +112,9 @@ interface MbArtist {
 	aliases?: Array<{ name?: string }>;
 }
 
-const artistMemoryCache = new Map<string, string | null>();
+const artistMemoryCache = new LruCache<string, string | null>(CACHE_MAX);
 /** Session-scoped negative cache for artist searches without a hit. */
-const artistFailures = new Set<string>();
+const artistFailures = new LruCache<string, true>(CACHE_MAX);
 
 /** Folds a name for comparison: lowercase, no spaces, punctuation or symbols. */
 function foldName(text: string): string {
@@ -214,7 +216,7 @@ async function findArtistName(artistName: string): Promise<string | null> {
 	const name = pick?.name?.trim() || null;
 	if (!name) {
 		artistMemoryCache.set(folded, null);
-		artistFailures.add(folded);
+		artistFailures.set(folded, true);
 		return null;
 	}
 	artistMemoryCache.set(folded, name);
@@ -323,7 +325,7 @@ export async function findRecording(
 		/** Remembers a genuine "no match"; a half-finished lookup stays retryable. */
 		const rememberMiss = () => {
 			if (artistLookupFailed) return;
-			failedLookups.add(key);
+			failedLookups.set(key, true);
 			memoryCache.set(key, null);
 		};
 		// Fielded queries are precise, but a title the catalog doesn't carry

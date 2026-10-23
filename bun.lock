@@ -41,6 +41,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "googlevideo@5.0.1": "patches/googlevideo@5.0.1.patch",
+  },
   "packages": {
     "@babel/runtime": ["@babel/runtime@8.0.8", "", {}, "sha512-dEu8nGlRqjsJsvviUUoSMfcRHpwomCiRlXsc2mPfJ79+ffTpDm+JtfUtTMzUrqCApHQnCsVPD3gT1ZT8RgBRCQ=="],
 

@@ -1,0 +1,21 @@
+diff --git a/dist/src/core/SabrStream.js b/dist/src/core/SabrStream.js
+index 2454d062e3661ec72b130a6294287d53be05294a..631be066077967a2a78a0d9aec0e44af50653b5a 100644
+--- a/dist/src/core/SabrStream.js
++++ b/dist/src/core/SabrStream.js
+@@ -176,7 +176,15 @@ export class SabrStream extends EventEmitterLike {
+         if (!this.trackCollection.needsDrain)
+             return Promise.resolve();
+         this.logger.debug(TAG, 'Waiting for drain');
+-        return new Promise((resolve) => this.drainResolver = resolve);
++        // A bounded player deliberately stops reading while paused or ahead.
++        // That is consumer backpressure, not a stalled network request.
++        const hadRequestTimeout = this.requestTimeoutId !== undefined;
++        this.clearRequestTimeout();
++        return new Promise((resolve) => this.drainResolver = resolve).then(() => {
++            this.health.lastProgressTime = Date.now();
++            if (hadRequestTimeout && !this.lifecycle.aborted)
++                this.resetRequestTimeout();
++        });
+     }
+     validateStreamingUrl(url) {
+         const broadcastId = getBroadcastId(url);

@@ -1,6 +1,4 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { SabrStream } from "googlevideo/sabr-stream";
-import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
 import {
 	createContext,
 	type ReactNode,
@@ -19,6 +17,7 @@ import {
 	getDownloadEntry,
 } from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
+import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import {
@@ -33,12 +32,10 @@ import {
 	parseDuration,
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
-import { botguardService } from "@/lib/youtube/botguard-service";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { applySongVersion } from "@/lib/youtube/song-version";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
-	fetchFunction,
 	getAutoplaySongs,
 	getPlaybackStream,
 	getSongVersion,
@@ -134,35 +131,6 @@ const PlayerControlsContext = createContext<
 const PlayerVolumeContext = createContext<PlayerVolumeContextType | undefined>(
 	undefined,
 );
-
-/** Appends one media chunk and resolves once the SourceBuffer is ready again. */
-function appendToSourceBuffer(
-	sourceBuffer: SourceBuffer,
-	data: Uint8Array,
-): Promise<void> {
-	return new Promise((resolve, reject) => {
-		const cleanup = () => {
-			sourceBuffer.removeEventListener("updateend", onUpdateEnd);
-			sourceBuffer.removeEventListener("error", onError);
-		};
-		const onUpdateEnd = () => {
-			cleanup();
-			resolve();
-		};
-		const onError = () => {
-			cleanup();
-			reject(new Error("SourceBuffer append failed"));
-		};
-		sourceBuffer.addEventListener("updateend", onUpdateEnd);
-		sourceBuffer.addEventListener("error", onError);
-		try {
-			sourceBuffer.appendBuffer(data as unknown as BufferSource);
-		} catch (error) {
-			cleanup();
-			reject(error as Error);
-		}
-	});
-}
 
 /** How often playback reports its watched range to YouTube's stats endpoint. */
 const WATCHTIME_PING_MS = 15_000;
@@ -395,8 +363,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	/**
 	 * googlevideo's SabrStream manages the SABR session. Its audio is fed
 	 * straight into a MediaSource — the app is audio-only, so there's no
-	 * manifest and no Shaka. YouTube currently caps a SABR session at
-	 * roughly a minute; that limit is upstream and awaiting a library fix.
+	 * manifest and no Shaka. Buffering is limited to a short window and seeks
+	 * outside that window restart SABR at the requested position.
 	 *
 	 * Mounts onto either deck so the idle one can buffer the next track for
 	 * a crossfade while the active one keeps playing.
@@ -405,148 +373,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		async (deck: Deck, result: LoadedStream, options: MountOptions) => {
 			const { videoInfo, innertube } = result;
 			const videoEl = deck.ref.current;
-			if (!videoEl) return;
-
 			const videoId = videoInfo.basic_info.id;
-			if (!videoId || !videoInfo.streaming_data) return;
-			if (
-				videoInfo.basic_info.is_live ||
-				videoInfo.basic_info.is_post_live_dvr
-			) {
-				console.warn("[PlayerContext] Live streams are not supported yet.");
+			if (!videoEl || !videoId || !videoInfo.streaming_data) return;
+			if (videoInfo.basic_info.is_live || videoInfo.basic_info.is_post_live_dvr)
 				return;
-			}
-
 			teardownDeck(deck);
-			deck.generation += 1;
-			const generation = deck.generation;
 			deck.videoId = videoId;
-			if (deck === decksRef.current[activeDeckRef.current]) {
+			const generation = deck.generation;
+			const controller = new AbortController();
+			deck.stop = () => controller.abort();
+			if (deck === decksRef.current[activeDeckRef.current])
 				videoElementRef.current = videoEl;
-			}
-
-			const streamingData = videoInfo.streaming_data;
-			const decipher = async (url?: string) =>
-				(await innertube.session.player?.decipher(url)) as string;
-
-			let objectUrl: string | null = null;
-			let mediaSource: MediaSource | null = null;
-			let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-			let stream: SabrStream | null = null;
-			let stopped = false;
-
-			/** True once this mount has been superseded or torn down. */
-			const cancelled = () => deck.generation !== generation;
-
-			const stop = () => {
-				if (stopped) return;
-				stopped = true;
-				reader?.cancel().catch(() => undefined);
-				stream?.abort();
-				const el = deck.ref.current;
-				if (el?.src.startsWith("blob:")) {
-					el.removeAttribute("src");
-					el.load();
-				}
-				if (objectUrl) URL.revokeObjectURL(objectUrl);
-				mediaSource = null;
-			};
-			deck.stop = stop;
-
 			try {
-				const client = innertube.session.context.client;
-				const ustreamerConfig =
-					videoInfo.player_config?.media_common_config
-						.media_ustreamer_request_config?.video_playback_ustreamer_config;
-				const clientInfo = {
-					osName: client.osName,
-					osVersion: client.osVersion,
-					clientName: parseInt(
-						Constants.CLIENT_NAME_IDS[
-							client.clientName as keyof typeof Constants.CLIENT_NAME_IDS
-						],
-						10,
-					),
-					clientVersion: client.clientVersion,
-				};
-				const sabrFormats = streamingData.adaptive_formats.map(buildSabrFormat);
-
-				stream = new SabrStream({
-					videoId,
-					fetchFunction: fetchFunction as unknown as typeof fetch,
-					serverAbrStreamingUrl: await decipher(
-						streamingData.server_abr_streaming_url,
-					),
-					videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
-					clientInfo,
-					poToken: await botguardService.mintToken(videoId),
-					formats: sabrFormats,
-				});
-				if (cancelled()) return;
-
-				const { audioStream, selectedFormats } = stream.start({
-					enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
-					audioPreferences: {},
-					isPostLiveDvr: false,
-				});
-				if (cancelled()) return;
-
-				const mime = selectedFormats.audioFormat?.mimeType;
-				if (!mime) throw new Error("SABR audio format is missing.");
-
-				mediaSource = new MediaSource();
-				objectUrl = URL.createObjectURL(mediaSource);
-				videoEl.src = objectUrl;
-				await new Promise<void>((resolve) => {
-					mediaSource?.addEventListener("sourceopen", () => resolve(), {
-						once: true,
-					});
-				});
-				if (cancelled() || !mediaSource) return;
-
-				const sourceBuffer = mediaSource.addSourceBuffer(mime);
-				if (videoInfo.basic_info.duration) {
-					mediaSource.duration = videoInfo.basic_info.duration;
-				}
-
-				reader =
-					audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
-				let started = false;
-				while (!cancelled()) {
-					const { value, done } = await reader.read();
-					if (done) break;
-					if (!value || value.byteLength === 0) continue;
-					await appendToSourceBuffer(sourceBuffer, value);
-					if (cancelled()) break;
-					if (!started) {
-						started = true;
+				await mountSabrAudio(videoEl, videoInfo, innertube, {
+					signal: controller.signal,
+					onReady: () => {
 						deck.ready = true;
 						if (options.autoPlay) {
-							// A deck reused after an older fade may still be dimmed.
 							videoEl.volume = volumeRef.current;
-							videoEl.play().catch((error) => {
-								// Ignore AbortError: play() interrupted by a pause.
-								if ((error as Error).name !== "AbortError") {
+							void videoEl.play().catch((error) => {
+								if (error.name !== "AbortError")
 									console.error("[PlayerContext] Auto-playback failed:", error);
-								}
 							});
 						}
 						options.onReady?.();
-					}
-				}
-
-				// Without an explicit endOfStream() the MediaSource never reports
-				// the end of the track, so the element never fires `ended` and
-				// playback just stalls at the last sample.
-				if (!cancelled() && mediaSource?.readyState === "open") {
-					try {
-						mediaSource.endOfStream();
-					} catch (error) {
-						console.warn("[PlayerContext] endOfStream failed:", error);
-					}
-				}
+					},
+				});
 			} catch (error) {
-				if (!cancelled()) {
+				if (!controller.signal.aborted && deck.generation === generation) {
 					console.error("[PlayerContext] Load video error:", error);
 					deck.videoId = null;
 					deck.ready = false;
@@ -691,7 +545,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			videoElementRef.current = nextEl;
 			nextEl.volume = volumeRef.current;
 
-			setHistory((prev) => [...prev, state.fromSong]);
+			setHistory((prev) => [...prev.slice(-99), state.fromSong]);
 			setCurrentIndex((index) => index + 1);
 			if (state.promote) {
 				setQueueState((prev) => [...prev, state.nextSong]);
@@ -1110,6 +964,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			// Any queued crossfade targets the old track; drop it.
 			abortCrossfade();
 			const request = ++loadRequestRef.current;
+			const oldDeck = decksRef.current[activeDeckRef.current];
+			if (oldDeck) teardownDeck(oldDeck);
 			setIsPlaying(false);
 			// A stored file carries the description saved with the download.
 			const localEntry = getDownloadEntry(song.id);
@@ -1166,15 +1022,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 							setAutoplayTracks((prev) => prev.map(replace));
 						}
 					}
-					// Debug: dump everything YouTube returned for this song
-					console.log(
-						"[YuMusic] song info:",
-						JSON.parse(JSON.stringify(result.videoInfo.basic_info ?? {})),
-					);
-					console.log(
-						"[YuMusic] streaming data:",
-						JSON.parse(JSON.stringify(result.videoInfo.streaming_data ?? {})),
-					);
 					setVideoInfo(result.videoInfo);
 					setInnertube(result.innertube);
 					setIsPlaying(true);
@@ -1225,7 +1072,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				);
 			}
 		},
-		[abortCrossfade, markUpload, mountLocalTrack],
+		[abortCrossfade, markUpload, mountLocalTrack, teardownDeck],
 	);
 
 	// Feed the shared listening-session tracker: one tick per second while
@@ -1310,7 +1157,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			// Add current song to history if it exists
 			if (currentSong) {
-				setHistory((prev) => [...prev, currentSong]);
+				setHistory((prev) => [...prev.slice(-99), currentSong]);
 			}
 
 			// A fresh start gets a fresh radio: drop the old track's suggestions
@@ -1354,7 +1201,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				return;
 			}
 			if (currentSong) {
-				setHistory((prev) => [...prev, currentSong]);
+				setHistory((prev) => [...prev.slice(-99), currentSong]);
 			}
 			// A fresh start gets a fresh radio (same as `play`).
 			setAutoplayTracks([]);
@@ -1390,7 +1237,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setAutoplayTracks(rest);
 			const extended = [...queue, upNext];
 			setQueueState(extended);
-			setHistory((prev) => [...prev, currentSong]);
+			setHistory((prev) => [...prev.slice(-99), currentSong]);
 			const nextIndex = currentIndex + 1;
 			setCurrentIndex(nextIndex);
 			await playSong(upNext);
@@ -1402,7 +1249,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		// Add current song to history
 		if (currentSong) {
-			setHistory((prev) => [...prev, currentSong]);
+			setHistory((prev) => [...prev.slice(-99), currentSong]);
 		}
 
 		setCurrentIndex(nextIndex);
@@ -1453,7 +1300,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			// Add current song to history
 			if (currentSong) {
-				setHistory((prev) => [...prev, currentSong]);
+				setHistory((prev) => [...prev.slice(-99), currentSong]);
 			}
 
 			setCurrentIndex(prevIndex);
@@ -1487,7 +1334,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setAutoplayTracks(autoplayTracks.slice(index + 1));
 			setQueueState((prev) => [...prev, ...promoted]);
 			if (currentSong) {
-				setHistory((prev) => [...prev, currentSong]);
+				setHistory((prev) => [...prev.slice(-99), currentSong]);
 			}
 			setCurrentIndex(queue.length + index);
 			void playSong(picked);

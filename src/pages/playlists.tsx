@@ -28,14 +28,12 @@ import {
 	type PlaylistEditResult,
 } from "@/components/playlist/edit-playlist-dialog";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
+import { VirtualTrackList } from "@/components/playlist/virtual-track-list";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
-import {
-	SongRowHover,
-	SongRowRating,
-} from "@/components/song/song-row-hover";
+import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
 import type { Song } from "@/contexts/player-context";
@@ -800,28 +798,31 @@ export function PlaylistDetails() {
 						Loading more…
 					</p>
 				)}
-				{visible.map(({ song, index }, i) => {
-					// The row displays the album track when the video was
-					// resolved to one; removal and playlist edits stay keyed
-					// to the playlist's own entry.
-					const displaySong = versions.get(song.id) ?? song;
-					return (
-						<PlaylistTrackRow
-							displaySong={displaySong}
-							editable={playlist.editable}
-							index={index}
-							isCurrent={currentSong?.id === displaySong.id}
-							isPlaying={currentSong?.id === displaySong.id && isPlaying}
-							key={rowKeys[i]}
-							number={sort === "newest" ? index + 1 : i + 1}
-							onPlay={playTrack}
-							onQueue={addToQueue}
-							onRemove={playlist.editable ? removeSong : undefined}
-							position={i}
-							song={song}
-						/>
-					);
-				})}
+				<VirtualTrackList count={visible.length} getKey={(i) => rowKeys[i]}>
+					{(i) => {
+						const { song, index } = visible[i];
+						// The row displays the album track when the video was
+						// resolved to one; removal and playlist edits stay keyed
+						// to the playlist's own entry.
+						const displaySong = versions.get(song.id) ?? song;
+						return (
+							<PlaylistTrackRow
+								displaySong={displaySong}
+								editable={playlist.editable}
+								index={index}
+								isCurrent={currentSong?.id === displaySong.id}
+								isPlaying={currentSong?.id === displaySong.id && isPlaying}
+								key={rowKeys[i]}
+								number={sort === "newest" ? index + 1 : i + 1}
+								onPlay={playTrack}
+								onQueue={addToQueue}
+								onRemove={playlist.editable ? removeSong : undefined}
+								position={i}
+								song={song}
+							/>
+						);
+					}}
+				</VirtualTrackList>
 				{visible.length === 0 && search.trim() && songs.length > 0 && (
 					<p className="px-4 py-10 text-sm text-muted-foreground sm:px-0">
 						No tracks match "{search.trim()}".
@@ -935,7 +936,7 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 									alt={displaySong.title}
 									className="size-10 rounded-md border border-foreground/10 object-cover"
 									loading="lazy"
-									src={proxiedImageUrl(displaySong.thumbnail)}
+									src={proxiedImageUrl(displaySong.thumbnail, 96)}
 								/>
 							) : (
 								<div className="size-10 rounded-md bg-muted" />

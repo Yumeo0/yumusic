@@ -268,7 +268,7 @@ export function QueuePanel() {
 												alt=""
 												className="size-10 rounded-md border border-foreground/10 object-cover"
 												loading="lazy"
-												src={proxiedImageUrl(song.thumbnail)}
+												src={proxiedImageUrl(song.thumbnail, 96)}
 											/>
 										) : (
 											<div className="size-10 rounded-md bg-muted" />

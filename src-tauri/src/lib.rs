@@ -167,6 +167,30 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 pub fn run() {
 	let builder = tauri::Builder::default()
 		.runtime(tauri_runtime_wry::Wry::default())
+		.on_window_event(|_window, _event| {
+			#[cfg(target_os = "windows")]
+			if let tauri::WindowEvent::Focused(focused) = _event {
+				use tauri_runtime_wry::WebviewWryExt;
+				use webview2_com::Microsoft::Web::WebView2::Win32::{
+					ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
+				};
+				use windows_core::Interface;
+				if let Some(webview) = _window.app_handle().get_webview_window(_window.label()) {
+					let level = if *focused { 0 } else { 1 };
+					// Release browser caches while inactive without suspending music,
+					// timers, downloads, or network requests. Restore normal on focus.
+					let _ = webview.with_wry_webview(move |view| unsafe {
+						if let Ok(core) = view.controller().CoreWebView2() {
+							if let Ok(core) = core.cast::<ICoreWebView2_19>() {
+								let _ = core.SetMemoryUsageTargetLevel(
+									COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(level),
+								);
+							}
+						}
+					});
+				}
+			}
+		})
 		.plugin(tauri_plugin_opener::init())
 		.plugin(tauri_plugin_os::init());
 

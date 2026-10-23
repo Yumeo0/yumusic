@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { LruCache } from "./lru-cache";
 import { proxiedImageUrl } from "./tauri";
 
 const MAX_VOLUME = 0.15;
@@ -102,9 +103,9 @@ export function useMediaTime(
 const AMBIENT_STORAGE_KEY = "yumusic-ambient-colors";
 const AMBIENT_MAX_ENTRIES = 256;
 
-const ambientCache = new Map<string, string>();
+const ambientCache = new LruCache<string, string>(AMBIENT_MAX_ENTRIES);
 /** URLs whose extraction failed — not re-probed this session (429 hammering guard). */
-const ambientFailures = new Set<string>();
+const ambientFailures = new LruCache<string, true>(AMBIENT_MAX_ENTRIES);
 const ambientInflight = new Map<string, Promise<string | null>>();
 
 /** Loads persisted colors once at startup; the map is tiny (url -> rgb string). */
@@ -202,13 +203,19 @@ function extractDominantColor(
  */
 async function extractFromUrl(url: string): Promise<string | null> {
 	try {
-		const res = await fetch(proxiedImageUrl(url), { mode: "cors" });
+		const res = await fetch(proxiedImageUrl(url, 64), { mode: "cors" });
 		if (!res.ok) return null;
 		const blob = await res.blob();
-		const bitmap = await createImageBitmap(blob);
-		const color = extractDominantColor(bitmap);
-		bitmap.close();
-		return color;
+		const bitmap = await createImageBitmap(blob, {
+			resizeWidth: 32,
+			resizeHeight: 32,
+			resizeQuality: "low",
+		});
+		try {
+			return extractDominantColor(bitmap);
+		} finally {
+			bitmap.close();
+		}
 	} catch {
 		// proxy unreachable or unusable response
 		return null;
@@ -243,7 +250,7 @@ export function useAmbientColor(imageUrl: string | undefined): string {
 						ambientCache.set(imageUrl, extracted);
 						persistAmbientCache();
 					} else {
-						ambientFailures.add(imageUrl);
+						ambientFailures.set(imageUrl, true);
 						console.warn("[ambient] failed to extract color from", imageUrl);
 					}
 					return extracted;

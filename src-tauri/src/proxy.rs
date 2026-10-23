@@ -1,6 +1,6 @@
 use base64::Engine;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -19,7 +19,7 @@ fn is_artwork_host(host: &str) -> bool {
 
 /// Max concurrent upstream artwork fetches: turns the webview's parallel
 /// grid-load burst into a paced stream so the CDN's burst limit isn't hit.
-const IMAGE_FETCH_CONCURRENCY: usize = 8;
+const IMAGE_FETCH_CONCURRENCY: usize = 4;
 /// 1 initial attempt + 3 retries on 429/5xx.
 const MAX_IMAGE_ATTEMPTS: usize = 4;
 const MIN_BACKOFF: Duration = Duration::from_millis(750);
@@ -37,8 +37,9 @@ const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
 /// eviction. Needed because custom-scheme responses are not kept in the
 /// WebView's HTTP cache, so every proxied image would otherwise be
 /// re-fetched upstream on every display — the main source of 429s.
-const IMAGE_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
-const IMAGE_CACHE_MAX_ENTRY_BYTES: usize = 8 * 1024 * 1024;
+const IMAGE_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
+const IMAGE_CACHE_MAX_ENTRY_BYTES: usize = 1024 * 1024;
+const IMAGE_CACHE_MAX_ENTRIES: usize = 512;
 const IMAGE_FRESHNESS_FALLBACK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 const IMAGE_FRESHNESS_CAP: u64 = 30 * 24 * 60 * 60;
 
@@ -46,7 +47,7 @@ const IMAGE_FRESHNESS_CAP: u64 = 30 * 24 * 60 * 60;
 struct CachedImage {
 	status: u16,
 	headers: Vec<(String, String)>,
-	body: Arc<Vec<u8>>,
+	body: bytes::Bytes,
 	etag: Option<String>,
 	fresh_until: Instant,
 	last_used: Instant,
@@ -59,9 +60,21 @@ struct ImageCache {
 
 impl ImageCache {
 	fn insert(&mut self, key: String, entry: CachedImage) {
+		let now = Instant::now();
+		self.entries.retain(|_, cached| {
+			if cached.fresh_until <= now {
+				self.total_bytes -= cached.body.len();
+				false
+			} else {
+				true
+			}
+		});
+		if let Some(previous) = self.entries.remove(&key) {
+			self.total_bytes -= previous.body.len();
+		}
 		self.total_bytes += entry.body.len();
 		self.entries.insert(key, entry);
-		while self.total_bytes > IMAGE_CACHE_MAX_BYTES {
+		while self.total_bytes > IMAGE_CACHE_MAX_BYTES || self.entries.len() > IMAGE_CACHE_MAX_ENTRIES {
 			// Evict the least recently used entry.
 			let victim = self
 				.entries
@@ -149,7 +162,7 @@ fn cache_lookup(
 		}
 	}
 
-	let mut response = Response::new((*entry.body).clone());
+	let mut response = Response::new(entry.body.to_vec());
 	if let Ok(status) = StatusCode::from_u16(entry.status) {
 		*response.status_mut() = status;
 	}
@@ -168,11 +181,51 @@ fn cache_lookup(
 
 fn client() -> &'static reqwest::Client {
 	static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-	CLIENT.get_or_init(reqwest::Client::new)
+	CLIENT.get_or_init(|| {
+		reqwest::Client::builder()
+			.pool_max_idle_per_host(2)
+			.pool_idle_timeout(Duration::from_secs(30))
+			.build()
+			.expect("proxy HTTP client")
+	})
 }
 
 #[cfg(test)]
 mod tests {
+	use super::*;
+
+	fn image(size: usize, age: Duration) -> CachedImage {
+		CachedImage {
+			status: 200,
+			headers: vec![],
+			body: bytes::Bytes::from(vec![0; size]),
+			etag: None,
+			fresh_until: Instant::now() + age,
+			last_used: Instant::now(),
+		}
+	}
+
+	#[test]
+	fn image_cache_replacement_and_expiry_release_their_byte_budget() {
+		let mut cache = ImageCache { entries: HashMap::new(), total_bytes: 0 };
+		cache.insert("cover".into(), image(100, Duration::from_secs(60)));
+		cache.insert("cover".into(), image(20, Duration::from_secs(60)));
+		assert_eq!(cache.total_bytes, 20);
+		cache.insert("expired".into(), image(100, Duration::ZERO));
+		cache.insert("fresh".into(), image(30, Duration::from_secs(60)));
+		assert_eq!(cache.total_bytes, 50);
+		assert!(!cache.entries.contains_key("expired"));
+	}
+
+	#[test]
+	fn image_cache_evicts_the_least_recently_used_data() {
+		let mut cache = ImageCache { entries: HashMap::new(), total_bytes: 0 };
+		cache.insert("old".into(), image(IMAGE_CACHE_MAX_BYTES / 2, Duration::from_secs(60)));
+		cache.insert("new".into(), image(IMAGE_CACHE_MAX_BYTES / 2 + 1, Duration::from_secs(60)));
+		assert!(!cache.entries.contains_key("old"));
+		assert!(cache.total_bytes <= IMAGE_CACHE_MAX_BYTES);
+	}
+
 	#[test]
 	fn https_client_initializes_without_panicking() {
 		// A providerless TLS backend compiles but panics on the first proxy request.
@@ -233,6 +286,7 @@ fn mark_image_throttled(target: Option<&str>) {
 			gate.cooldown_until = new_until;
 		}
 		if let Some(target) = target {
+			gate.target_cooldowns.retain(|_, until| *until > now);
 			gate.target_cooldowns
 				.insert(target.to_owned(), now + PER_TARGET_COOLDOWN);
 		}
@@ -519,7 +573,6 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		// Retries exhausted: fail fast for further requests to this image.
 		mark_image_throttled(Some(&target));
 	}
-	drop(permit);
 
 	let mut passthrough = HeaderMap::new();
 	for name in [
@@ -547,6 +600,7 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 	let is_image = is_image_response(upstream_response.headers());
 
 	let bytes = upstream_response.bytes().await.map_err(|e| e.to_string())?;
+	drop(permit);
 
 	if cacheable_request
 		&& status == StatusCode::OK
@@ -569,7 +623,7 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 					CachedImage {
 						status: status.as_u16(),
 						headers,
-						body: Arc::new(bytes.to_vec()),
+						body: bytes.clone(),
 						etag: passthrough
 							.get("etag")
 							.and_then(|value| value.to_str().ok())

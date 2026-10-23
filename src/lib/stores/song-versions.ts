@@ -6,8 +6,9 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Song } from "@/contexts/player-context";
+import { LruCache } from "@/lib/utils/lru-cache";
 
-const replacements = new Map<string, Song>();
+const replacements = new LruCache<string, Song>(256);
 let snapshot: ReadonlyMap<string, Song> = new Map();
 const listeners = new Set<() => void>();
 

@@ -8,6 +8,7 @@ import {
 	YTNodes,
 } from "youtubei.js/web";
 import type { LrcLine } from "../lyrics/lrclib";
+import { LruCache } from "../utils/lru-cache";
 import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
@@ -142,14 +143,13 @@ export async function fetchFunction(
 		}
 	}
 
+	// Propagate SABR cancellation so skipped tracks stop retaining response buffers.
+	const controller = new AbortController();
+	const timeoutId = setTimeout(() => {
+		console.error("[fetchFunction] Request timed out after 30 seconds");
+		controller.abort();
+	}, 30000);
 	try {
-		// Add a timeout to prevent indefinite hangs
-		const controller = new AbortController();
-		const timeoutId = setTimeout(() => {
-			console.error("[fetchFunction] Request timed out after 30 seconds");
-			controller.abort();
-		}, 30000);
-
 		const proxyHeaders: Record<string, string> = {
 			"X-Proxy-Headers": JSON.stringify(headersObj),
 		};
@@ -162,7 +162,14 @@ export async function fetchFunction(
 			method: method,
 			headers: proxyHeaders,
 			body: body,
-			signal: controller.signal,
+			signal: AbortSignal.any([
+				controller.signal,
+				...(init?.signal
+					? [init.signal]
+					: input instanceof Request
+						? [input.signal]
+						: []),
+			]),
 		});
 
 		clearTimeout(timeoutId);
@@ -179,6 +186,8 @@ export async function fetchFunction(
 	} catch (error) {
 		console.error("[fetchFunction] Fetch failed:", error);
 		throw error;
+	} finally {
+		clearTimeout(timeoutId);
 	}
 }
 
@@ -1229,7 +1238,7 @@ export interface TrackMeta {
  * Session cache for queue metadata: it is locale-stable and costs a queue
  * fetch, so a track played, scrobbled and enriched only fetches it once.
  */
-const trackMetaCache = new Map<string, TrackMeta>();
+const trackMetaCache = new LruCache<string, TrackMeta>(256);
 const trackMetaRequests = new Map<string, Promise<TrackMeta | null>>();
 
 /**

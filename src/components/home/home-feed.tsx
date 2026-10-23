@@ -385,6 +385,9 @@ export function HomeFeed() {
 	const [sections, setSections] = useState<HomeSection[] | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
+	const [hasMore, setHasMore] = useState(false);
+	const loadMoreRef = useRef<(() => void) | null>(null);
+	const continuationRef = useRef<HTMLDivElement | null>(null);
 	const [expandedSections, setExpandedSections] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -519,29 +522,35 @@ export function HomeFeed() {
 				setFailed(false);
 				enrich(initial);
 
-				// YouTube Music paginates the home feed; keep appending until the
-				// continuation ends so every available row is shown.
-				for (
-					let page = 0;
-					page < MAX_HOME_CONTINUATION_PAGES && feed.has_continuation;
-					page++
-				) {
-					if (cancelled) return;
+				// Fetch additional pages only when the user approaches them to avoid
+				// retaining the full feed and decoding all of its artwork at startup.
+				let page = 0;
+				let loading = false;
+				loadMoreRef.current = async () => {
+					if (cancelled || loading || !feed.has_continuation) return;
+					loading = true;
 					setLoadingMore(true);
 					try {
 						feed = await feed.getContinuation();
+						page++;
+						if (cancelled) return;
+						const next = accept(homeSectionsFromFeed(feed));
+						if (next.length > 0) {
+							setSections((prev) => (prev ? [...prev, ...next] : next));
+							enrich(next);
+						}
+						setHasMore(
+							page < MAX_HOME_CONTINUATION_PAGES && feed.has_continuation,
+						);
 					} catch (error) {
 						console.warn("[HomeFeed] failed to load more sections:", error);
-						break;
+						if (!cancelled) setHasMore(false);
+					} finally {
+						loading = false;
+						if (!cancelled) setLoadingMore(false);
 					}
-					if (cancelled) return;
-					const next = accept(homeSectionsFromFeed(feed));
-					if (next.length > 0) {
-						totalSections += next.length;
-						setSections((prev) => (prev ? [...prev, ...next] : next));
-						enrich(next);
-					}
-				}
+				};
+				setHasMore(feed.has_continuation);
 			} catch (error) {
 				console.warn("[HomeFeed] failed to load recommendations:", error);
 				if (cancelled) return;
@@ -557,9 +566,24 @@ export function HomeFeed() {
 
 		return () => {
 			cancelled = true;
+			loadMoreRef.current = null;
 			for (const cancel of cancels) cancel();
 		};
 	}, []);
+
+	useEffect(() => {
+		const sentinel = continuationRef.current;
+		if (!sentinel || !hasMore || loadingMore) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((entry) => entry.isIntersecting))
+					loadMoreRef.current?.();
+			},
+			{ rootMargin: "600px" },
+		);
+		observer.observe(sentinel);
+		return () => observer.disconnect();
+	}, [hasMore, loadingMore]);
 
 	if (sections === null) {
 		if (isMobile) {
@@ -805,6 +829,9 @@ export function HomeFeed() {
 					<Loader2 className="size-4 animate-spin" />
 					Loading more sections…
 				</div>
+			)}
+			{hasMore && (
+				<div aria-hidden="true" className="h-px" ref={continuationRef} />
 			)}
 		</div>
 	);

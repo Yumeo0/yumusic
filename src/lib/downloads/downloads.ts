@@ -117,7 +117,7 @@ function getSnapshot(): DownloadsSnapshot {
 		}
 
 		snapshot = {
-			entries: new Map(entries),
+			entries,
 			failed,
 			jobs: new Map(jobs),
 			statuses: new Map(statuses),
@@ -234,11 +234,20 @@ async function pump() {
 async function runDownload(item: QueueItem): Promise<boolean> {
 	const { song } = item;
 	let cancelled = false;
-	current = { cancel: () => (cancelled = true), jobId: item.jobId, song };
+	let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+	let stream: SabrStream | null = null;
+	current = {
+		cancel: () => {
+			cancelled = true;
+			void reader?.cancel().catch(() => undefined);
+			void stream?.abort().catch(() => undefined);
+		},
+		jobId: item.jobId,
+		song,
+	};
 	statuses.set(song.id, { phase: "downloading", progress: null, song });
 	emit();
 
-	let stream: SabrStream | null = null;
 	let token: string | null = null;
 	let lastProgressEmit = 0;
 	try {
@@ -285,6 +294,8 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		};
 
 		stream = new SabrStream({
+			audioHighWaterMark: 256 * 1024,
+			videoHighWaterMark: 0,
 			videoId: result.videoId,
 			fetchFunction: fetchFunction as unknown as typeof fetch,
 			serverAbrStreamingUrl: await decipher(
@@ -317,8 +328,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		token = await invoke<string>("download_begin", { songId: song.id, ext });
 		if (cancelled) throw new Error("cancelled");
 
-		const reader =
-			audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+		reader = audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
 		let pending: Uint8Array[] = [];
 		let pendingBytes = 0;
 		let received = 0;
@@ -386,7 +396,6 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 				// best-effort cleanup
 			}
 		}
-		stream?.abort();
 		// Failures stay in the queue with a retry action instead of toasting.
 		if (!cancelled) {
 			statuses.set(song.id, { phase: "error", song });
@@ -396,6 +405,9 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		}
 		return false;
 	} finally {
+		void stream?.abort().catch(() => undefined);
+		await reader?.cancel().catch(() => undefined);
+		reader?.releaseLock();
 		// Clear the running slot *before* publishing. Emitting inside the
 		// try/catch still included `current`, so a finished single song stayed
 		// in the queue until some unrelated change re-rendered it (playlist

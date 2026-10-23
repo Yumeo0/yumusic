@@ -3,6 +3,7 @@ import {
 	applySongDescription,
 	titleNeedsDescription,
 } from "@/lib/utils/description";
+import { LruCache } from "@/lib/utils/lru-cache";
 import { formatTitleParts, splitDualTitle } from "@/lib/utils/title";
 import { isVideoId } from "./youtube.utils";
 import { getTrackMeta, getYoutubeClient } from "./youtube-client";
@@ -15,7 +16,7 @@ import { getTrackMeta, getYoutubeClient } from "./youtube-client";
  * after being enriched — or the same song in another playlist — never fetches
  * twice.
  */
-const resolved = new Map<string, string>();
+const resolved = new LruCache<string, string>(256);
 const inFlight = new Map<string, Promise<string | null>>();
 
 /** Fetches one description from the player response's short description. */
