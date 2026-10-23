@@ -171,6 +171,15 @@ fn client() -> &'static reqwest::Client {
 	CLIENT.get_or_init(reqwest::Client::new)
 }
 
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn https_client_initializes_without_panicking() {
+		// A providerless TLS backend compiles but panics on the first proxy request.
+		let _ = super::client();
+	}
+}
+
 /// Pacing state for artwork fetches: a global pause window when upstream
 /// signals 429, plus per-target fail-fast cooldowns. Concurrency is paced
 /// separately via [`image_semaphore`].

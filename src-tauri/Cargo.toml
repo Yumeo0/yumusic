@@ -6,7 +6,7 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.95"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -15,28 +15,30 @@ name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "=3.0.0-alpha.4", features = [] }
 
 [dependencies]
 base64 = "0.23"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.12.3", features = ["protocol-asset"] }
-tauri-plugin-log = "2"
-tauri-plugin-opener = "2"
-tauri-plugin-os = "2"
+tauri = { version = "=3.0.0-alpha.5", features = ["protocol-asset"] }
+tauri-runtime-wry = "=3.0.0-alpha.5"
+tauri-plugin-log = "=3.0.0-alpha.3"
+tauri-plugin-opener = "=3.0.0-alpha.3"
+tauri-plugin-os = "=3.0.0-alpha.3"
 playwire = "2"
 reqwest = { version = "0.13", default-features = false, features = [
   "http2",
+  "rustls",
 ] }
 tokio = { version = "1", features = ["sync", "time"] }
 discord-rich-presence = "1.1.0"
 
 # Self-updating is desktop-only; mobile builds must not pull the plugins in.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
+tauri-plugin-updater = "=3.0.0-alpha.3"
+tauri-plugin-process = "=3.0.0-alpha.3"
 
 # The native media session identifies the app by AUMID; setting it on the
 # process lets Windows resolve the name and icon from the installed shortcut.

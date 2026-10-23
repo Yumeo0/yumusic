@@ -166,6 +166,7 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
 	let builder = tauri::Builder::default()
+		.runtime(tauri_runtime_wry::Wry::default())
 		.plugin(tauri_plugin_opener::init())
 		.plugin(tauri_plugin_os::init());
 
