@@ -1,0 +1,33 @@
+# YuMusic
+
+A Tauri app for YouTube Music.
+
+## Development
+
+Install Bun 1.4.4 or newer, Rust, and the native build prerequisites for your
+platform. Bun handles dependencies, JavaScript tooling, tests, and release scripts.
+
+```sh
+bun install --frozen-lockfile
+bun run tauri dev
+```
+
+For the frontend alone, run `bun run dev`.
+
+```sh
+bun run build                         # Type-check and build the frontend
+bun run test                          # Run the test suite
+bun run lint                          # Check formatting and lint rules
+bun run tauri build                   # Build desktop bundles
+bun run build:android                 # Build Android APKs
+bun run release patch --no-push        # Create a local release commit and tag
+```
+
+The scripts invoke the Tauri, Vite, TypeScript, and Biome entry points directly
+with Bun, bypassing executable shims. Tauri's frontend hooks also force Bun.
+`bunfig.toml` applies the same runtime preference to nested commands. CI uses the
+Bun version recorded in `package.json`. The recommended Bun extension provides
+the VS Code debugging configuration.
+
+Restart an existing development session with `bun run tauri dev` after changing
+these scripts; already-running processes keep their original runtime.

@@ -15,9 +15,13 @@
 //                       build machine's platform)
 //   RELEASE_NOTES       optional override of the generated commit notes
 
-import { execFileSync } from "node:child_process";
-import { basename, join } from "node:path";
 import { file, Glob, write } from "bun";
+import { runGit } from "./git";
+
+/** Artifact paths can come from either a Windows or Linux build runner. */
+function basename(path: string): string {
+	return path.split(/[\\/]/).pop() ?? path;
+}
 
 interface ForgejoAsset {
 	id: number;
@@ -87,8 +91,7 @@ async function findRelease(name: string): Promise<ForgejoRelease | null> {
 function releaseNotes(): string {
 	let previous = "";
 	try {
-		const tags = execFileSync("git", ["tag", "-l", "v*", "--sort=-v:refname"])
-			.toString()
+		const tags = runGit(["tag", "-l", "v*", "--sort=-v:refname"])
 			.split("\n")
 			.map((line) => line.trim())
 			.filter(Boolean);
@@ -99,9 +102,7 @@ function releaseNotes(): string {
 	const range = previous ? `${previous}..${tag}` : tag;
 	let log = "";
 	try {
-		log = execFileSync("git", ["log", range, "--pretty=format:- %s"])
-			.toString()
-			.trim();
+		log = runGit(["log", range, "--pretty=format:- %s"]);
 	} catch {
 		// ignore
 	}
@@ -160,7 +161,7 @@ async function uploadJson(
 	name: string,
 	value: unknown,
 ) {
-	const temporary = join(process.env.BUNDLE_DIR ?? ".", name);
+	const temporary = `${process.env.BUNDLE_DIR ?? "."}/${name}`;
 	await write(temporary, `${JSON.stringify(value, null, 2)}\n`);
 	await upload(release, temporary, name);
 }

@@ -5,11 +5,10 @@
 // commit and pushes the branch and tag so the release workflow builds and
 // publishes the signed bundles and updater manifest. Pass --no-push to keep
 // the commit and tag local.
-import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { file, fileURLToPath, write } from "bun";
+import { runGit } from "./git";
 
-const ROOT = join(import.meta.dir, "..");
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const BUMPS = ["patch", "minor", "major"] as const;
 type Bump = (typeof BUMPS)[number];
 
@@ -20,15 +19,12 @@ function fail(message: string): never {
 
 /** Runs git and captures its output. */
 function git(...args: string[]): string {
-	return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
+	return runGit(args, { cwd: ROOT });
 }
 
 /** Runs git with its output going straight to the terminal. */
 function gitInherit(...args: string[]) {
-	execFileSync("git", args, {
-		cwd: ROOT,
-		stdio: ["ignore", "inherit", "inherit"],
-	});
+	runGit(args, { cwd: ROOT, inherit: true });
 }
 
 function bumpVersion(version: string, bump: Bump): string {
@@ -40,13 +36,10 @@ function bumpVersion(version: string, bump: Bump): string {
 	return `${major}.${minor}.${patch + 1}`;
 }
 
-function updateJsonVersion(path: string, version: string) {
-	const json = JSON.parse(readFileSync(path, "utf8")) as Record<
-		string,
-		unknown
-	>;
+async function updateJsonVersion(path: URL, version: string) {
+	const json = (await file(path).json()) as Record<string, unknown>;
 	json.version = version;
-	writeFileSync(path, `${JSON.stringify(json, null, "\t")}\n`);
+	await write(path, `${JSON.stringify(json, null, "\t")}\n`);
 }
 
 const args = process.argv.slice(2);
@@ -63,28 +56,30 @@ if (git("status", "--porcelain")) {
 	fail("Working tree is not clean — commit or stash your changes first.");
 }
 
-const packagePath = join(ROOT, "package.json");
-const current = (
-	JSON.parse(readFileSync(packagePath, "utf8")) as { version: string }
-).version;
+const packagePath = new URL("../package.json", import.meta.url);
+const current = ((await file(packagePath).json()) as { version: string })
+	.version;
 const version = bumpVersion(current, bump);
 const tag = `v${version}`;
 if (git("tag", "-l", tag)) {
 	fail(`Tag ${tag} already exists.`);
 }
 
-updateJsonVersion(packagePath, version);
-updateJsonVersion(join(ROOT, "src-tauri", "tauri.conf.json"), version);
+await updateJsonVersion(packagePath, version);
+await updateJsonVersion(
+	new URL("../src-tauri/tauri.conf.json", import.meta.url),
+	version,
+);
 
-const cargoPath = join(ROOT, "src-tauri", "Cargo.toml");
-const cargo = readFileSync(cargoPath, "utf8").replace(
+const cargoPath = new URL("../src-tauri/Cargo.toml", import.meta.url);
+const cargo = (await file(cargoPath).text()).replace(
 	/^version = "[^"]*"/m,
 	`version = "${version}"`,
 );
-writeFileSync(cargoPath, cargo);
+await write(cargoPath, cargo);
 
-const lockPath = join(ROOT, "src-tauri", "Cargo.lock");
-const lock = readFileSync(lockPath, "utf8");
+const lockPath = new URL("../src-tauri/Cargo.lock", import.meta.url);
+const lock = await file(lockPath).text();
 const updatedLock = lock.replace(
 	/(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(?=")/,
 	`$1${version}`,
@@ -92,7 +87,7 @@ const updatedLock = lock.replace(
 if (updatedLock === lock) {
 	fail("Could not find the app package in src-tauri/Cargo.lock.");
 }
-writeFileSync(lockPath, updatedLock);
+await write(lockPath, updatedLock);
 
 gitInherit(
 	"add",

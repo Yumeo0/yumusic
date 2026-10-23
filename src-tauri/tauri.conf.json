@@ -6,8 +6,8 @@
 	"build": {
 		"frontendDist": "../dist",
 		"devUrl": "http://localhost:5173",
-		"beforeDevCommand": "bun run dev",
-		"beforeBuildCommand": "bun run build"
+		"beforeDevCommand": "bun --bun run dev",
+		"beforeBuildCommand": "bun --bun run build"
 	},
 	"app": {
 		"windows": [
@@ -26,9 +26,7 @@
 			"csp": null,
 			"assetProtocol": {
 				"enable": true,
-				"scope": [
-					"$APPDATA/downloads/**"
-				]
+				"scope": ["$APPDATA/downloads/**"]
 			}
 		}
 	},

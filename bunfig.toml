@@ -1,0 +1,3 @@
+[run]
+# Run CLI shebangs and nested scripts with Bun on every platform.
+bun = true

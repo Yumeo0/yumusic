@@ -7,7 +7,7 @@ name: Build and Release
 #
 # Required repository secret:
 #   TAURI_SIGNING_PRIVATE_KEY  content of the private updater key
-# Generate a keypair with `bunx tauri signer generate -w ~/.tauri/yumusic.key`
+# Generate a keypair with `bun run tauri signer generate -w ~/.tauri/yumusic.key`
 # and put its public key into `plugins.updater.pubkey` in tauri.conf.json.
 # The key used here has no password. If you regenerate it with one, add a
 # TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret and pass it to the build step.
@@ -51,7 +51,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install base dependencies
         if: runner.os == 'Linux'
@@ -122,11 +122,10 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           export VERSION
-          bun -e "import { readFileSync, writeFileSync } from 'node:fs';
-            for (const file of ['package.json', 'src-tauri/tauri.conf.json']) {
-              const json = JSON.parse(readFileSync(file, 'utf8'));
+          bun -e "for (const path of ['package.json', 'src-tauri/tauri.conf.json']) {
+              const json = await Bun.file(path).json();
               json.version = process.env.VERSION;
-              writeFileSync(file, JSON.stringify(json, null, 2) + '\n');
+              await Bun.write(path, JSON.stringify(json, null, 2) + '\n');
             }"
           sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
           echo "Building YuMusic $VERSION"
@@ -141,7 +140,7 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: bunx tauri build --bundles ${{ matrix.bundles }}
+        run: bun run tauri build --bundles ${{ matrix.bundles }}
 
       - name: Publish release assets
         shell: bash
@@ -171,7 +170,7 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Update latest.json
         env:

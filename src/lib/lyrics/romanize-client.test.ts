@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { setTimeout as delay } from "node:timers/promises";
+import { sleep as delay } from "bun";
 import { RomanizeClient } from "./romanize-client";
 
 class FakeWorker {

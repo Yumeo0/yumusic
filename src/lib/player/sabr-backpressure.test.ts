@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { setTimeout as delay } from "node:timers/promises";
+import { sleep as delay } from "bun";
 import { SabrStream } from "googlevideo/sabr-stream";
 
 test("SABR pauses its network timeout while the player applies backpressure", async () => {
