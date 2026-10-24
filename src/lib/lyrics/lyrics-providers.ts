@@ -7,7 +7,8 @@ export type LyricsProviderId =
 	| "musixmatch"
 	| "youtube"
 	| "vocadb"
-	| "lrcred";
+	| "lrcred"
+	| "genius";
 
 /**
  * How detailed a provider's lyrics are, simplest first. "word" is reserved
@@ -56,10 +57,17 @@ export const LYRICS_PROVIDERS: readonly LyricsProvider[] = [
 		attribution: "lrc.red",
 		kinds: ["word", "synced", "plain"],
 	},
+	{ id: "genius", label: "Genius", attribution: "Genius", kinds: ["plain"] },
 ];
 
-export const DEFAULT_LYRICS_PROVIDER_ORDER: LyricsProviderId[] =
-	LYRICS_PROVIDERS.map((provider) => provider.id);
+export const DEFAULT_LYRICS_PROVIDER_ORDER: LyricsProviderId[] = [
+	"youtube",
+	"lrclib",
+	"musixmatch",
+	"lrcred",
+	"genius",
+	"vocadb",
+];
 
 const VALID_IDS = new Set<LyricsProviderId>(DEFAULT_LYRICS_PROVIDER_ORDER);
 

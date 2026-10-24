@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { LrcLine } from "./lrclib";
-import { lyricsKind, pickProvider } from "./lyrics-providers";
+import {
+	DEFAULT_LYRICS_PROVIDER_ORDER,
+	lyricsKind,
+	normalizeProviderOrder,
+	pickProvider,
+} from "./lyrics-providers";
 
 interface TestLyrics {
 	synced: LrcLine[] | null;
@@ -25,6 +30,35 @@ function plain(confirmed = true): TestLyrics {
 }
 
 const ORDER = ["lrclib", "musixmatch", "lrcred"] as const;
+
+describe("Genius provider preferences", () => {
+	test("adds Genius after existing saved preferences without changing their order", () => {
+		const saved = [
+			"vocadb",
+			"lrcred",
+			"youtube",
+			"musixmatch",
+			"lrclib",
+		] as const;
+		expect(normalizeProviderOrder(saved)).toEqual([...saved, "genius"]);
+	});
+	test("keeps the requested default order with Genius before VocaDB", () => {
+		expect(DEFAULT_LYRICS_PROVIDER_ORDER).toEqual([
+			"youtube",
+			"lrclib",
+			"musixmatch",
+			"lrcred",
+			"genius",
+			"vocadb",
+		]);
+		expect(normalizeProviderOrder(["genius", "genius", "invalid"])[0]).toBe(
+			"genius",
+		);
+		expect(normalizeProviderOrder(undefined)).toEqual(
+			DEFAULT_LYRICS_PROVIDER_ORDER,
+		);
+	});
+});
 
 describe("lyricsKind", () => {
 	test("reads the timing level from the payload", () => {

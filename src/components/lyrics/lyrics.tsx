@@ -10,6 +10,7 @@ import {
 	useState,
 } from "react";
 import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
+import { fetchGeniusLyrics } from "@/lib/lyrics/genius";
 import {
 	fetchSyncedLyrics,
 	type LrcLine,
@@ -70,6 +71,7 @@ const PENDING_SOURCES: LyricsSources = {
 	vocadb: undefined,
 	youtube: undefined,
 	lrcred: undefined,
+	genius: undefined,
 };
 
 /** Tooltips for the sync-kind badge in the header. */
@@ -82,7 +84,7 @@ const KIND_TITLES: Record<LyricsKind, string> = {
 /**
  * Full-height lyrics panel. Fetches synced lyrics (LRCLIB, Musixmatch,
  * lrc.red, and YouTube Music's timed lyrics) plus static YouTube Music and
- * VocaDB lyrics in parallel, lets the user switch between the providers,
+ * VocaDB and Genius lyrics in parallel, lets the user switch between providers,
  * optionally shows romanization under each line, and falls back to a quiet
  * placeholder when nothing is available.
  */
@@ -146,6 +148,7 @@ export function LyricsPanel({
 			fetchLrcRedLyrics(title, artist, duration),
 			(lrcred) => lrcred,
 		);
+		settle("genius", fetchGeniusLyrics(title, artist), (genius) => genius);
 
 		return () => {
 			cancelled = true;
