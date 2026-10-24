@@ -9,6 +9,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { LyricSectionHeading } from "@/components/lyrics/lyric-section";
 import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
 import { fetchGeniusLyrics } from "@/lib/lyrics/genius";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/lib/lyrics/lyrics-providers";
 import { fetchMusixmatchSynced } from "@/lib/lyrics/musixmatch";
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
+import { parseLyricSection } from "@/lib/lyrics/sections";
 import { fetchVocadbLyrics } from "@/lib/lyrics/vocadb";
 import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
@@ -280,7 +282,14 @@ function SyncedLines({
 	const anchorRefs = useRef<Array<HTMLElement | null>>([]);
 	// Pauses auto-scroll briefly while the user scrolls manually
 	const holdUntilRef = useRef(0);
-	const lineTexts = useMemo(() => lines.map((l) => l.text), [lines]);
+	const sections = useMemo(
+		() => lines.map((line) => parseLyricSection(line.text)),
+		[lines],
+	);
+	const lineTexts = useMemo(
+		() => lines.map((line, index) => (sections[index] ? "" : line.text)),
+		[lines, sections],
+	);
 	const romanized = useRomanizedLines(lineTexts, romanize);
 	// Romaji spacing stays reserved while pending; dropped once there is
 	// nothing to show (Latin-script lyrics, or every reading matches).
@@ -390,12 +399,9 @@ function SyncedLines({
 	};
 
 	// Stable so the memoized lines don't all re-render on every clock tick.
-	const setAnchor = useCallback(
-		(index: number, el: HTMLParagraphElement | null) => {
-			anchorRefs.current[index] = el;
-		},
-		[],
-	);
+	const setAnchor = useCallback((index: number, el: HTMLElement | null) => {
+		anchorRefs.current[index] = el;
+	}, []);
 
 	return (
 		<div
@@ -438,6 +444,18 @@ function SyncedLines({
 						);
 					}
 					const line = lines[seg.index];
+					const section = sections[seg.index];
+					if (section) {
+						return (
+							<LyricSectionHeading
+								headingRef={(element) => setAnchor(seg.index, element)}
+								isActive={seg.index === activeIndex}
+								key={`section-${seg.index}`}
+								onSeek={() => onSeekTime(line.time)}
+								section={section}
+							/>
+						);
+					}
 					if (line.words && line.words.length > 0) {
 						return (
 							<WordSyncLyricLine
@@ -715,9 +733,22 @@ function LyricsLines({
 	romanize: boolean;
 	attribution?: string;
 }) {
-	const lines = useMemo(() => text.split("\n"), [text]);
-	const romanized = useRomanizedLines(lines, romanize);
+	const lines = useMemo(
+		() =>
+			text
+				.split("\n")
+				.map((text) => ({ text, section: parseLyricSection(text) })),
+		[text],
+	);
+	const lineTexts = useMemo(
+		() => lines.map((line) => (line.section ? "" : line.text)),
+		[lines],
+	);
+	const romanized = useRomanizedLines(lineTexts, romanize);
 	const showRomaji = romanize && romanized?.size !== 0;
+	const firstLyricIndex = lines.findIndex(
+		(line) => line.text.trim() !== "" && !line.section,
+	);
 
 	return (
 		<div
@@ -725,8 +756,11 @@ function LyricsLines({
 			data-swipe-dismiss-ignore
 		>
 			<div className="pb-24 pt-10">
-				{lines.map((line, i) =>
-					line.trim() === "" ? (
+				{lines.map(({ text: line, section }, i) =>
+					section ? (
+						// biome-ignore lint/suspicious/noArrayIndexKey: section positions stay fixed within a lyrics payload
+						<LyricSectionHeading key={`section-${i}`} section={section} />
+					) : line.trim() === "" ? (
 						// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
 						<div className="h-5" key={`gap-${i}`} />
 					) : (
@@ -734,7 +768,7 @@ function LyricsLines({
 							className={cn(
 								"cursor-default text-[26px] leading-snug font-medium tracking-tight text-foreground/25 transition-colors duration-200 hover:text-foreground",
 								showRomaji ? "py-3" : "py-2.5",
-								i === 0 && "text-foreground/70",
+								i === firstLyricIndex && "text-foreground/70",
 							)}
 							// biome-ignore lint/suspicious/noArrayIndexKey: static lyrics lines, list never reorders
 							key={`line-${i}`}
