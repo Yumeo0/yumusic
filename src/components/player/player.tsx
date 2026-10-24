@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { type RefObject, useRef } from "react";
 import { RatingButtons } from "@/components/player/rating-buttons";
+import { RepeatButton } from "@/components/player/repeat-button";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -184,6 +185,7 @@ export function Player() {
 				{/* Timecodes + queue + volume (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
+					<RepeatButton />
 					<MiniTime
 						knownDuration={knownDuration}
 						songId={currentSong.id}
@@ -216,7 +218,7 @@ export function Player() {
 					</button>
 					{/* Volume interactions must not open the fullscreen */}
 					<div className="player-ctl" onClick={(e) => e.stopPropagation()}>
-						<VolumeControl />
+						<VolumeControl vertical />
 					</div>
 				</div>
 			</div>

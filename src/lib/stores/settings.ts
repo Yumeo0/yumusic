@@ -4,6 +4,7 @@ import {
 	type LyricsProviderId,
 	normalizeProviderOrder,
 } from "../lyrics/lyrics-providers";
+import { normalizeRepeatMode, type RepeatMode } from "../player/repeat";
 import { normalizeHiddenHomeSections } from "./home-sections";
 
 export type TitleMode = "both" | "original" | "translation";
@@ -39,6 +40,8 @@ export interface Settings {
 	hiddenHomeSections: string[];
 	/** Keep playing similar songs when the queue ends. */
 	autoplay: boolean;
+	/** Repeat the current song, the whole queue, or neither. */
+	repeatMode: RepeatMode;
 	/** Fade the end of a song into the start of the next one. */
 	crossfade: boolean;
 	/** Crossfade overlap length in seconds (clamped to the CROSSFADE_* bounds). */
@@ -68,6 +71,7 @@ const DEFAULTS: Settings = {
 	lrclibLooseMatch: true,
 	hiddenHomeSections: [],
 	autoplay: true,
+	repeatMode: "off",
 	crossfade: true,
 	crossfadeSeconds: CROSSFADE_DEFAULT_SECONDS,
 	downloadedPlaylists: [],
@@ -87,6 +91,7 @@ export function getSettings(): Settings {
 		return {
 			...DEFAULTS,
 			...stored,
+			repeatMode: normalizeRepeatMode(stored.repeatMode),
 			hiddenHomeSections: normalizeHiddenHomeSections(
 				stored.hiddenHomeSections,
 				hideTodaysBiggestHits,

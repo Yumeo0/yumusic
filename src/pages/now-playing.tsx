@@ -20,6 +20,7 @@ import {
 } from "react";
 import { LyricsPanel } from "@/components/lyrics/lyrics";
 import { RatingButtons } from "@/components/player/rating-buttons";
+import { RepeatButton } from "@/components/player/repeat-button";
 import { VolumeControl } from "@/components/player/volume-control";
 import { ProgressBar } from "@/components/player/waveform";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -69,6 +70,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		currentSong,
 		queue,
 		currentIndex,
+		repeatMode,
 		autoplayTracks,
 		next,
 		previous,
@@ -84,11 +86,20 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 	// The up-next stack tucks up to three upcoming tracks under the next card
 	// and slides them out on hover. It reserves no height: the stack grows to
 	// fit its cards when revealed, pushing the content below it. When the queue
-	// has nothing left, the section falls back to the autoplay radio so it
-	// shows what will actually play next.
-	const hasQueuedNext = queue.length > currentIndex + 1;
+	// has nothing left, repeat wraps it before falling back to autoplay.
+	const nextQueueStart =
+		repeatMode === "one"
+			? currentIndex
+			: queue.length > currentIndex + 1
+				? currentIndex + 1
+				: repeatMode === "all" && queue.length > 0
+					? 0
+					: null;
+	const hasQueuedNext = nextQueueStart !== null && nextQueueStart >= 0;
 	const upNext = hasQueuedNext
-		? queue.slice(currentIndex + 1, currentIndex + 4)
+		? repeatMode === "one" && currentSong
+			? [currentSong]
+			: queue.slice(nextQueueStart, nextQueueStart + 3)
 		: autoplayTracks.slice(0, 3);
 	const upNextTucked = upNext.slice(1);
 	const upNextIsAutoplay = !hasQueuedNext && upNext.length > 0;
@@ -290,7 +301,11 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							</p>
 							{hasQueuedNext ? (
 								<p className="text-[11px] text-muted-foreground/60">
-									{queue.length - currentIndex - 1} in queue
+									{repeatMode === "one"
+										? "Loop single song"
+										: repeatMode === "all"
+											? "Loop playlist"
+											: `${queue.length - currentIndex - 1} in queue`}
 								</p>
 							) : upNextIsAutoplay ? (
 								<p className="text-[11px] text-muted-foreground/60">Autoplay</p>
@@ -303,7 +318,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 										onPlay={() =>
 											hasQueuedNext ? play(upNext[0]) : playAutoplayAt(0)
 										}
-										queueIndex={hasQueuedNext ? currentIndex + 1 : undefined}
+										queueIndex={hasQueuedNext ? nextQueueStart : undefined}
 										song={upNext[0]}
 									/>
 								</div>
@@ -315,7 +330,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 											)}
 											key={
 												hasQueuedNext
-													? `queue-${song.id}-${currentIndex + 2 + k}`
+													? `queue-${song.id}-${nextQueueStart + 1 + k}`
 													: `auto-${song.id}-${k}`
 											}
 											style={{
@@ -328,7 +343,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 													hasQueuedNext ? play(song) : playAutoplayAt(k + 1)
 												}
 												queueIndex={
-													hasQueuedNext ? currentIndex + 2 + k : undefined
+													hasQueuedNext ? nextQueueStart + 1 + k : undefined
 												}
 												song={song}
 											/>
@@ -744,27 +759,8 @@ function TransportRow({
 	showLyrics: boolean;
 	songId: string;
 }) {
-	// Width the row needs before the volume slider may expand sideways: the
-	// transport (176px) plus the expanded volume control (124px) on both
-	// sides. Narrower rows get the vertical popover instead.
-	const rowRef = useRef<HTMLDivElement>(null);
-	const [narrow, setNarrow] = useState(false);
-	useLayoutEffect(() => {
-		const row = rowRef.current;
-		if (!row) return;
-		const update = () => setNarrow(row.clientWidth < 440);
-		update();
-		if (typeof ResizeObserver === "undefined") {
-			window.addEventListener("resize", update);
-			return () => window.removeEventListener("resize", update);
-		}
-		const observer = new ResizeObserver(update);
-		observer.observe(row);
-		return () => observer.disconnect();
-	}, []);
-
 	return (
-		<div className="flex w-full max-w-md items-center" ref={rowRef}>
+		<div className="flex w-full max-w-md items-center">
 			{/* Left slot: the rating pair on desktop, the lyrics toggle on
 			    mobile (where the top-right chrome carries the ratings). */}
 			<div className="flex min-w-0 flex-1 items-center justify-start">
@@ -832,16 +828,11 @@ function TransportRow({
 				</button>
 			</div>
 
-			{/* Right slot: volume. It expands leftward on hover; when the row
-			    is too narrow for that it pops up vertically over a backdrop
-			    instead. Hidden on touch devices, where the hardware volume
-			    keys apply, but shown on narrow desktop windows too. */}
+			{/* The volume popover opens above its icon so the repeat button and
+			    centered transport stay fixed. Touch devices use hardware volume. */}
 			<div className="flex min-w-0 flex-1 items-center justify-end">
-				<VolumeControl
-					className="pointer-coarse:hidden"
-					reverse
-					vertical={narrow}
-				/>
+				<RepeatButton className="size-11" />
+				<VolumeControl className="pointer-coarse:hidden" vertical />
 			</div>
 		</div>
 	);

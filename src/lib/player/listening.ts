@@ -30,6 +30,15 @@ class ListeningSession {
 	#scrobbled = false;
 	#listeners = new Set<Listener>();
 
+	/** A repeated song counts as a fresh listen even though its id is unchanged. */
+	reset() {
+		this.#songId = null;
+		this.#elapsed = 0;
+		this.#duration = 0;
+		this.#established = false;
+		this.#scrobbled = false;
+	}
+
 	/**
 	 * Starts tracking `songId`, resetting progress for a new track. Repeated
 	 * calls for the same track keep the accumulated time (e.g. after a pause).

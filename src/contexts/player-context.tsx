@@ -17,6 +17,7 @@ import {
 	getDownloadEntry,
 } from "@/lib/downloads/downloads";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
+import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
@@ -97,6 +98,8 @@ interface PlayerContextType {
 	removeFromQueueAt: (index: number) => void;
 	/** Shuffles the tracks after the current one; playback stays untouched. */
 	shuffleQueue: () => void;
+	repeatMode: RepeatMode;
+	setRepeatMode: (mode: RepeatMode) => void;
 	next: () => void;
 	previous: () => void;
 	hasNext: boolean;
@@ -257,6 +260,8 @@ interface CrossfadeState {
 	seconds: number;
 	/** Next song comes from the autoplay radio and gets promoted to the queue. */
 	promote: boolean;
+	/** Queue position to select, including a playlist wrap to zero. */
+	nextIndex: number;
 	/**
 	 * Advances the ramp one step. Called by rAF while the window renders and
 	 * again on every timeupdate, so a backgrounded window (where rAF is
@@ -286,7 +291,12 @@ function pickArtwork(
 }
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
-	const [settings] = useSettings();
+	const [settings, updateSettings] = useSettings();
+	const repeatMode = settings.repeatMode;
+	const setRepeatMode = useCallback(
+		(mode: RepeatMode) => updateSettings({ repeatMode: mode }),
+		[updateSettings],
+	);
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
 	const [isPlaying, setIsPlaying] = useState(false);
 	const [videoInfo, setVideoInfo] = useState<YT.VideoInfo | null>(null);
@@ -546,7 +556,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			nextEl.volume = volumeRef.current;
 
 			setHistory((prev) => [...prev.slice(-99), state.fromSong]);
-			setCurrentIndex((index) => index + 1);
+			setCurrentIndex(state.nextIndex);
 			if (state.promote) {
 				setQueueState((prev) => [...prev, state.nextSong]);
 				setAutoplayTracks((prev) => prev.slice(1));
@@ -667,6 +677,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			promote: boolean,
 			seconds: number,
 			fromSong: Song,
+			nextIndex: number,
 		) => {
 			if (crossfadeRef.current) return;
 			const deckIndex = activeDeckRef.current === 0 ? 1 : 0;
@@ -688,6 +699,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				originalId: nextSong.id,
 				phase: "preload",
 				promote,
+				nextIndex,
 				result: null,
 				seconds,
 			};
@@ -759,15 +771,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			? clampCrossfadeSeconds(settings.crossfadeSeconds)
 			: 0;
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
-		if (!seconds || !isPlaying || !currentSong || !activeEl) {
+		if (
+			!seconds ||
+			!isPlaying ||
+			!currentSong ||
+			!activeEl ||
+			repeatMode === "one"
+		) {
 			abortCrossfade();
 			return;
 		}
 
 		// The song that will play next, mirroring next(): queue first, then
 		// the autoplay radio (whose first track gets promoted to the queue).
-		const queuedNext =
-			currentIndex < queue.length - 1 ? queue[currentIndex + 1] : null;
+		const nextIndex = nextQueueIndex(currentIndex, queue.length, repeatMode);
+		const queuedNext = nextIndex !== null ? queue[nextIndex] : null;
 		const nextSong =
 			queuedNext ?? (settings.autoplay ? (autoplayTracks[0] ?? null) : null);
 
@@ -775,8 +793,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		// The queue changed under an armed crossfade; re-evaluate from scratch.
 		// Compared against the queued id: the state's song may already be the
 		// album track of that entry.
-		if (state && (!nextSong || nextSong.id !== state.originalId)) {
+		if (
+			state &&
+			(!nextSong ||
+				nextSong.id !== state.originalId ||
+				state.nextIndex !== (nextIndex ?? queue.length))
+		) {
 			abortCrossfade();
+		}
+		// Replaying a single-entry playlist starts at its natural end.
+		if (nextIndex === currentIndex) {
+			abortCrossfade();
+			return;
 		}
 
 		const duration = activeEl.duration;
@@ -791,7 +819,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		const armed = crossfadeRef.current;
 		if (!armed) {
-			void armCrossfade(nextSong, queuedNext === null, seconds, currentSong);
+			void armCrossfade(
+				nextSong,
+				queuedNext === null,
+				seconds,
+				currentSong,
+				nextIndex ?? queue.length,
+			);
 			return;
 		}
 		// rAF is paused while the window is hidden; timeupdate (which keeps
@@ -814,6 +848,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		settings.crossfade,
 		settings.crossfadeSeconds,
 		settings.autoplay,
+		repeatMode,
 		isPlaying,
 		currentSong,
 		currentIndex,
@@ -1218,13 +1253,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const next = useCallback(async () => {
-		if (currentIndex >= queue.length - 1) {
+		const nextIndex = nextQueueIndex(currentIndex, queue.length, repeatMode);
+		if (nextIndex === null) {
 			// Queue finished: move into the autoplay section. Use the visible
 			// suggestions when present, otherwise fetch a mix now.
-			if (!currentSong) return;
+			if (!currentSong || !settings.autoplay) return;
 			let upcoming = autoplayTracks;
 			if (upcoming.length === 0) {
-				if (!settings.autoplay || autoplayLoadingRef.current) return;
+				if (autoplayLoadingRef.current) return;
 				autoplayLoadingRef.current = true;
 				try {
 					upcoming = await getAutoplaySongs(currentSong.id);
@@ -1244,7 +1280,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			return;
 		}
 
-		const nextIndex = currentIndex + 1;
 		const nextSong = queue[nextIndex];
 
 		// Add current song to history
@@ -1259,6 +1294,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		queue,
 		currentSong,
 		settings.autoplay,
+		repeatMode,
 		playSong,
 		autoplayTracks,
 	]);
@@ -1271,6 +1307,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const handleEnded = useCallback(
 		(deckIndex: number) => {
 			if (deckIndex !== activeDeckRef.current) return;
+			const nextIndex = nextQueueIndex(
+				currentIndex,
+				queue.length,
+				repeatMode,
+				true,
+			);
+			if (currentSong && (repeatMode === "one" || nextIndex === currentIndex)) {
+				listeningSession.reset();
+				void playSong(currentSong);
+				return;
+			}
 			const state = crossfadeRef.current;
 			if (state?.phase === "fading") {
 				// The fade follows the audio clock, so if the track ran out
@@ -1279,9 +1326,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				commitCrossfade(state);
 				return;
 			}
+			setIsPlaying(false);
 			void next();
 		},
-		[commitCrossfade, next],
+		[
+			commitCrossfade,
+			next,
+			currentIndex,
+			queue.length,
+			repeatMode,
+			currentSong,
+			playSong,
+		],
 	);
 
 	// The provider owns both decks; free their streams when it goes away.
@@ -1294,8 +1350,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	const previous = useCallback(async () => {
 		// Try to go back in queue first
-		if (currentIndex > 0) {
-			const prevIndex = currentIndex - 1;
+		if (currentIndex > 0 || (repeatMode === "all" && queue.length > 0)) {
+			const prevIndex = currentIndex > 0 ? currentIndex - 1 : queue.length - 1;
 			const prevSong = queue[prevIndex];
 
 			// Add current song to history
@@ -1322,7 +1378,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 		setHistory(newHistory);
 		await playSong(previousSong);
-	}, [currentIndex, queue, history, currentSong, playSong]);
+	}, [currentIndex, queue, history, currentSong, playSong, repeatMode]);
 
 	const playAutoplayAt = useCallback(
 		(index: number) => {
@@ -1395,8 +1451,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const toggle = useCallback(() => setIsPlaying((playing) => !playing), []);
 
 	const hasNext =
-		currentIndex < queue.length - 1 || (settings.autoplay && !!currentSong);
-	const hasPrevious = currentIndex > 0 || history.length > 0;
+		nextQueueIndex(currentIndex, queue.length, repeatMode) !== null ||
+		(settings.autoplay && !!currentSong);
+	const hasPrevious =
+		currentIndex > 0 ||
+		history.length > 0 ||
+		(repeatMode === "all" && queue.length > 0);
 	const duration =
 		parseDuration(currentSong?.duration) || videoInfo?.basic_info.duration || 0;
 
@@ -1416,6 +1476,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			playNext,
 			removeFromQueueAt,
 			shuffleQueue,
+			repeatMode,
+			setRepeatMode,
 			next,
 			previous,
 			hasNext,
@@ -1439,6 +1501,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			playNext,
 			removeFromQueueAt,
 			shuffleQueue,
+			repeatMode,
+			setRepeatMode,
 			next,
 			previous,
 			hasNext,
