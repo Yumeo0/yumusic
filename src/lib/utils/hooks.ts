@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DEFAULT_AMBIENT_COLOR, dominantAccentColor } from "./ambient-color";
 import { LruCache } from "./lru-cache";
 import { proxiedImageUrl } from "./tauri";
 
@@ -100,7 +101,8 @@ export function useMediaTime(
 
 /* ─── Ambient album color extraction ─────────────────────────── */
 
-const AMBIENT_STORAGE_KEY = "yumusic-ambient-colors";
+// Frequency-based extraction replaces the old single-pixel cached colors.
+const AMBIENT_STORAGE_KEY = "yumusic-ambient-colors:v2";
 const AMBIENT_MAX_ENTRIES = 256;
 
 const ambientCache = new LruCache<string, string>(AMBIENT_MAX_ENTRIES);
@@ -140,35 +142,6 @@ function persistAmbientCache() {
 	}
 }
 
-function boostColor(r: number, g: number, b: number): string {
-	// Pick the most vivid pixel: score by saturation + brightness
-	const max = Math.max(r, g, b) || 1;
-	const min = Math.min(r, g, b);
-	const sat = (max - min) / max;
-	// Scale so the color works as an accent on a dark background:
-	// not blinding bright, not invisible dark
-	const target = 205;
-	const scale = Math.min(target / max, 2.6);
-	let nr = Math.round(Math.min(255, r * scale));
-	let ng = Math.round(Math.min(255, g * scale));
-	let nb = Math.round(Math.min(255, b * scale));
-	// Lift very dark colors just enough to stay visible
-	const lum = 0.2126 * nr + 0.7152 * ng + 0.0722 * nb;
-	if (lum < 80) {
-		const lift = Math.min(80 / Math.max(lum, 1), 1.8);
-		nr = Math.round(Math.min(255, nr * lift + 12));
-		ng = Math.round(Math.min(255, ng * lift + 12));
-		nb = Math.round(Math.min(255, nb * lift + 12));
-	}
-	// Blend a touch of warmth so near-grayscale covers still feel at home
-	if (sat < 0.18) {
-		nr = Math.round(nr * 0.92 + 24);
-		ng = Math.round(ng * 0.8 + 18);
-		nb = Math.round(nb * 0.45 + 8);
-	}
-	return `rgb(${nr}, ${ng}, ${nb})`;
-}
-
 function extractDominantColor(
 	bitmap: ImageBitmap | HTMLImageElement,
 ): string | null {
@@ -180,18 +153,7 @@ function extractDominantColor(
 	if (!ctx) return null;
 	ctx.drawImage(bitmap, 0, 0, size, size);
 	const { data } = ctx.getImageData(0, 0, size, size);
-	let best = { score: -1, r: 255, g: 19, b: 74 };
-	for (let i = 0; i < data.length; i += 4) {
-		const r = data[i];
-		const g = data[i + 1];
-		const b = data[i + 2];
-		const max = Math.max(r, g, b);
-		const min = Math.min(r, g, b);
-		const sat = max === 0 ? 0 : (max - min) / max;
-		const score = sat * 1.7 + (max / 255) * 0.5;
-		if (score > best.score) best = { score, r, g, b };
-	}
-	return boostColor(best.r, best.g, best.b);
+	return dominantAccentColor(data);
 }
 
 /**
@@ -230,7 +192,7 @@ async function extractFromUrl(url: string): Promise<string | null> {
  */
 export function useAmbientColor(imageUrl: string | undefined): string {
 	const [color, setColor] = useState(
-		() => (imageUrl && ambientCache.get(imageUrl)) || "rgb(255, 19, 74)",
+		() => (imageUrl && ambientCache.get(imageUrl)) || DEFAULT_AMBIENT_COLOR,
 	);
 
 	useEffect(() => {
