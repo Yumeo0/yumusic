@@ -29,6 +29,7 @@ import { ProgressBar } from "./waveform";
 export function Player() {
 	const {
 		currentSong,
+		currentAlbum,
 		next,
 		previous,
 		hasNext,
@@ -129,6 +130,12 @@ export function Player() {
 								style={{ animationDelay: "60ms" }}
 							>
 								<ArtistLinks song={currentSong} />
+								{currentAlbum && (
+									<span title={`Album or single: ${currentAlbum.name}`}>
+										<span aria-hidden> · </span>
+										{currentAlbum.name}
+									</span>
+								)}
 							</p>
 						</div>
 					</button>

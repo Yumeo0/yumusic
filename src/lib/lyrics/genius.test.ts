@@ -68,6 +68,102 @@ describe("fetchGeniusLyrics", () => {
 		globalThis.fetch = realFetch;
 	});
 
+	test("finds 1% Low Battery Girl using its shorter single title and parenthetical artist alias", async () => {
+		const queries: string[] = [];
+		globalThis.fetch = (async (input: unknown) => {
+			const url = new URL(String(input));
+			if (url.pathname.includes("/api/search/")) {
+				const query = url.searchParams.get("q") ?? "";
+				queries.push(query);
+				return searchResponse(query === "1% Battery Girl Sān-Z" ? [SONG] : []);
+			}
+			return new Response(PAGE);
+		}) as typeof fetch;
+		expect(
+			await fetchGeniusLyrics(
+				"1% Low Battery Girl (feat. ChiliChill)",
+				"Sān-Z - Topic",
+				"1% Battery Girl",
+			),
+		).toEqual({
+			synced: null,
+			plain: "First line\nSecond line",
+			confirmed: true,
+		});
+		expect(queries).toContain("1% Battery Girl Sān-Z");
+	});
+
+	test("does not use unrelated album titles or an unverified artist as release aliases", async () => {
+		const queries: string[] = [];
+		let pages = 0;
+		globalThis.fetch = (async (input: unknown) => {
+			const url = new URL(String(input));
+			if (url.pathname.includes("/api/search/")) {
+				queries.push(url.searchParams.get("q") ?? "");
+				return searchResponse([SONG]);
+			}
+			pages++;
+			return new Response(PAGE);
+		}) as typeof fetch;
+		expect(
+			await fetchGeniusLyrics("Unrelated Song", "Sān-Z", "1% Battery Girl"),
+		).toBeNull();
+		expect(queries).not.toContain("1% Battery Girl Sān-Z");
+		expect(
+			await fetchGeniusLyrics(
+				"1% Low Battery Girl",
+				"Different Artist",
+				"1% Battery Girl",
+			),
+		).toBeNull();
+		expect(pages).toBe(0);
+	});
+
+	test("includes the album or single name in the first search", async () => {
+		const queries: string[] = [];
+		globalThis.fetch = (async (input: unknown) => {
+			const url = new URL(String(input));
+			if (url.pathname.includes("/api/search/")) {
+				queries.push(url.searchParams.get("q") ?? "");
+				return searchResponse([SONG]);
+			}
+			return new Response(PAGE);
+		}) as typeof fetch;
+		expect(
+			(
+				await fetchGeniusLyrics(
+					SONG.title,
+					"HOYO-MiX - Topic",
+					"Battery Songs & More",
+				)
+			)?.confirmed,
+		).toBe(true);
+		expect(queries).toEqual(["1% Battery Girl HOYO-MiX Battery Songs & More"]);
+	});
+
+	test("falls back to title and artist when the release name finds no songs", async () => {
+		const queries: string[] = [];
+		globalThis.fetch = (async (input: unknown) => {
+			const url = new URL(String(input));
+			if (url.pathname.includes("/api/search/")) {
+				const query = url.searchParams.get("q") ?? "";
+				queries.push(query);
+				return searchResponse(
+					query === "1% Battery Girl HOYO-MiX" ? [SONG] : [],
+				);
+			}
+			return new Response(PAGE);
+		}) as typeof fetch;
+		expect(
+			(await fetchGeniusLyrics(SONG.title, "HOYO-MiX", "  Unlisted Single  "))
+				?.plain,
+		).toBe("First line\nSecond line");
+		expect(queries).toEqual([
+			"1% Battery Girl HOYO-MiX Unlisted Single",
+			"1% Battery Girl HOYO-MiX",
+		]);
+	});
+
 	test("encodes percent signs and returns the artist-matched song's plain lyrics", async () => {
 		const urls: string[] = [];
 		globalThis.fetch = (async (input: unknown) => {

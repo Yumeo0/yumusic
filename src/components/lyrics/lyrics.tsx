@@ -30,7 +30,7 @@ import { useRomanizedLines } from "@/lib/lyrics/romanize";
 import { fetchVocadbLyrics } from "@/lib/lyrics/vocadb";
 import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
-import { getSongLyrics } from "@/lib/youtube/youtube-client";
+import { getSongLyrics, getTrackMeta } from "@/lib/youtube/youtube-client";
 
 interface LyricsPanelProps {
 	songId: string;
@@ -148,7 +148,13 @@ export function LyricsPanel({
 			fetchLrcRedLyrics(title, artist, duration),
 			(lrcred) => lrcred,
 		);
-		settle("genius", fetchGeniusLyrics(title, artist), (genius) => genius);
+		settle(
+			"genius",
+			getTrackMeta(songId)
+				.catch(() => null)
+				.then((meta) => fetchGeniusLyrics(title, artist, meta?.album?.name)),
+			(genius) => genius,
+		);
 
 		return () => {
 			cancelled = true;

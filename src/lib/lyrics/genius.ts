@@ -103,6 +103,26 @@ function fold(value: string): string {
 		.replace(/[^\p{L}\p{N}]/gu, "");
 }
 
+/** A single may use a shorter release title; unrelated album names aren't aliases. */
+function relatedReleaseTitle(title: string, release: string): boolean {
+	const tokens = (value: string) => [
+		...new Set(
+			value
+				.normalize("NFKC")
+				.toLowerCase()
+				.match(/[\p{L}\p{N}]+/gu) ?? [],
+		),
+	];
+	const a = tokens(title);
+	const b = tokens(release);
+	const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+	return (
+		shorter.length >= 3 &&
+		shorter.length / longer.length >= 0.75 &&
+		shorter.every((token) => longer.includes(token))
+	);
+}
+
 function artistMatches(song: GeniusSong, artist: string): boolean {
 	const names = [
 		song.primary_artist_names,
@@ -114,7 +134,11 @@ function artistMatches(song: GeniusSong, artist: string): boolean {
 			fold(name.replace(/\s*-\s*Topic$/i, "")),
 			...name
 				.split(/[,;&]|\s+(?:feat\.?|ft\.?|and)\s+/i)
-				.flatMap((part) => [fold(part), fold(part.replace(/\([^)]*\)/g, ""))]),
+				.flatMap((part) => [
+					fold(part),
+					fold(part.replace(/\([^)]*\)/g, "")),
+					...[...part.matchAll(/\(([^)]*)\)/g)].map((match) => fold(match[1])),
+				]),
 		].filter(Boolean);
 	const wanted = variants(artist);
 	return names.some(
@@ -153,10 +177,11 @@ async function search(
 	);
 }
 
-/** Search by cleaned title and artist, then fetch the matched song's plain lyrics. */
+/** Prefer title + artist + release searches, falling back when the release isn't indexed. */
 export async function fetchGeniusLyrics(
 	title: string,
 	artist: string,
+	album?: string,
 ): Promise<GeniusLyrics | null> {
 	const original = cleanSearchTitle(title, artist).trim();
 	if (!original) return null;
@@ -167,12 +192,32 @@ export async function fetchGeniusLyrics(
 		artist,
 	).main.trim();
 	const tracks = [...new Set([original, translated].filter(Boolean))];
+	const primaryTracks = new Set(tracks);
 	const name = artist.replace(/\s*-\s*Topic$/i, "").trim();
+	const release = album?.trim();
+	const releaseTitle = release ? cleanSearchTitle(release).trim() : "";
+	if (
+		releaseTitle &&
+		!tracks.includes(releaseTitle) &&
+		tracks.some((track) => relatedReleaseTitle(track, releaseTitle))
+	) {
+		tracks.push(releaseTitle);
+	}
 	const seen = new Set<string>();
 	const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 	try {
 		for (const track of tracks) {
-			const queries = name ? [`${track} ${name}`, track] : [track];
+			const releaseAlias = !primaryTracks.has(track);
+			const baseQuery = [track, name].filter(Boolean).join(" ");
+			const queries = [
+				...new Set([
+					...(release && fold(release) !== fold(track)
+						? [`${baseQuery} ${release}`]
+						: []),
+					baseQuery,
+					track,
+				]),
+			];
 			for (const query of queries) {
 				const candidates = (await search(query, signal))
 					.filter(
@@ -181,7 +226,8 @@ export async function fetchGeniusLyrics(
 							!song.instrumental &&
 							(!song.lyrics_state || song.lyrics_state === "complete") &&
 							song.title &&
-							fold(cleanSearchTitle(song.title)) === fold(track),
+							fold(cleanSearchTitle(song.title)) === fold(track) &&
+							(!releaseAlias || artistMatches(song, name)),
 					)
 					.sort(
 						(a, b) =>

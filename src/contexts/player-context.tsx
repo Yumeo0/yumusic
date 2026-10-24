@@ -41,6 +41,7 @@ import {
 	getPlaybackStream,
 	getSongVersion,
 	getTrackMeta,
+	type TrackMeta,
 } from "@/lib/youtube/youtube-client";
 
 export interface Song {
@@ -79,6 +80,8 @@ export interface Song {
  */
 interface PlayerContextType {
 	currentSong: Song | null;
+	/** Album or single release belonging to the current song. */
+	currentAlbum: NonNullable<TrackMeta["album"]> | null;
 	play: (song: Song, queue?: Song[]) => void;
 	/** Replaces the queue with `songs` and starts playing at `index`. */
 	playQueue: (songs: Song[], index: number) => void;
@@ -298,6 +301,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[updateSettings],
 	);
 	const [currentSong, setCurrentSong] = useState<Song | null>(null);
+	const [trackAlbum, setTrackAlbum] = useState<{
+		songId: string;
+		album: NonNullable<TrackMeta["album"]> | null;
+	} | null>(null);
+	const currentSongId = currentSong?.id;
+	// Key the result by song id so a late response can never label the next track.
+	const currentAlbum =
+		trackAlbum?.songId === currentSongId ? (trackAlbum?.album ?? null) : null;
+	useEffect(() => {
+		if (!currentSongId) return;
+		let cancelled = false;
+		void getTrackMeta(currentSongId)
+			.catch(() => null)
+			.then((meta) => {
+				if (!cancelled)
+					setTrackAlbum({ songId: currentSongId, album: meta?.album ?? null });
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [currentSongId]);
 	const [isPlaying, setIsPlaying] = useState(false);
 	const [videoInfo, setVideoInfo] = useState<YT.VideoInfo | null>(null);
 	const [innertube, setInnertube] = useState<Innertube | null>(null);
@@ -1463,6 +1487,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const playerValue = useMemo<PlayerContextType>(
 		() => ({
 			currentSong,
+			currentAlbum,
 			play,
 			playQueue,
 			videoInfo,
@@ -1488,6 +1513,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}),
 		[
 			currentSong,
+			currentAlbum,
 			play,
 			playQueue,
 			videoInfo,

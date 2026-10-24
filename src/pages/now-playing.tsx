@@ -23,6 +23,7 @@ import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
 import { VolumeControl } from "@/components/player/volume-control";
 import { ProgressBar } from "@/components/player/waveform";
+import { AlbumLink } from "@/components/song/album-link";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
@@ -695,10 +696,11 @@ function morphStyle(prefix: string): CSSProperties {
 	};
 }
 
-/** Track title + artist credit, shared by the mobile stage, compact row and
- * desktop layout. The two lines are wrapped so the dismiss morph can move and
+/** Track title, artist and release, shared by the mobile stage, compact row and
+ * desktop layout. The title and artist are wrapped so the dismiss morph can move and
  * scale each one onto its mini-player counterpart independently. */
 function TrackHeading({ song, className }: { song: Song; className?: string }) {
+	const { currentAlbum } = usePlayer();
 	return (
 		<div className={cn("max-w-full", className)}>
 			<div
@@ -733,6 +735,16 @@ function TrackHeading({ song, className }: { song: Song; className?: string }) {
 					<ArtistLinks song={song} />
 				</p>
 			</div>
+			{currentAlbum && (
+				<p
+					className="np-morph mt-1 truncate text-sm text-muted-foreground/80"
+					data-song-release
+					style={{ opacity: "calc(1 - var(--np-dismiss, 0))" }}
+				>
+					<span className="sr-only">Album or single: </span>
+					<AlbumLink album={currentAlbum} />
+				</p>
+			)}
 		</div>
 	);
 }
