@@ -8,6 +8,7 @@ import {
 	mergeArtistNames,
 	remixAuthors,
 	scrobbleTitle,
+	stripArtistSuffix,
 } from "./title";
 
 /** Main title as cleaned by the display pipeline (original mode). */
@@ -15,6 +16,45 @@ const main = (title: string, artist?: string) =>
 	formatTitleParts(title, "original", true, artist).main;
 
 describe("noise, credit and decoration tails", () => {
+	test("character EP videos use the quoted song as their title", () => {
+		const title = 'Ellen EP - "Shark\'s Gotta Bite" | Zenless Zone Zero';
+		expect(formatTitleParts(title, "both", true, "Zenless Zone Zero")).toEqual({
+			main: "Shark's Gotta Bite",
+			feats: [],
+			credits: [],
+			coverArtists: [],
+		});
+		expect(displayTitle(title, "both", false, "Zenless Zone Zero")).toBe(title);
+	});
+
+	test("character EP wrappers accept typographic quotes and dashes", () => {
+		for (const title of [
+			"Ellen EP – “Shark's Gotta Bite” | Zenless Zone Zero",
+			'Ellen EP — "Shark\'s Gotta Bite" ｜ Zenless Zone Zero',
+			'Ellen EP - "Shark\'s Gotta Bite"',
+		]) {
+			expect(main(title, "Zenless Zone Zero")).toBe("Shark's Gotta Bite");
+		}
+	});
+
+	test("a pipe artist suffix does not consume an earlier song segment", () => {
+		expect(
+			stripArtistSuffix(
+				'Character - "Song Name" | Game Channel',
+				"Game Channel",
+			),
+		).toBe('Character - "Song Name"');
+		expect(main('Artist - "Song Name"', "Another Artist")).toBe(
+			'Artist - "Song Name"',
+		);
+		expect(main("The EP - A Song Without Quotes")).toBe(
+			"The EP - A Song Without Quotes",
+		);
+		expect(main("A Song | Unrelated Text", "Game Channel")).toBe(
+			"A Song | Unrelated Text",
+		);
+	});
+
 	test("covered by tail", () => {
 		expect(main("美人局 covered by 藍月なくる")).toBe("美人局");
 	});
@@ -115,6 +155,58 @@ describe("noise, credit and decoration tails", () => {
 
 	test("from-bracket tail", () => {
 		expect(main('Lumiose City (From "Pokémon X & Y")')).toBe("Lumiose City");
+	});
+
+	test("original soundtrack qualifiers leave the song title and artist intact", () => {
+		const title = "Oaths Unbent(Original Game Soundtrack)";
+		expect(
+			formatTitleParts(title, "original", true, "Wuthering Waves"),
+		).toEqual({
+			main: "Oaths Unbent",
+			feats: [],
+			credits: [],
+			coverArtists: [],
+		});
+		expect(displayTitle(title, "both", true, "Wuthering Waves")).toBe(
+			"Oaths Unbent",
+		);
+	});
+
+	test("soundtrack qualifiers accept spacing, case and bracket variants", () => {
+		for (const title of [
+			"Oaths Unbent (Original Game Soundtrack)",
+			"Oaths Unbent ( original game soundtrack )",
+			"Oaths Unbent（Original Game Soundtrack）",
+			"Oaths Unbent (Original Soundtrack)",
+		]) {
+			expect(main(title)).toBe("Oaths Unbent");
+		}
+	});
+
+	test("soundtrack qualifiers revealed by video and feature tails are removed", () => {
+		expect(
+			main("Oaths Unbent(Original Game Soundtrack) (Official Video)"),
+		).toBe("Oaths Unbent");
+		const parts = formatTitleParts(
+			"Oaths Unbent(Original Game Soundtrack) feat. Lime",
+			"original",
+			true,
+		);
+		expect(parts.main).toBe("Oaths Unbent");
+		expect(parts.feats).toEqual(["Lime"]);
+	});
+
+	test("soundtrack cleanup preserves raw mode and meaningful version names", () => {
+		const raw = "Oaths Unbent(Original Game Soundtrack)";
+		expect(displayTitle(raw, "original", false)).toBe(raw);
+		for (const title of [
+			"Oaths Unbent (Original Mix)",
+			"Oaths Unbent (Game Version)",
+			"Song (Soundtrack of My Life)",
+			"Original Game Soundtrack",
+		]) {
+			expect(main(title)).toBe(title);
+		}
 	});
 
 	test("spaced slash credit tail", () => {

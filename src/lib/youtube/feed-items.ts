@@ -55,6 +55,28 @@ export function feedItemKey(item: FeedItem): string {
 	return `${item.kind}:${item.id}`;
 }
 
+/** Every playable song in the feed, for the description prefetch. */
+export function feedSongs(sections: HomeSection[]): Song[] {
+	return sections.flatMap((section) =>
+		section.items.flatMap((item) => (item.kind === "song" ? [item.song] : [])),
+	);
+}
+
+/** Replaces one song wherever it appears in the feed. */
+export function withUpdatedSong(
+	sections: HomeSection[],
+	updated: Song,
+): HomeSection[] {
+	return sections.map((section) => ({
+		...section,
+		items: section.items.map((item) =>
+			item.kind === "song" && item.song.id === updated.id
+				? { ...item, song: updated }
+				: item,
+		),
+	}));
+}
+
 /** A playable card from a responsive list item (song/video/non-music track). */
 function responsiveSong(
 	item: YTNodes.MusicResponsiveListItem,

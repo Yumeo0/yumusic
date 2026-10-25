@@ -39,14 +39,20 @@ import { cn } from "@/lib/utils/utils";
 import {
 	type FeedItem,
 	feedItemKey,
+	feedSongs,
 	type HomeSection,
 	homeSectionsFromFeed,
+	withUpdatedSong,
 } from "@/lib/youtube/feed-items";
+import {
+	getHomeFeed,
+	patchCachedHomeFeedSong,
+	readCachedHomeFeed,
+} from "@/lib/youtube/home-feed-cache";
 import {
 	enrichSongsWithDescriptions,
 	enrichSongsWithUploads,
 } from "@/lib/youtube/song-description";
-import { getYoutubeClient } from "@/lib/youtube/youtube-client";
 
 /** Matches Tailwind's `md` breakpoint; below it the feed uses compact rows. */
 const MOBILE_QUERY = "(max-width: 767.98px)";
@@ -344,28 +350,6 @@ function swipeHintDismissed(): boolean {
 	}
 }
 
-/** Every playable song in the feed, for the description prefetch. */
-function feedSongs(sections: HomeSection[]): Song[] {
-	return sections.flatMap((section) =>
-		section.items.flatMap((item) => (item.kind === "song" ? [item.song] : [])),
-	);
-}
-
-/** Replaces one song wherever it appears in the feed. */
-function withUpdatedSong(
-	sections: HomeSection[],
-	updated: Song,
-): HomeSection[] {
-	return sections.map((section) => ({
-		...section,
-		items: section.items.map((item) =>
-			item.kind === "song" && item.song.id === updated.id
-				? { ...item, song: updated }
-				: item,
-		),
-	}));
-}
-
 /**
  * Recommended tracks, playlists, albums and artists from the YouTube Music
  * home feed. Desktop keeps the horizontally scrollable card shelves; phones
@@ -382,7 +366,11 @@ export function HomeFeed() {
 	// Only touch devices can perform the swipe; a narrow desktop window gets
 	// the compact rows without the gesture hint or affordance.
 	const swipeEnabled = isMobile && hasTouch;
-	const [sections, setSections] = useState<HomeSection[] | null>(null);
+	// Seed from the cache so returning within the TTL paints instantly instead
+	// of flashing the skeleton while the cached promise resolves.
+	const [sections, setSections] = useState<HomeSection[] | null>(() =>
+		readCachedHomeFeed(),
+	);
 	const [failed, setFailed] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [hasMore, setHasMore] = useState(false);
@@ -478,6 +466,9 @@ export function HomeFeed() {
 		const cancels: Array<() => void> = [];
 		const applyUpdatedSong = (updated: Song): void => {
 			setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
+			// Keep the cached first page in step with what the view resolved, so
+			// reopening within the TTL skips the enrichment request entirely.
+			patchCachedHomeFeedSong(updated);
 		};
 		// Descriptions resolve ambiguous credits and upload detection keeps
 		// reuploads raw; each continuation page feeds both pipelines.
@@ -501,8 +492,9 @@ export function HomeFeed() {
 
 		(async () => {
 			try {
-				const client = await getYoutubeClient();
-				let feed = await client.music.getHomeFeed();
+				const { feed: cachedFeed, sections: cachedSections } =
+					await getHomeFeed();
+				let feed = cachedFeed;
 				const seen = new Set<string>();
 				const accept = (incoming: HomeSection[]): HomeSection[] => {
 					const fresh: HomeSection[] = [];
@@ -515,7 +507,7 @@ export function HomeFeed() {
 					return fresh;
 				};
 
-				const initial = accept(homeSectionsFromFeed(feed));
+				const initial = accept(cachedSections);
 				totalSections = initial.length;
 				if (cancelled) return;
 				setSections(initial);

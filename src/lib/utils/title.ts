@@ -701,10 +701,10 @@ export function stripArtistSuffix(title: string, artist?: string): string {
 		const head = title.slice(0, bracket.index ?? 0).trim();
 		if (head) return head;
 	}
-	// " - <artist>" / "/ <artist>" / "／<artist>" tail.
-	const separated = title.match(
-		/\s*(?:[-–—]\s*|\s*\/\s*|／)([^-–—／/]{1,80})$/u,
-	);
+	// " - <artist>" / "/ <artist>" / "／<artist>" / "| <artist>" tail.
+	// Stop at every separator so an earlier song segment cannot be swallowed
+	// just because the final credit contains the artist name.
+	const separated = title.match(/\s*[-–—/／|｜]\s*([^-–—／/|｜]{1,80})$/u);
 	if (separated && !CREDIT_ROLE.test(separated[1]) && matches(separated[1])) {
 		const head = title.slice(0, separated.index ?? 0).trim();
 		if (head) return head;
@@ -725,6 +725,12 @@ const BARE_COVER_MARKER =
 	/\s*[歌弾踊叩]ってみた(?:\s*ver(?:sion)?\.?\s*\S{1,60})?\s*$/iu;
 
 const TITLE_NOISE: NoiseRule[] = [
+	// 'Ellen EP - "Shark\'s Gotta Bite" | Zenless Zone Zero': the quoted
+	// song replaces the character/video label; keep the tail for credit cleanup.
+	{
+		pattern: /^.{1,80}?\s+EP\s*[-–—]\s*["“]([^"”]+)["”]/iu,
+		replacement: "$1",
+	},
 	// "藍月なくる×DECO*27×tepe「Hookah, whoo!」MV / ゲーム『Hookah Haze』
 	// 主題歌" → "Hookah, whoo! …" — the quoted song title replaces the
 	// leading performer list; the MV marker and slash credit peel afterwards.
@@ -861,6 +867,16 @@ const TITLE_NOISE: NoiseRule[] = [
 		String.raw`\s*` +
 			BRACKET_OPEN +
 			String.raw`\s*from\s+(?:"[^"]{1,80}"|“[^”]{1,80}”|.{1,80}?)` +
+			BRACKET_CLOSE +
+			String.raw`\s*$`,
+		"i",
+	),
+	// "Oaths Unbent(Original Game Soundtrack)" → "Oaths Unbent".
+	// Match the whole qualifier so meaningful version names stay intact.
+	new RegExp(
+		String.raw`\s*` +
+			BRACKET_OPEN +
+			String.raw`\s*original(?:\s+game)?\s+soundtrack\s*` +
 			BRACKET_CLOSE +
 			String.raw`\s*$`,
 		"i",
