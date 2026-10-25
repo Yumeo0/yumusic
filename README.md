@@ -31,3 +31,10 @@ the VS Code debugging configuration.
 
 Restart an existing development session with `bun run tauri dev` after changing
 these scripts; already-running processes keep their original runtime.
+
+The desktop icon source is `public/app-icon.svg`, using the mobile app's white
+logo and red background. On Wayland, the window identifies itself as
+`dev.yumeo.yumusic`. Linux bundles include a matching hidden desktop entry
+alongside Tauri's generated `YuMusic.desktop` so the compositor can resolve the
+icon without adding another launcher. A development binary needs the packaged
+desktop entries and icons installed for that lookup to work.

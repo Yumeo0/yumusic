@@ -41,6 +41,9 @@ discord-rich-presence = "1.1.0"
 tauri-plugin-updater = "=3.0.0-alpha.3"
 tauri-plugin-process = "=3.0.0-alpha.3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+glib = "0.18"
+
 # The native media session identifies the app by AUMID; setting it on the
 # process lets Windows resolve the name and icon from the installed shortcut.
 [target.'cfg(target_os = "windows")'.dependencies]

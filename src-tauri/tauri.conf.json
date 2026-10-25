@@ -26,9 +26,7 @@
 			"csp": null,
 			"assetProtocol": {
 				"enable": true,
-				"scope": [
-					"$APPDATA/downloads/**"
-				]
+				"scope": ["$APPDATA/downloads/**"]
 			}
 		}
 	},
@@ -43,6 +41,23 @@
 			"icons/icon.icns",
 			"icons/icon.ico"
 		],
+		"linux": {
+			"deb": {
+				"files": {
+					"/usr/share/applications/dev.yumeo.yumusic.desktop": "linux/dev.yumeo.yumusic.desktop"
+				}
+			},
+			"rpm": {
+				"files": {
+					"/usr/share/applications/dev.yumeo.yumusic.desktop": "linux/dev.yumeo.yumusic.desktop"
+				}
+			},
+			"appimage": {
+				"files": {
+					"/usr/share/applications/dev.yumeo.yumusic.desktop": "linux/dev.yumeo.yumusic.desktop"
+				}
+			}
+		},
 		"android": {
 			"debugApplicationIdSuffix": ".debug"
 		}

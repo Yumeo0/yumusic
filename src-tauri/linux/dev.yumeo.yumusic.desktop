@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=YuMusic
+Exec=app
+Icon=app
+Terminal=false
+NoDisplay=true
+StartupWMClass=dev.yumeo.yumusic

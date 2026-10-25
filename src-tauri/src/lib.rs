@@ -165,6 +165,12 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+	let context = tauri::generate_context!();
+	// GTK uses the program name for Wayland's app_id. Set it before GTK
+	// initializes so all windows resolve the matching desktop entry.
+	#[cfg(target_os = "linux")]
+	glib::set_prgname(Some(context.config().identifier.as_str()));
+
 	let builder = tauri::Builder::default()
 		.runtime(tauri_runtime_wry::Wry::default())
 		.on_window_event(|_window, _event| {
@@ -259,7 +265,7 @@ pub fn run() {
 			downloads::downloads_remove,
 			media_controls::update_media_session
 		])
-		.build(tauri::generate_context!())
+		.build(context)
 		.expect("error while building tauri application")
 		.run(|_app_handle, event| {
 			if let tauri::RunEvent::Exit = event {
