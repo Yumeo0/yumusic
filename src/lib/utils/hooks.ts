@@ -3,20 +3,6 @@ import { DEFAULT_AMBIENT_COLOR, dominantAccentColor } from "./ambient-color";
 import { LruCache } from "./lru-cache";
 import { proxiedImageUrl } from "./tauri";
 
-const MAX_VOLUME = 0.15;
-
-/** Map a linear slider position [0,1] to an exponential volume curve. */
-export function linearToVolume(linear: number): number {
-	return ((Math.exp(linear) - 1) / (Math.E - 1)) * MAX_VOLUME;
-}
-
-/** Map an exponential volume back to a linear slider position [0,1]. */
-export function volumeToLinear(volume: number): number {
-	return Math.log((volume / MAX_VOLUME) * (Math.E - 1) + 1);
-}
-
-export { MAX_VOLUME };
-
 /**
  * Tracks a CSS media query. Starts from the current match so the first paint
  * already uses the right layout, then follows viewport changes. Safe outside a

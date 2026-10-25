@@ -20,13 +20,13 @@ import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
+import { DEFAULT_VOLUME, MAX_VOLUME } from "@/lib/player/volume";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import {
 	rememberSongVersion,
 	songVersionReplacement,
 } from "@/lib/stores/song-versions";
 import { applySongDescription } from "@/lib/utils/description";
-import { MAX_VOLUME } from "@/lib/utils/hooks";
 import {
 	biggestThumb,
 	hiResThumb,
@@ -362,7 +362,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		const parsed = savedVolume ? Number.parseFloat(savedVolume) : NaN;
 		return Number.isFinite(parsed)
 			? Math.min(MAX_VOLUME, Math.max(0, parsed))
-			: MAX_VOLUME;
+			: DEFAULT_VOLUME;
 	});
 
 	/** Read by the fade loop so volume changes mid-fade stay respected. */
