@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=YuMusic
+GenericName=Music Player
+Comment=Listen to music and manage your library
+Exec=yumusic
+Icon=dev.yumeo.yumusic
+Terminal=false
+Categories=AudioVideo;Audio;Music;Player;
+Keywords=music;audio;player;streaming;
+StartupNotify=true
+StartupWMClass=dev.yumeo.yumusic

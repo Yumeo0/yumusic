@@ -2,6 +2,9 @@
 
 A Tauri app for YouTube Music.
 
+YuMusic is an independent project and is not affiliated with, endorsed by, or
+sponsored by Google or YouTube.
+
 ## Development
 
 Install Bun 1.4.4 or newer, Rust, and the native build prerequisites for your
@@ -33,19 +36,3 @@ bun run tauri build                   # Build desktop bundles
 bun run build:android                 # Build Android APKs
 bun run release patch --no-push        # Create a local release commit and tag
 ```
-
-The scripts invoke the Tauri, Vite, TypeScript, and Biome entry points directly
-with Bun, bypassing executable shims. Tauri's frontend hooks also force Bun.
-`bunfig.toml` applies the same runtime preference to nested commands. CI uses the
-Bun version recorded in `package.json`. The recommended Bun extension provides
-the VS Code debugging configuration.
-
-Restart an existing development session with `bun run tauri dev` after changing
-these scripts; already-running processes keep their original runtime.
-
-The desktop icon source is `public/app-icon.svg`, using the mobile app's white
-logo and red background. On Wayland, the window identifies itself as
-`dev.yumeo.yumusic`. Linux bundles include a matching hidden desktop entry
-alongside Tauri's generated `YuMusic.desktop` so the compositor can resolve the
-icon without adding another launcher. A development binary needs the packaged
-desktop entries and icons installed for that lookup to work.

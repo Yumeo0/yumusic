@@ -1,0 +1,15 @@
+{
+    "bun": "1.4.4",
+    "base": "dac1247507183cab147d9d70035a5cf58a2ac89b",
+    "inputs": {
+        "package.json": "f2c5a81a1753a81dfd09ae8939788fd3b1769970e907fd69f6fa380cce01d513",
+        "bun.lock": "6ed01243c4af0c4ed954ea4832d4df1f6470bd4494725d66e645387900c70595",
+        "src-tauri/Cargo.lock": "899a41a6d1dc025f0ba0449655f0fad67b4037a6f39ad51bcd1da167e5c5ed3c"
+    },
+    "outputs": {
+        "flatpak/bun-sources.json": "19300bc519a63d740f5d62384daea5e7594ab7f849863deaabca70b6c3eec167",
+        "flatpak/cargo-sources.json": "b0d00b147fee3bf52ede426a2bdd169dc8a939a2bb1d9bd75c446d9462390769",
+        "flatpak/bun-toolchain-sources.json": "5133aa51bfb5021a9e37c78805f7f2abb8e20c847cd5d8ee173a632c4482d01c",
+        "flatpak/application.patch": "f5bb6d531bc6c05e4f072d4769be86e3af260d9401cd51af79b94088cbec5705"
+    }
+}

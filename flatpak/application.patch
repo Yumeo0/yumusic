@@ -1,0 +1,433 @@
+diff --git a/bun.lock b/bun.lock
+index 3a7bc21..330790a 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -43,6 +43,7 @@
+   },
+   "patchedDependencies": {
+     "googlevideo@5.0.1": "patches/googlevideo@5.0.1.patch",
++    "youtubei.js@18.3.0": "patches/youtubei.js@18.3.0.patch",
+   },
+   "packages": {
+     "@babel/runtime": ["@babel/runtime@8.0.8", "", {}, "sha512-dEu8nGlRqjsJsvviUUoSMfcRHpwomCiRlXsc2mPfJ79+ffTpDm+JtfUtTMzUrqCApHQnCsVPD3gT1ZT8RgBRCQ=="],
+diff --git a/package.json b/package.json
+index 947433f..cf0e3a7 100644
+--- a/package.json
++++ b/package.json
+@@ -16,6 +16,11 @@
+ 		"dev": "bun ./node_modules/vite/bin/vite.js",
+ 		"release": "bun scripts/release.ts",
+ 		"build": "bun ./node_modules/typescript/bin/tsc --noEmit && bun ./node_modules/vite/bin/vite.js build",
++		"sources:flatpak": "bun scripts/flatpak-sources.ts",
++		"check:flatpak-sources": "bun scripts/flatpak-sources.ts --check",
++		"build:flatpak": "bun scripts/flatpak.ts build",
++		"install:flatpak": "bun scripts/flatpak.ts install",
++		"validate:flatpak": "bun scripts/flatpak.ts validate",
+ 		"preview": "bun ./node_modules/vite/bin/vite.js preview",
+ 		"tauri": "bun scripts/tauri.ts",
+ 		"lint": "bun ./node_modules/@biomejs/biome/bin/biome check .",
+@@ -46,7 +51,7 @@
+ 		"youtubei.js": "18.3.0"
+ 	},
+ 	"patchedDependencies": {
+-		"youtubei.js@18.1.0": "patches/youtubei.js@18.1.0.patch",
++		"youtubei.js@18.3.0": "patches/youtubei.js@18.3.0.patch",
+ 		"googlevideo@5.0.1": "patches/googlevideo@5.0.1.patch"
+ 	},
+ 	"devDependencies": {
+diff --git a/patches/youtubei.js@18.1.0.patch b/patches/youtubei.js@18.3.0.patch
+similarity index 100%
+rename from patches/youtubei.js@18.1.0.patch
+rename to patches/youtubei.js@18.3.0.patch
+diff --git a/scripts/flatpak.ts b/scripts/flatpak.ts
+new file mode 100644
+index 0000000..5916722
+--- /dev/null
++++ b/scripts/flatpak.ts
+@@ -0,0 +1,37 @@
++import { $, fileURLToPath } from "bun";
++
++const root = fileURLToPath(new URL("../", import.meta.url));
++const appId = "dev.yumeo.yumusic";
++const command = process.argv[2];
++const targetDir = process.env.CARGO_TARGET_DIR ?? "src-tauri/target";
++const cargo = process.env.CARGO ?? "cargo";
++const shell = $.cwd(root);
++
++switch (command) {
++	case "build": {
++		// Dependencies and Bun's patchedDependencies must already be installed.
++		await shell`${process.execPath} run build`;
++		await shell`${cargo} build --manifest-path src-tauri/Cargo.toml --target-dir ${targetDir} --release --frozen --features custom-protocol`;
++		break;
++	}
++	case "install": {
++		const prefix = process.env.PREFIX ?? "/usr/local";
++		const destdir = process.env.DESTDIR ?? "";
++		const destination = `${destdir}${prefix}`;
++		const binary = process.env.BINARY ?? `${targetDir}/release/app`;
++		await shell`install -Dm755 ${binary} ${`${destination}/bin/yumusic`}`;
++		await shell`install -Dm644 ${`src-tauri/linux/${appId}.flatpak.desktop`} ${`${destination}/share/applications/${appId}.desktop`}`;
++		await shell`install -Dm644 ${`src-tauri/linux/${appId}.metainfo.xml`} ${`${destination}/share/metainfo/${appId}.metainfo.xml`}`;
++		await shell`install -Dm644 public/app-icon.svg ${`${destination}/share/icons/hicolor/scalable/apps/${appId}.svg`}`;
++		await shell`install -Dm644 LICENSE ${`${destination}/share/licenses/${appId}/LICENSE`}`;
++		break;
++	}
++	case "validate": {
++		await shell`desktop-file-validate ${`src-tauri/linux/${appId}.flatpak.desktop`}`;
++		await shell`appstreamcli validate --pedantic --no-net ${`src-tauri/linux/${appId}.metainfo.xml`}`;
++		break;
++	}
++	default:
++		console.error("Usage: bun scripts/flatpak.ts <build|install|validate>");
++		process.exit(1);
++}
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index e4b2a6f..46474e9 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -1,10 +1,10 @@
+ [package]
+ name = "app"
+ version = "0.5.1"
+-description = "A Tauri App"
++description = "A desktop music player for YouTube Music"
+ authors = ["Yumeo"]
+ license = "GPL-3.0-only"
+-repository = ""
++repository = "https://git.yumeo.dev/Yumeo/YuMusic"
+ edition = "2021"
+ rust-version = "1.95"
+ 
+@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
+ 
+ [features]
+ mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
++custom-protocol = ["tauri/custom-protocol"]
+ 
+ [build-dependencies]
+ tauri-build = { version = "=3.0.0-alpha.4", features = [] }
+diff --git a/src-tauri/linux/dev.yumeo.yumusic.flatpak.desktop b/src-tauri/linux/dev.yumeo.yumusic.flatpak.desktop
+new file mode 100644
+index 0000000..eddb25b
+--- /dev/null
++++ b/src-tauri/linux/dev.yumeo.yumusic.flatpak.desktop
+@@ -0,0 +1,12 @@
++[Desktop Entry]
++Type=Application
++Name=YuMusic
++GenericName=Music Player
++Comment=Listen to music and manage your library
++Exec=yumusic
++Icon=dev.yumeo.yumusic
++Terminal=false
++Categories=AudioVideo;Audio;Music;Player;
++Keywords=music;audio;player;streaming;
++StartupNotify=true
++StartupWMClass=dev.yumeo.yumusic
+diff --git a/src-tauri/linux/dev.yumeo.yumusic.metainfo.xml b/src-tauri/linux/dev.yumeo.yumusic.metainfo.xml
+new file mode 100644
+index 0000000..5993048
+--- /dev/null
++++ b/src-tauri/linux/dev.yumeo.yumusic.metainfo.xml
+@@ -0,0 +1,124 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<component type="desktop-application">
++  <id>dev.yumeo.yumusic</id>
++  <metadata_license>CC0-1.0</metadata_license>
++  <project_license>GPL-3.0-only</project_license>
++  <name>YuMusic</name>
++  <summary>Listen to music and manage your library</summary>
++  <developer id="dev.yumeo">
++    <name>Yumeo</name>
++  </developer>
++  <description>
++    <p>
++      YuMusic is an independent music player for YouTube Music. Search for
++      songs, explore albums and artists, and organize your listening queue
++      in a dedicated desktop interface.
++    </p>
++    <ul>
++      <li>Sign in to access your library and manage playlists</li>
++      <li>Read lyrics while listening</li>
++      <li>Control playback with your desktop's media controls and media keys</li>
++      <li>Adjust playback with shuffle, repeat, and crossfade</li>
++      <li>Optionally share listening activity with ListenBrainz or Discord</li>
++    </ul>
++    <p>
++      An internet connection is required to stream music. Signing in with a
++      Google account is required for personal library features. Availability
++      of music depends on the service and your region.
++    </p>
++    <p>
++      YuMusic is not affiliated with or endorsed by Google or YouTube.
++    </p>
++  </description>
++  <launchable type="desktop-id">dev.yumeo.yumusic.desktop</launchable>
++  <url type="homepage">https://git.yumeo.dev/Yumeo/YuMusic</url>
++  <url type="bugtracker">https://git.yumeo.dev/Yumeo/YuMusic/issues</url>
++  <url type="vcs-browser">https://git.yumeo.dev/Yumeo/YuMusic</url>
++  <provides>
++    <binary>yumusic</binary>
++    <id>dev.yumeo.yumusic.desktop</id>
++  </provides>
++  <categories>
++    <category>AudioVideo</category>
++    <category>Music</category>
++  </categories>
++  <keywords>
++    <keyword>music</keyword>
++    <keyword>audio</keyword>
++    <keyword>streaming</keyword>
++  </keywords>
++  <supports>
++    <control>pointing</control>
++    <control>keyboard</control>
++    <control>touch</control>
++  </supports>
++  <requires>
++    <internet>always</internet>
++  </requires>
++  <branding>
++    <color type="primary" scheme_preference="light">#cb1f43</color>
++    <color type="primary" scheme_preference="dark">#cb1f43</color>
++  </branding>
++  <screenshots>
++    <screenshot type="default">
++      <caption>Home feed with the mini-player</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/01-home.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Expanded player with synced lyrics</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/10-now-playing.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Playback queue and upcoming songs</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/11-queue.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Personal playlist library</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/02-playlists.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Album details and track list</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/03-album.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Playlist details and tracks</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/04-playlist.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Artist page with top songs and albums</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/05-artist.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Search results for songs, albums, and playlists</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/06-search.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Account, home feed, and lyrics settings</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/07-settings.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Song titles, playback, and crossfade settings</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/08-settings-playback.png</image>
++    </screenshot>
++    <screenshot>
++      <caption>Integrations, storage, and update settings</caption>
++      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/09-settings-integrations.png</image>
++    </screenshot>
++  </screenshots>
++  <releases>
++    <release version="0.5.1" date="2026-10-24">
++      <url type="details">https://git.yumeo.dev/Yumeo/YuMusic/releases/tag/v0.5.1</url>
++      <description>
++        <p>Improved lyrics and playback controls.</p>
++        <ul>
++          <li>Add lyrics from Genius and recognize plain lyric sections</li>
++          <li>Support repeating songs and playlists</li>
++          <li>Improve album matching and artwork-based accent colors</li>
++        </ul>
++      </description>
++    </release>
++  </releases>
++  <content_rating type="oars-1.1">
++    <content_attribute id="social-info">intense</content_attribute>
++  </content_rating>
++</component>
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 4f8e739..297711b 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -166,12 +166,17 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+ pub fn run() {
+ 	let context = tauri::generate_context!();
++	let self_update_supported = cfg!(desktop)
++		&& !(cfg!(target_os = "linux") && std::path::Path::new("/.flatpak-info").exists());
+ 	// GTK uses the program name for Wayland's app_id. Set it before GTK
+ 	// initializes so all windows resolve the matching desktop entry.
+ 	#[cfg(target_os = "linux")]
+ 	glib::set_prgname(Some(context.config().identifier.as_str()));
+ 
+ 	let builder = tauri::Builder::default()
++		.append_invoke_initialization_script(format!(
++			"Object.defineProperty(window, '__YUMUSIC_SELF_UPDATE_SUPPORTED__', {{ value: {self_update_supported} }});"
++		))
+ 		.runtime(tauri_runtime_wry::Wry::default())
+ 		.on_window_event(|_window, _event| {
+ 			#[cfg(target_os = "windows")]
+@@ -202,9 +207,13 @@ pub fn run() {
+ 
+ 	// Self-updating is desktop-only (the plugins don't target Android/iOS).
+ 	#[cfg(desktop)]
+-	let builder = builder
+-		.plugin(tauri_plugin_updater::Builder::new().build())
+-		.plugin(tauri_plugin_process::init());
++	let builder = if self_update_supported {
++		builder
++			.plugin(tauri_plugin_updater::Builder::new().build())
++			.plugin(tauri_plugin_process::init())
++	} else {
++		builder
++	};
+ 
+ 	#[cfg(all(debug_assertions, feature = "mcp-bridge"))]
+ 	let builder = builder.plugin(
+diff --git a/src-tauri/src/media_controls.rs b/src-tauri/src/media_controls.rs
+index d536d60..e80ee8d 100644
+--- a/src-tauri/src/media_controls.rs
++++ b/src-tauri/src/media_controls.rs
+@@ -80,6 +80,7 @@ impl MediaSession {
+ 		let mut config = PlayerConfig::new("YuMusic")
+ 			.desktop_entry("dev.yumeo.yumusic")
+ 			.track_id_prefix("/dev/yumeo/yumusic/track");
++		config.bus_name = "dev.yumeo.yumusic".to_string();
+ 		if let Some(hwnd) = hwnd {
+ 			config = config.hwnd(hwnd);
+ 		}
+@@ -141,4 +142,4 @@ impl MediaSession {
+ pub fn update_media_session(app: AppHandle, snapshot: MediaState) {
+ 	use tauri::Manager;
+ 	app.state::<MediaSession>().update(snapshot);
+-}
+\ No newline at end of file
++}
+diff --git a/src/lib/services/updater.test.ts b/src/lib/services/updater.test.ts
+new file mode 100644
+index 0000000..23d3243
+--- /dev/null
++++ b/src/lib/services/updater.test.ts
+@@ -0,0 +1,70 @@
++import { afterEach, beforeEach, describe, expect, test } from "bun:test";
++import { Update } from "@tauri-apps/plugin-updater";
++import { checkForUpdate, installUpdate, updaterSupported } from "./updater";
++
++const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
++const originalTauri = Object.getOwnPropertyDescriptor(globalThis, "isTauri");
++const calls: string[] = [];
++
++beforeEach(() => {
++	calls.length = 0;
++	Object.defineProperty(globalThis, "isTauri", {
++		configurable: true,
++		value: true,
++	});
++	Object.defineProperty(globalThis, "window", {
++		configurable: true,
++		value: {
++			__YUMUSIC_SELF_UPDATE_SUPPORTED__: false,
++			__TAURI_INTERNALS__: {
++				invoke: async (command: string) => {
++					calls.push(command);
++					return null;
++				},
++			},
++		},
++	});
++});
++
++afterEach(() => {
++	for (const [key, descriptor] of [
++		["window", originalWindow],
++		["isTauri", originalTauri],
++	] as const) {
++		if (descriptor) Object.defineProperty(globalThis, key, descriptor);
++		else Reflect.deleteProperty(globalThis, key);
++	}
++});
++
++describe("distribution-managed updates", () => {
++	test("does not contact the updater when the native plugin is disabled", async () => {
++		expect(updaterSupported()).toBe(false);
++		expect(await checkForUpdate()).toBeNull();
++		expect(calls).toEqual([]);
++	});
++
++	test("rejects installation before invoking disabled native plugins", async () => {
++		const update = new Update({
++			rid: 1,
++			currentVersion: "0.5.1",
++			version: "0.5.2",
++			rawJson: {},
++		});
++		await expect(installUpdate(update)).rejects.toThrow("managed");
++		expect(calls).toEqual([]);
++	});
++
++	test("uses the updater in native builds that enable it", async () => {
++		Object.defineProperty(window, "__YUMUSIC_SELF_UPDATE_SUPPORTED__", {
++			value: true,
++		});
++		expect(updaterSupported()).toBe(true);
++		expect(await checkForUpdate()).toBeNull();
++		expect(calls).toEqual(["plugin:updater|check"]);
++	});
++
++	test("requires a native capability flag even in a Tauri window", () => {
++		Reflect.deleteProperty(window, "__YUMUSIC_SELF_UPDATE_SUPPORTED__");
++		expect(updaterSupported()).toBe(false);
++	});
++});
+diff --git a/src/lib/services/updater.ts b/src/lib/services/updater.ts
+index ea44900..883372d 100644
+--- a/src/lib/services/updater.ts
++++ b/src/lib/services/updater.ts
+@@ -5,11 +5,13 @@ import { IS_MOBILE } from "../utils/tauri";
+ 
+ /**
+  * Whether the in-app updater can run here. It is a desktop-only plugin: on
+- * Android/iOS (and in the plain browser dev server) updates come from the
+- * store or the browser, so the UI is hidden there.
++ * Android/iOS, Flatpak and the browser use their distribution's updates.
++ * The native startup script reports whether the updater was registered.
+  */
+ export function updaterSupported(): boolean {
+-	return isTauri() && !IS_MOBILE;
++	return (
++		isTauri() && !IS_MOBILE && window.__YUMUSIC_SELF_UPDATE_SUPPORTED__ === true
++	);
+ }
+ 
+ /** Checks the configured endpoints for a release newer than this build. */
+@@ -32,6 +34,9 @@ export async function installUpdate(
+ 	update: Update,
+ 	onProgress?: (progress: DownloadProgress) => void,
+ ): Promise<void> {
++	if (!updaterSupported()) {
++		throw new Error("Updates are managed by this application's distribution");
++	}
+ 	let downloaded = 0;
+ 	let total: number | null = null;
+ 	await update.downloadAndInstall((event) => {
+diff --git a/src/types/electron.d.ts b/src/types/electron.d.ts
+index 764f4d2..f454acb 100644
+--- a/src/types/electron.d.ts
++++ b/src/types/electron.d.ts
+@@ -1,5 +1,6 @@
+ declare global {
+ 	interface Window {
++		readonly __YUMUSIC_SELF_UPDATE_SUPPORTED__?: boolean;
+ 		electron: {
+ 			login: () => Promise<string | null>;
+ 			getCookie: () => Promise<string | null>;

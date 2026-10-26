@@ -7,6 +7,7 @@
 // the commit and tag local.
 import { file, fileURLToPath, write } from "bun";
 import { runGit } from "./git";
+import { addMetainfoRelease } from "./metainfo";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const BUMPS = ["patch", "minor", "major"] as const;
@@ -89,12 +90,26 @@ if (updatedLock === lock) {
 }
 await write(lockPath, updatedLock);
 
+const metainfoPath = new URL(
+	"../src-tauri/linux/dev.yumeo.yumusic.metainfo.xml",
+	import.meta.url,
+);
+await write(
+	metainfoPath,
+	addMetainfoRelease(
+		await file(metainfoPath).text(),
+		version,
+		new Date().toISOString().slice(0, 10),
+	),
+);
+
 gitInherit(
 	"add",
 	"package.json",
 	"src-tauri/tauri.conf.json",
 	"src-tauri/Cargo.toml",
 	"src-tauri/Cargo.lock",
+	"src-tauri/linux/dev.yumeo.yumusic.metainfo.xml",
 );
 gitInherit("commit", "-m", `chore: release ${tag}`);
 gitInherit("tag", tag);

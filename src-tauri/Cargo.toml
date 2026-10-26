@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.5.1"
-description = "A Tauri App"
+description = "A desktop music player for YouTube Music"
 authors = ["Yumeo"]
 license = "GPL-3.0-only"
-repository = ""
+repository = "https://git.yumeo.dev/Yumeo/YuMusic"
 edition = "2021"
 rust-version = "1.95"
 
@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
+custom-protocol = ["tauri/custom-protocol"]
 
 [build-dependencies]
 tauri-build = { version = "=3.0.0-alpha.4", features = [] }

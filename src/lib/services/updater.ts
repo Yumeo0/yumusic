@@ -5,11 +5,13 @@ import { IS_MOBILE } from "../utils/tauri";
 
 /**
  * Whether the in-app updater can run here. It is a desktop-only plugin: on
- * Android/iOS (and in the plain browser dev server) updates come from the
- * store or the browser, so the UI is hidden there.
+ * Android/iOS, Flatpak and the browser use their distribution's updates.
+ * The native startup script reports whether the updater was registered.
  */
 export function updaterSupported(): boolean {
-	return isTauri() && !IS_MOBILE;
+	return (
+		isTauri() && !IS_MOBILE && window.__YUMUSIC_SELF_UPDATE_SUPPORTED__ === true
+	);
 }
 
 /** Checks the configured endpoints for a release newer than this build. */
@@ -32,6 +34,9 @@ export async function installUpdate(
 	update: Update,
 	onProgress?: (progress: DownloadProgress) => void,
 ): Promise<void> {
+	if (!updaterSupported()) {
+		throw new Error("Updates are managed by this application's distribution");
+	}
 	let downloaded = 0;
 	let total: number | null = null;
 	await update.downloadAndInstall((event) => {

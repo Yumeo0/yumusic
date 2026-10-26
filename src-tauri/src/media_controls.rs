@@ -80,6 +80,7 @@ impl MediaSession {
 		let mut config = PlayerConfig::new("YuMusic")
 			.desktop_entry("dev.yumeo.yumusic")
 			.track_id_prefix("/dev/yumeo/yumusic/track");
+		config.bus_name = "dev.yumeo.yumusic".to_string();
 		if let Some(hwnd) = hwnd {
 			config = config.hwnd(hwnd);
 		}

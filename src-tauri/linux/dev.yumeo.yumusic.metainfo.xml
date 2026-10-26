@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.yumeo.yumusic</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <name>YuMusic</name>
+  <summary>Listen to music and manage your library</summary>
+  <developer id="dev.yumeo">
+    <name>Yumeo</name>
+  </developer>
+  <description>
+    <p>
+      YuMusic is an independent music player for YouTube Music. Search for
+      songs, explore albums and artists, and organize your listening queue
+      in a dedicated desktop interface.
+    </p>
+    <ul>
+      <li>Sign in to access your library and manage playlists</li>
+      <li>Read lyrics while listening</li>
+      <li>Control playback with your desktop's media controls and media keys</li>
+      <li>Adjust playback with shuffle, repeat, and crossfade</li>
+      <li>Optionally share listening activity with ListenBrainz or Discord</li>
+    </ul>
+    <p>
+      An internet connection is required to stream music. Signing in with a
+      Google account is required for personal library features. Availability
+      of music depends on the service and your region.
+    </p>
+    <p>
+      YuMusic is not affiliated with or endorsed by Google or YouTube.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.yumeo.yumusic.desktop</launchable>
+  <url type="homepage">https://git.yumeo.dev/Yumeo/YuMusic</url>
+  <url type="bugtracker">https://git.yumeo.dev/Yumeo/YuMusic/issues</url>
+  <url type="vcs-browser">https://git.yumeo.dev/Yumeo/YuMusic</url>
+  <provides>
+    <binary>yumusic</binary>
+    <id>dev.yumeo.yumusic.desktop</id>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Music</category>
+  </categories>
+  <keywords>
+    <keyword>music</keyword>
+    <keyword>audio</keyword>
+    <keyword>streaming</keyword>
+  </keywords>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <requires>
+    <internet>always</internet>
+  </requires>
+  <branding>
+    <color type="primary" scheme_preference="light">#cb1f43</color>
+    <color type="primary" scheme_preference="dark">#cb1f43</color>
+  </branding>
+  <screenshots>
+    <screenshot type="default">
+      <caption>Home feed with the mini-player</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/01-home.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Expanded player with synced lyrics</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/10-now-playing.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Playback queue and upcoming songs</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/11-queue.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Personal playlist library</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/02-playlists.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Album details and track list</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/03-album.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Playlist details and tracks</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/04-playlist.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Artist page with top songs and albums</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/05-artist.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Search results for songs, albums, and playlists</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/06-search.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Account, home feed, and lyrics settings</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/07-settings.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Song titles, playback, and crossfade settings</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/08-settings-playback.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Integrations, storage, and update settings</caption>
+      <image type="source" width="1600" height="900">https://git.yumeo.dev/Yumeo/YuMusic/raw/commit/dac1247507183cab147d9d70035a5cf58a2ac89b/docs/screenshots/09-settings-integrations.png</image>
+    </screenshot>
+  </screenshots>
+  <releases>
+    <release version="0.5.1" date="2026-10-24">
+      <url type="details">https://git.yumeo.dev/Yumeo/YuMusic/releases/tag/v0.5.1</url>
+      <description>
+        <p>Improved lyrics and playback controls.</p>
+        <ul>
+          <li>Add lyrics from Genius and recognize plain lyric sections</li>
+          <li>Support repeating songs and playlists</li>
+          <li>Improve album matching and artwork-based accent colors</li>
+        </ul>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-info">intense</content_attribute>
+  </content_rating>
+</component>

@@ -23,3 +23,12 @@ electron/.vite/
 
 # OS
 .DS_Store
+
+# Flatpak build state and downloaded tools
+.flatpak-tools/
+.flatpak-builder/
+flatpak-build/
+flatpak-repo/
+flatpak-build-aarch64/
+flatpak-repo-aarch64/
+flatpak/__pycache__/

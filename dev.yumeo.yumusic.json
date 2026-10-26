@@ -1,0 +1,58 @@
+{
+    "app-id": "dev.yumeo.yumusic",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "51",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": [
+        "org.freedesktop.Sdk.Extension.rust-stable"
+    ],
+    "command": "yumusic",
+    "finish-args": [
+        "--share=ipc",
+        "--share=network",
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--socket=pulseaudio",
+        "--device=dri"
+    ],
+    "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin:/run/build/yumusic/bun",
+        "env": {
+            "CARGO_HOME": "/run/build/yumusic/cargo",
+            "CARGO_NET_OFFLINE": "true",
+            "BUN_INSTALL_CACHE_DIR": "/run/build/yumusic/bun-cache",
+            "PREFIX": "/app"
+        }
+    },
+    "modules": [
+        {
+            "name": "yumusic",
+            "buildsystem": "simple",
+            "build-commands": [
+                "bun install --offline --frozen-lockfile --ignore-scripts --backend=copyfile",
+                "bun scripts/prepare-mcp.ts",
+                "bun run build:flatpak",
+                "bun run install:flatpak",
+                "python3 install-notices.py /app/share/licenses/dev.yumeo.yumusic"
+            ],
+            "sources": [
+                {
+                    "type": "git",
+                    "url": "https://git.yumeo.dev/Yumeo/YuMusic.git",
+                    "commit": "dac1247507183cab147d9d70035a5cf58a2ac89b"
+                },
+                {
+                    "type": "patch",
+                    "path": "flatpak/application.patch"
+                },
+                "flatpak/bun-toolchain-sources.json",
+                "flatpak/bun-sources.json",
+                "flatpak/cargo-sources.json",
+                {
+                    "type": "file",
+                    "path": "flatpak/install-notices.py"
+                }
+            ]
+        }
+    ]
+}

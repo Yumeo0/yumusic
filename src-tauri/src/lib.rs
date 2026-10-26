@@ -166,12 +166,17 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
 	let context = tauri::generate_context!();
+	let self_update_supported = cfg!(desktop)
+		&& !(cfg!(target_os = "linux") && std::path::Path::new("/.flatpak-info").exists());
 	// GTK uses the program name for Wayland's app_id. Set it before GTK
 	// initializes so all windows resolve the matching desktop entry.
 	#[cfg(target_os = "linux")]
 	glib::set_prgname(Some(context.config().identifier.as_str()));
 
 	let builder = tauri::Builder::default()
+		.append_invoke_initialization_script(format!(
+			"Object.defineProperty(window, '__YUMUSIC_SELF_UPDATE_SUPPORTED__', {{ value: {self_update_supported} }});"
+		))
 		.runtime(tauri_runtime_wry::Wry::default())
 		.on_window_event(|_window, _event| {
 			#[cfg(target_os = "windows")]
@@ -202,9 +207,13 @@ pub fn run() {
 
 	// Self-updating is desktop-only (the plugins don't target Android/iOS).
 	#[cfg(desktop)]
-	let builder = builder
-		.plugin(tauri_plugin_updater::Builder::new().build())
-		.plugin(tauri_plugin_process::init());
+	let builder = if self_update_supported {
+		builder
+			.plugin(tauri_plugin_updater::Builder::new().build())
+			.plugin(tauri_plugin_process::init())
+	} else {
+		builder
+	};
 
 	#[cfg(all(debug_assertions, feature = "mcp-bridge"))]
 	let builder = builder.plugin(
