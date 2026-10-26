@@ -1,3 +1,6 @@
 [run]
 # Run CLI shebangs and nested scripts with Bun on every platform.
 bun = true
+
+[test]
+pathIgnorePatterns = ["vendor/**", "src-tauri/.cache/**"]

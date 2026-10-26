@@ -1,0 +1,149 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index c1c641c..d936471 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -23,7 +23,8 @@ name = "tauri_plugin_mcp_bridge"
+ crate-type = ["staticlib", "cdylib", "rlib"]
+
+ [dependencies]
+-tauri = "~2.12.2"
++tauri = "=3.0.0-alpha.5"
++tauri-runtime-wry = "=3.0.0-alpha.5"
+ serde = { version = "1", features = ["derive"] }
+ serde_json = "1"
+ tokio = { version = "1", features = ["full"] }
+@@ -75,7 +76,7 @@ gio = "0.18"
+ jni = "0.21"
+
+ [build-dependencies]
+-tauri-plugin = { version = "2.7.1", features = ["build"] }
++tauri-plugin = { version = "=3.0.0-alpha.4", features = ["build"] }
+
+ [lints.clippy]
+ too_many_lines = "warn"
+diff --git a/src/commands/execute_js.rs b/src/commands/execute_js.rs
+index c0def65..1cfbfde 100644
+--- a/src/commands/execute_js.rs
++++ b/src/commands/execute_js.rs
+@@ -79,8 +79,7 @@ fn native_evaluate_js<R: Runtime>(
+
+     let script_for_closure = Arc::clone(&script_ptr);
+
+-    window
+-        .with_webview(move |webview| {
++    crate::utils::with_webview(window, move |webview| {
+             unsafe {
+                 let wkwebview: &WKWebView = &*(webview.inner() as *const _ as *const WKWebView);
+
+diff --git a/src/screenshot/android.rs b/src/screenshot/android.rs
+index 6c5d192..1aea6c5 100644
+--- a/src/screenshot/android.rs
++++ b/src/screenshot/android.rs
+@@ -20,8 +20,7 @@ pub fn capture_viewport<R: Runtime>(
+         let (tx, rx) = mpsc::channel::<Result<Screenshot, ScreenshotError>>();
+
+         // Use Tauri's with_webview to access the Android WebView via JNI
+-        window
+-            .with_webview(move |webview| {
++        crate::utils::with_webview(window, move |webview| {
+                 webview
+                     .jni_handle()
+                     .exec(move |env, _activity, webview_obj| {
+diff --git a/src/screenshot/ios.rs b/src/screenshot/ios.rs
+index a0a421e..e12e3e8 100644
+--- a/src/screenshot/ios.rs
++++ b/src/screenshot/ios.rs
+@@ -26,8 +26,7 @@ pub fn capture_viewport<R: Runtime>(
+         let (tx, rx) = mpsc::channel::<Result<Screenshot, ScreenshotError>>();
+
+         // Use Tauri's with_webview to access the platform-specific webview
+-        window
+-            .with_webview(move |webview| {
++        crate::utils::with_webview(window, move |webview| {
+                 unsafe {
+                     // Get the WKWebView as a raw AnyObject pointer
+                     // We can't use the typed WKWebView because objc2-web-kit requires
+diff --git a/src/screenshot/linux.rs b/src/screenshot/linux.rs
+index 5bbca41..c81ef06 100644
+--- a/src/screenshot/linux.rs
++++ b/src/screenshot/linux.rs
+@@ -16,8 +16,7 @@ pub fn capture_viewport<R: Runtime>(
+
+         let (tx, rx) = mpsc::channel::<Result<Screenshot, ScreenshotError>>();
+
+-        window
+-            .with_webview(move |platform_webview| {
++        crate::utils::with_webview(window, move |platform_webview| {
+                 let webview = platform_webview.inner();
+
+                 webview.snapshot(
+diff --git a/src/screenshot/macos.rs b/src/screenshot/macos.rs
+index 20ea38e..042e56d 100644
+--- a/src/screenshot/macos.rs
++++ b/src/screenshot/macos.rs
+@@ -28,8 +28,7 @@ pub fn capture_viewport<R: Runtime>(
+         }
+
+         // Use Tauri's with_webview to access the platform-specific webview
+-        window
+-            .with_webview(move |webview| {
++        crate::utils::with_webview(window, move |webview| {
+                 unsafe {
+                     // Get the WKWebView from Tauri's webview handle
+                     let wkwebview: &WKWebView = &*(webview.inner() as *const _ as *const WKWebView);
+diff --git a/src/screenshot/windows.rs b/src/screenshot/windows.rs
+index eba4159..deb4f80 100644
+--- a/src/screenshot/windows.rs
++++ b/src/screenshot/windows.rs
+@@ -21,8 +21,7 @@ pub fn capture_viewport<R: Runtime>(
+
+         let (tx, rx) = mpsc::channel::<Result<Screenshot, ScreenshotError>>();
+
+-        window
+-            .with_webview(move |webview| {
++        crate::utils::with_webview(window, move |webview| {
+                 unsafe {
+                     // Get ICoreWebView2 from Tauri's webview handle
+                     let controller = webview.controller();
+diff --git a/src/utils.rs b/src/utils.rs
+index efb6a04..967ade2 100644
+--- a/src/utils.rs
++++ b/src/utils.rs
+@@ -14,8 +14,7 @@ pub fn prepare_window_for_screenshot<R: Runtime>(window: &WebviewWindow<R>) -> R
+         return Ok(());
+     }
+
+-    window
+-        .with_webview(move |webview| unsafe {
++    crate::utils::with_webview(window, move |webview| unsafe {
+             let wkwebview: &WKWebView = &*(webview.inner() as *const _ as *const WKWebView);
+             let ns_window: *mut objc2::runtime::AnyObject = objc2::msg_send![wkwebview, window];
+
+@@ -48,3 +47,15 @@ unsafe fn is_window_fully_occluded(ns_window: *mut objc2::runtime::AnyObject) ->
+
+     occlusion_state & NS_WINDOW_OCCLUSION_STATE_VISIBLE == 0
+ }
++
++// Tauri 3 exposes a type-erased native handle; this bridge runs on wry.
++pub(crate) fn with_webview<R: Runtime>(
++    window: &WebviewWindow<R>,
++    callback: impl FnOnce(&tauri_runtime_wry::Webview) + Send + 'static,
++) -> tauri::Result<()> {
++    window.with_webview(move |handle| {
++        if let Some(webview) = handle.downcast_ref::<tauri_runtime_wry::Webview>() {
++            callback(webview);
++        }
++    })
++}
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -174,7 +174,7 @@
+             commands::list_windows::list_windows,
+             commands::script_injection::request_script_injection,
+         ])
+-        .js_init_script(include_str!("bridge.js").to_string())
++        .initialization_script(include_str!("bridge.js").to_string())
+         .setup(move |app, _api| {
+             // Initialize script executor state
+             app.manage(ScriptExecutor::new());

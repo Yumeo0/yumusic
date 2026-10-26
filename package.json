@@ -11,11 +11,13 @@
 		"bun": ">=1.4.4"
 	},
 	"scripts": {
+		"postinstall": "bun scripts/prepare-mcp.ts",
+		"setup:mcp": "bun scripts/prepare-mcp.ts",
 		"dev": "bun ./node_modules/vite/bin/vite.js",
 		"release": "bun scripts/release.ts",
 		"build": "bun ./node_modules/typescript/bin/tsc --noEmit && bun ./node_modules/vite/bin/vite.js build",
 		"preview": "bun ./node_modules/vite/bin/vite.js preview",
-		"tauri": "bun ./node_modules/@tauri-apps/cli/tauri.js",
+		"tauri": "bun scripts/tauri.ts",
 		"lint": "bun ./node_modules/@biomejs/biome/bin/biome check .",
 		"test": "bun test",
 		"build:android": "bun run tauri android build --apk"

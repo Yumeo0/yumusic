@@ -206,10 +206,23 @@ pub fn run() {
 		.plugin(tauri_plugin_updater::Builder::new().build())
 		.plugin(tauri_plugin_process::init());
 
+	#[cfg(all(debug_assertions, feature = "mcp-bridge"))]
+	let builder = builder.plugin(
+		tauri_plugin_mcp_bridge::Builder::new()
+			.bind_address("127.0.0.1")
+			.build(),
+	);
+
 	builder
 		.register_asynchronous_uri_scheme_protocol("proxy", proxy::handle)
 		.manage(media_controls::MediaSession::default())
 		.setup(|app| {
+			#[cfg(all(debug_assertions, feature = "mcp-bridge"))]
+			app.add_capability(
+				tauri::ipc::CapabilityBuilder::new("mcp-bridge-development")
+					.window("main")
+					.permission("mcp-bridge:default"),
+			)?;
 			if cfg!(debug_assertions) {
 				app.handle().plugin(
 					tauri_plugin_log::Builder::default()
