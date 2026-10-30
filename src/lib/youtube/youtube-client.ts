@@ -13,6 +13,7 @@ import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
 import { getOembedMetadata } from "./oembed";
+import { readSessionProfile } from "./session-profile";
 import { type SongVersion, songVersionEntryFromQueue } from "./song-version";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
@@ -261,24 +262,7 @@ export function getYoutubeClient(cookie?: string) {
 
 export async function getUserProfile() {
 	const client = await getYoutubeClient();
-	try {
-		// getInfo(true) uses the WEB client channel-switcher endpoint, which is
-		// the variant that works with cookie-based sessions. The default
-		// getInfo() uses the TV client, whose response has no contents here.
-		const accounts = await client.account.getInfo(true);
-
-		const selected = accounts.find((item) => item.is_selected) ?? accounts[0];
-
-		if (!selected) return null;
-
-		return {
-			name: selected.account_name?.text,
-			photo: selected.account_photo?.[0]?.url,
-		};
-	} catch (error) {
-		console.error("Failed to get user profile:", error);
-		return null;
-	}
+	return readSessionProfile(client);
 }
 
 export async function getUserPlaylists() {

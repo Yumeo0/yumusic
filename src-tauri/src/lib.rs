@@ -47,10 +47,55 @@ fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn logout(app: AppHandle) -> Result<bool, String> {
+async fn logout(app: AppHandle) -> Result<bool, String> {
 	let path = cookie_path(&app)?;
 	if path.exists() {
 		fs::remove_file(&path).map_err(|e| e.to_string())?;
+	}
+	#[cfg(target_os = "android")]
+	{
+		// wry's delete_cookie is a no-op on Android. Clear the app-owned
+		// CookieManager directly, without touching localStorage or app settings.
+		let (tx, rx) = tokio::sync::oneshot::channel();
+		tauri_runtime_wry::wry::prelude::dispatch(move |env, _, _| {
+			let result = (|| {
+				let manager = env
+					.call_static_method(
+						"android/webkit/CookieManager",
+						"getInstance",
+						"()Landroid/webkit/CookieManager;",
+						&[],
+					)?
+					.l()?;
+				// The legacy synchronous API lets logout finish only after removal.
+				env.call_method(&manager, "removeAllCookie", "()V", &[])?;
+				env.call_method(&manager, "flush", "()V", &[])?;
+				Ok::<(), tauri_runtime_wry::wry::prelude::jni::errors::Error>(())
+			})();
+			let _ = tx.send(result.map_err(|e| e.to_string()));
+		});
+		rx.await.map_err(|e| e.to_string())??;
+	}
+	#[cfg(not(target_os = "android"))]
+	{
+		// The login webview shares the main window's cookie store. Removing only
+		// cookie.json lets the next login immediately capture the same stale session.
+		let window = app.get_webview_window("main").ok_or("Main window not found")?;
+		for origin in [
+			"https://google.com/",
+			"https://accounts.google.com/",
+			"https://www.google.com/",
+			"https://youtube.com/",
+			"https://www.youtube.com/",
+			"https://m.youtube.com/",
+			"https://music.youtube.com/",
+			"https://accounts.youtube.com/",
+		] {
+			let url = Url::parse(origin).map_err(|e| e.to_string())?;
+			for cookie in window.cookies_for_url(url).map_err(|e| e.to_string())? {
+				window.delete_cookie(cookie).map_err(|e| e.to_string())?;
+			}
+		}
 	}
 	Ok(true)
 }

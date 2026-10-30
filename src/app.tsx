@@ -57,6 +57,7 @@ import {
 	readCache,
 } from "./lib/stores/playlist-cache";
 import { useSettings } from "./lib/stores/settings";
+import { showToast } from "./lib/stores/toast";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
@@ -550,6 +551,8 @@ function NowPlayingOverlay() {
 }
 
 function Layout() {
+	const authRevision = useRef(0);
+	const authBusy = useRef(false);
 	const [isLoggedIn, setIsLoggedIn] = useState(false);
 	const [userProfile, setUserProfile] = useState<{
 		name?: string;
@@ -557,36 +560,86 @@ function Layout() {
 	} | null>(null);
 
 	useEffect(() => {
+		let disposed = false;
+		let checking = false;
 		const checkLogin = async () => {
-			const cookie = await window.electron.getCookie();
-			if (cookie) {
-				setIsLoggedIn(true);
+			if (checking || authBusy.current || document.visibilityState === "hidden")
+				return;
+			checking = true;
+			const revision = authRevision.current;
+			try {
+				const cookie = await window.electron.getCookie();
+				if (!cookie) return;
 				await getYoutubeClient(cookie);
 				const profile = await getUserProfile();
-				if (profile) {
-					setUserProfile(profile);
+				if (disposed || revision !== authRevision.current) return;
+				if (!profile) {
+					authBusy.current = true;
+					try {
+						await window.electron.logout();
+					} finally {
+						authBusy.current = false;
+					}
+					window.location.reload();
+					return;
 				}
+				setUserProfile(profile);
+				setIsLoggedIn(true);
+			} catch (error) {
+				// Offline, rate-limited and server failures do not invalidate cookies.
+				console.error("Failed to check Google session:", error);
+			} finally {
+				checking = false;
 			}
 		};
-		checkLogin();
+		void checkLogin();
+		window.addEventListener("focus", checkLogin);
+		document.addEventListener("visibilitychange", checkLogin);
+		const timer = window.setInterval(checkLogin, 5 * 60 * 1000);
+		return () => {
+			disposed = true;
+			window.removeEventListener("focus", checkLogin);
+			document.removeEventListener("visibilitychange", checkLogin);
+			window.clearInterval(timer);
+		};
 	}, []);
 
 	const handleLogin = async () => {
-		const cookie = await window.electron.login();
-		if (!cookie) return;
-		// Rebuild the shared client with the new session, then reload so every
-		// mounted view (home feed, library, profile) refetches authenticated
-		// data — effects that already ran against the signed-out client would
-		// otherwise never refresh.
-		await getYoutubeClient(cookie);
-		window.location.reload();
+		if (authBusy.current) return;
+		authBusy.current = true;
+		authRevision.current += 1;
+		try {
+			const cookie = await window.electron.login();
+			if (!cookie) return;
+			await getYoutubeClient(cookie);
+			if (!(await getUserProfile())) {
+				await window.electron.logout();
+			}
+			// Refetch all mounted views with the validated session (or signed out).
+			window.location.reload();
+		} catch (error) {
+			console.error("Google sign-in failed:", error);
+			showToast("Could not verify Google sign-in. Please try again.");
+		} finally {
+			authBusy.current = false;
+		}
 	};
 
 	const handleLogout = async () => {
-		await window.electron.logout();
-		setIsLoggedIn(false);
-		setUserProfile(null);
-		window.location.reload();
+		if (authBusy.current) return;
+		authBusy.current = true;
+		authRevision.current += 1;
+		try {
+			await window.electron.logout();
+			setIsLoggedIn(false);
+			setUserProfile(null);
+			window.location.reload();
+		} catch (error) {
+			console.error("Google sign-out failed:", error);
+			showToast("Could not clear Google sign-in. Please try again.");
+		} finally {
+			authBusy.current = false;
+		}
 	};
 
 	return (
