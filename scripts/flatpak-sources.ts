@@ -23,7 +23,17 @@ if (runningBunVersion !== bunVersion) {
 		`Generate with Bun ${bunVersion}; cache layouts are version-specific`,
 	);
 }
-const lock = JSONC.parse(await file(`${root}/bun.lock`).text());
+const lock = JSONC.parse(await file(`${root}/bun.lock`).text()) as {
+	packages: Record<
+		string,
+		[
+			string,
+			string,
+			{ os?: string | string[]; cpu?: string | string[] },
+			string,
+		]
+	>;
+};
 const cargoLock = TOML.parse(
 	await file(`${root}/src-tauri/Cargo.lock`).text(),
 ) as {
@@ -127,12 +137,7 @@ try {
 		}
 	}
 	const bunSources = [];
-	for (const entry of Object.values(lock.packages) as [
-		string,
-		string,
-		{ os?: string | string[]; cpu?: string | string[] },
-		string,
-	][]) {
+	for (const entry of Object.values(lock.packages)) {
 		const [resolved, registry, platform, integrity] = entry;
 		const matches = (value: string | string[] | undefined, allowed: string[]) =>
 			!value ||
