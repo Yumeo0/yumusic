@@ -1,5 +1,6 @@
 mod discord;
 mod downloads;
+mod login_session;
 mod media_controls;
 mod proxy;
 
@@ -102,8 +103,15 @@ async fn logout(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn login(app: AppHandle) -> Result<Option<String>, String> {
-	let login_url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
+	let mut login_url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
 		.map_err(|e| e.to_string())?;
+	login_url
+		.query_pairs_mut()
+		.append_pair("continue", "https://music.youtube.com/");
+	let verifier = reqwest::Client::builder()
+		.timeout(Duration::from_secs(10))
+		.user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+		.build().map_err(|e| e.to_string())?;
 
 	let mut builder = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(login_url))
 		.title("Sign in with Google")
@@ -136,17 +144,21 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 		Url::parse("https://music.youtube.com/").map_err(|e| e.to_string())?,
 	];
 
-	// The flow can stall on accounts.google.com, which only sets the
-	// third-party cookie variants. Bounce the webview to YouTube once (after
-	// the account cookies appear) so the first-party session cookies are
-	// issued there.
-	let mut nudged_to_youtube = false;
+	let mut last_verification: Option<(String, std::time::Instant)> = None;
 
 	loop {
 		tokio::time::sleep(Duration::from_millis(1000)).await;
 
 		if app.get_webview_window("login").is_none() {
 			break;
+		}
+		// Never interrupt the Google account picker, password or 2FA screens.
+		if !window
+			.url()
+			.map(|url| login_session::is_youtube_page(&url))
+			.unwrap_or(false)
+		{
+			continue;
 		}
 
 		// Both origins carry the same session cookies; deduplicate by name.
@@ -166,43 +178,52 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 		}
 		let header = parts.join("; ");
 
-		// `__Secure-3PSID` alone is not proof of a usable session: Google also
-		// sets the third-party variant while the flow is still on
-		// accounts.google.com. The API's `SAPISIDHASH` authorization needs a
-		// first-party secret, so wait until `SAPISID`/`__Secure-1PAPISID` shows
-		// up too (they are issued once the webview lands back on youtube.com).
-		// Capturing earlier stored a session the API treats as signed out — no
-		// profile, no home feed and an empty library.
-		let has_first_party_secret =
-			header.contains("SAPISID=") || header.contains("__Secure-1PAPISID=");
-
-		if header.contains("__Secure-3PSID") && has_first_party_secret {
-			let path = cookie_path(&app)?;
-			let data =
-				serde_json::to_string(&serde_json::json!({ "cookie": header.clone() }))
-					.map_err(|e| e.to_string())?;
-			fs::write(&path, data).map_err(|e| e.to_string())?;
-
-			if cfg!(target_os = "android") {
-				// Android runs the whole app in a single activity, so closing
-				// the login window is a no-op and finishing the activity would
-				// quit the app. Instead, navigate the same webview back to the
-				// app frontend.
-				if let Ok(app_url) = Url::parse("http://tauri.localhost/") {
-					let _ = window.navigate(app_url);
-				}
-			} else {
-				let _ = window.close();
-			}
-			return Ok(Some(header));
+		if !login_session::has_login_cookies(&header) {
+			continue;
 		}
-
-		if header.contains("__Secure-3PSID") && !nudged_to_youtube {
-			nudged_to_youtube = true;
-			if let Some(home) = youtube_urls.first() {
-				let _ = window.navigate(home.clone());
+		if last_verification.as_ref().is_some_and(|(previous, at)| {
+			previous == &header && at.elapsed() < Duration::from_secs(5)
+		}) {
+			continue;
+		}
+		last_verification = Some((header.clone(), std::time::Instant::now()));
+		match login_session::verify_login(&verifier, &header).await {
+			Ok(true) => {}
+			Ok(false) => continue,
+			Err(_) => {
+				// A temporary network failure must not close the login window.
+				log::warn!("Could not verify Google sign-in; keeping the login window open");
+				continue;
 			}
 		}
+		// The user may have closed the window or returned to Google while verifying.
+		if app.get_webview_window("login").is_none() {
+			break;
+		}
+		if !window
+			.url()
+			.map(|url| login_session::is_youtube_page(&url))
+			.unwrap_or(false)
+		{
+			continue;
+		}
+		let path = cookie_path(&app)?;
+		let data = serde_json::to_string(&serde_json::json!({ "cookie": header.clone() }))
+			.map_err(|e| e.to_string())?;
+		fs::write(&path, data).map_err(|e| e.to_string())?;
+
+		if cfg!(target_os = "android") {
+			// Android runs the whole app in a single activity, so closing
+			// the login window is a no-op and finishing the activity would
+			// quit the app. Instead, navigate the same webview back to the
+			// app frontend.
+			if let Ok(app_url) = Url::parse("http://tauri.localhost/") {
+				let _ = window.navigate(app_url);
+			}
+		} else {
+			let _ = window.close();
+		}
+		return Ok(Some(header));
 	}
 
 	Ok(None)
