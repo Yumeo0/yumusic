@@ -4,9 +4,13 @@
 
 ### Features
 
+- Linux releases now include a Flatpak download.
+
 ### Improvements
 
 ### Bug fixes
+
+- Fixed Linux AppImage packages failing to build.
 
 ## [0.6.0] - 2026-10-31
 

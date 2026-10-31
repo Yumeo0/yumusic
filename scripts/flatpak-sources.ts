@@ -16,6 +16,7 @@ import {
 // Generation runs online. Every resulting download is pinned before sandboxed builds.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const shell = $.cwd(root);
+const release = process.argv[2] === "--release";
 const pkg = await file(`${root}/package.json`).json();
 const bunVersion = pkg.packageManager.replace(/^bun@/, "");
 if (runningBunVersion !== bunVersion) {
@@ -57,6 +58,21 @@ const digest = async (path: string) =>
 		.digest("hex");
 const applicationPatch = async (base: string) =>
 	shell`git diff --binary ${base} -- package.json bun.lock patches scripts/flatpak.ts scripts/prepare-mcp.ts src-tauri src`.text();
+// A release downloads this published revision, never an older development snapshot.
+if (release) {
+	const changes = await applicationPatch("HEAD");
+	if (changes.trim())
+		throw new Error("Flatpak releases require committed application sources");
+	const tag = process.env.RELEASE_TAG;
+	if (!tag || tag !== `v${pkg.version}`)
+		throw new Error("RELEASE_TAG must match the package.json version");
+	const head = (await shell`git rev-parse HEAD`.text()).trim();
+	const tagged = (
+		await shell`git rev-parse ${`${tag}^{commit}`}`.text()
+	).trim();
+	if (head !== tagged)
+		throw new Error("Flatpak releases must check out RELEASE_TAG");
+}
 async function snapshot(base: string) {
 	await write(
 		`${root}/flatpak/application.patch`,
@@ -239,6 +255,21 @@ try {
 	);
 	// Until the packaging prerequisites are released, build a pinned commit plus an explicit patch.
 	await snapshot((await shell`git rev-parse HEAD`.text()).trim());
+	if (release) {
+		const manifest = await file(`${root}/dev.yumeo.yumusic.json`).json();
+		// The tagged source already includes all application changes. An empty
+		// development patch would fail flatpak-builder's patch extraction step.
+		manifest.modules[0].sources = manifest.modules[0].sources.filter(
+			(source: { type?: string; path?: string } | string) =>
+				typeof source === "string" ||
+				source.type !== "patch" ||
+				source.path !== "flatpak/application.patch",
+		);
+		await write(
+			`${root}/flatpak-release.json`,
+			`${JSON.stringify(manifest, null, 4)}\n`,
+		);
+	}
 	console.log(
 		`Generated ${bunSources.length} npm archives, ${cargoLock.package.filter((p) => p.source).length} Cargo archives, and Bun for both architectures.`,
 	);

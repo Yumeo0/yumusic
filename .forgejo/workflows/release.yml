@@ -1,7 +1,7 @@
 name: Build and Release
 
 # Tag a release with `git tag vX.Y.Z && git push origin vX.Y.Z` to build the
-# desktop bundles, sign them for the Tauri updater and publish them to a
+# desktop bundles and a Flatpak, sign the Tauri updater bundles and publish to a
 # Forgejo release. The rolling `latest` release carries the latest.json the
 # app polls for self-updates.
 #
@@ -141,7 +141,8 @@ jobs:
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: bun run tauri build --bundles ${{ matrix.bundles }}
+        # Tauri otherwise discards linuxdeploy's output on AppImage failures.
+        run: bun run tauri build --verbose --bundles ${{ matrix.bundles }}
 
       - name: Publish release assets
         shell: bash
@@ -155,6 +156,86 @@ jobs:
           export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
           export RELEASE_VERSION="${RELEASE_TAG#v}"
           bun scripts/forgejo-release.ts publish
+
+  flatpak:
+    name: Build Flatpak x86_64
+    runs-on: ubuntu-latest
+    # Flatpak's nested bubblewrap sandbox requires container.privileged: true
+    # in this Forgejo runner's configuration. Forgejo ignores --privileged in
+    # workflow container.options; this must be enabled by the runner operator.
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Check Flatpak sandbox support
+        shell: bash
+        run: |
+          if ! bwrap --unshare-user --ro-bind / / true; then
+            echo 'Flatpak requires nested sandbox support. Enable container.privileged: true on the Forgejo runner.' >&2
+            exit 1
+          fi
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Prepare tagged Flatpak sources
+        shell: bash
+        run: |
+          unset GITHUB_API_URL GITHUB_SERVER_URL GITHUB_GRAPHQL_URL
+          export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          bun scripts/flatpak-sources.ts --release
+
+      - name: Cache Flatpak downloads and build state
+        uses: actions/cache@v4
+        with:
+          path: .flatpak-builder
+          key: flatpak-x86_64-gnome-51-${{ hashFiles('bun.lock', 'src-tauri/Cargo.lock', 'dev.yumeo.yumusic.json', 'scripts/flatpak.ts') }}
+          restore-keys: |
+            flatpak-x86_64-gnome-51-
+
+      - name: Install Rust SDK extension and download sources
+        shell: bash
+        run: |
+          flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # The image already supplies the GNOME Platform and SDK.
+          flatpak install --system --assumeyes --noninteractive flathub \
+            org.freedesktop.Sdk.Extension.rust-stable//26.08
+          flatpak-builder --arch=x86_64 --download-only \
+            flatpak-build flatpak-release.json
+
+      - name: Build Flatpak bundle
+        shell: bash
+        run: |
+          flatpak-builder --arch=x86_64 --force-clean \
+            --disable-rofiles-fuse --disable-download --sandbox \
+            --default-branch=stable --repo=flatpak-repo \
+            flatpak-build flatpak-release.json
+          mkdir -p flatpak-dist
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          flatpak build-bundle --arch=x86_64 \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
+            flatpak-repo "flatpak-dist/YuMusic_${VERSION}_x86_64.flatpak" \
+            dev.yumeo.yumusic stable
+
+      - name: Publish Flatpak release asset
+        shell: bash
+        env:
+          FORGEJO_URL: ${{ env.FORGEJO }}
+          FORGEJO_REPOSITORY: ${{ env.REPOSITORY }}
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE_DIR: flatpak-dist
+          FLATPAK_ARCH: x86_64
+        run: |
+          export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          export RELEASE_VERSION="${RELEASE_TAG#v}"
+          bun scripts/forgejo-release.ts publish-flatpak
 
   # Merges every platform's updater entry into the rolling `latest` release.
   # Runs after all builds so the manifest is complete.

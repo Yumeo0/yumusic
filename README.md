@@ -52,3 +52,7 @@ in the release commit. Empty notes stop the release before version files change.
 Forgejo releases and the in-app updater use these same notes from the tagged
 version. Manually created tags need a matching changelog entry; the publishing
 workflow also accepts an explicit `RELEASE_NOTES` override.
+
+Releases also attach an x86_64 `.flatpak` bundle. See
+[Flatpak packaging](flatpak/README.md#release-downloads) for installation and the
+Forgejo runner requirements.

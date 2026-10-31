@@ -1,4 +1,25 @@
-# Local Flatpak packaging
+# Flatpak packaging
+
+## Release downloads
+
+Tagged releases build an x86_64 Flatpak in `.forgejo/workflows/release.yml` and
+attach `YuMusic_VERSION_x86_64.flatpak` to the Forgejo release. Install a downloaded
+bundle with `flatpak install --user ./YuMusic_VERSION_x86_64.flatpak`. The bundle
+includes the Flathub runtime repository URL so Flatpak can install its runtime.
+Flatpak manages updates; this bundle does not use the Tauri updater manifest.
+
+The release job uses the GNOME 51 Flatpak CI image. Its Forgejo Docker runner
+must allow nested bubblewrap sandboxes with `container.privileged: true` in the
+runner's configuration. Forgejo does not accept `--privileged` through workflow
+`container.options`. The job checks sandbox support before downloading sources.
+
+`bun scripts/flatpak-sources.ts --release` regenerates pinned dependency downloads
+and writes `flatpak-release.json` using the checked-out release commit, without
+the older development patch described below. It requires `RELEASE_TAG` to match
+both HEAD and the package version. CI downloads sources first, then builds with
+`--disable-download --sandbox`; application build commands have no network access.
+
+## Local builds
 
 This packaging is for local build and validation. Flathub's current
 [AI policy](https://docs.flathub.org/docs/for-app-authors/requirements#generative-ai-policy)

@@ -32,3 +32,5 @@ flatpak-repo/
 flatpak-build-aarch64/
 flatpak-repo-aarch64/
 flatpak/__pycache__/
+flatpak-release.json
+flatpak-dist/

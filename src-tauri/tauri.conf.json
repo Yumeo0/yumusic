@@ -53,11 +53,6 @@
 				"files": {
 					"/usr/share/applications/dev.yumeo.yumusic.desktop": "linux/dev.yumeo.yumusic.desktop"
 				}
-			},
-			"appimage": {
-				"files": {
-					"/usr/share/applications/dev.yumeo.yumusic.desktop": "linux/dev.yumeo.yumusic.desktop"
-				}
 			}
 		},
 		"android": {

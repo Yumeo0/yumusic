@@ -3,6 +3,7 @@
 //
 //   bun scripts/forgejo-release.ts publish   # once per platform build job
 //   bun scripts/forgejo-release.ts latest    # once after all platform jobs
+//   bun scripts/forgejo-release.ts publish-flatpak # standalone Flatpak bundle
 //
 // Required environment:
 //   FORGEJO_URL         base URL, e.g. https://git.yumeo.dev
@@ -14,6 +15,7 @@
 //   UPDATER_TARGET      override the updater platform key (defaults to the
 //                       build machine's platform)
 //   RELEASE_NOTES       optional override of the reviewed CHANGELOG.md notes
+//   FLATPAK_ARCH        Flatpak bundle architecture (defaults to host arch)
 
 import { file, Glob, write } from "bun";
 import { releaseNotes as changelogReleaseNotes } from "./changelog";
@@ -100,17 +102,25 @@ async function ensureRelease(
 ): Promise<ForgejoRelease> {
 	const existing = await findRelease(name);
 	if (existing) return existing;
-	const response = await apiFetch("/releases", {
-		method: "POST",
-		body: JSON.stringify({
-			tag_name: name,
-			name,
-			body: typeof body === "function" ? body() : body,
-			draft: false,
-			prerelease: false,
-		}),
-		headers: { "Content-Type": "application/json" },
-	});
+	let response: Response;
+	try {
+		response = await apiFetch("/releases", {
+			method: "POST",
+			body: JSON.stringify({
+				tag_name: name,
+				name,
+				body: typeof body === "function" ? body() : body,
+				draft: false,
+				prerelease: false,
+			}),
+			headers: { "Content-Type": "application/json" },
+		});
+	} catch (error) {
+		// Platform jobs can finish together and race to create the tagged release.
+		const concurrent = await findRelease(name);
+		if (concurrent) return concurrent;
+		throw error;
+	}
 	return (await response.json()) as ForgejoRelease;
 }
 
@@ -242,6 +252,21 @@ async function publish() {
 	});
 }
 
+/** Flatpak owns its updates; publish a download without a Tauri updater entry. */
+async function publishFlatpak() {
+	const bundleDir = process.env.BUNDLE_DIR ?? "flatpak-dist";
+	const arch = process.env.FLATPAK_ARCH ?? ARCH[process.arch] ?? process.arch;
+	const path = `${bundleDir}/YuMusic_${version}_${arch}.flatpak`;
+	if (!(await file(path).exists()))
+		throw new Error(`Flatpak bundle not found: ${path}`);
+	const release = await ensureRelease(
+		tag,
+		() => process.env.RELEASE_NOTES ?? releaseNotes(),
+	);
+	await upload(release, path);
+	console.log(`Published Flatpak: ${basename(path)}`);
+}
+
 function isNewerVersion(candidate: string, current: string): boolean {
 	const parse = (value: string) =>
 		value
@@ -322,6 +347,10 @@ if (command === "publish") {
 	await publish();
 } else if (command === "latest") {
 	await latest();
+} else if (command === "publish-flatpak") {
+	await publishFlatpak();
 } else {
-	throw new Error("Usage: bun scripts/forgejo-release.ts <publish|latest>");
+	throw new Error(
+		"Usage: bun scripts/forgejo-release.ts <publish|publish-flatpak|latest>",
+	);
 }
