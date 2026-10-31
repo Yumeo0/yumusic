@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [0.7.0] - 2026-10-31
+
+### Features
+
 - Added Listen together with synchronized playback, a shared queue with contributor names and autoplay recommendations, and song requests.
 - Added native Android audio playback with lock-screen controls, background playback, and equalizer support.
 
