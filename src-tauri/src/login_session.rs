@@ -27,7 +27,13 @@ pub fn has_login_cookies(header: &str) -> bool {
 }
 
 /// Read the server's sign-in verdict, rather than trusting cookie existence.
+#[cfg(test)]
 pub fn page_is_signed_in(html: &str) -> bool {
+	page_login_status(html) == Some(true)
+}
+
+/// Missing or unrecognized config is inconclusive, not evidence of logout.
+fn page_login_status(html: &str) -> Option<bool> {
 	let mut logged_in = None;
 	for fragment in html.split("ytcfg.set").skip(1) {
 		let Some(json) = fragment.trim_start().strip_prefix('(') else {
@@ -42,21 +48,24 @@ pub fn page_is_signed_in(html: &str) -> bool {
 			}
 		}
 	}
-	logged_in == Some(true)
+	logged_in
 }
 
-pub async fn verify_login(client: &reqwest::Client, cookie: &str) -> Result<bool, reqwest::Error> {
+pub async fn verify_login(client: &reqwest::Client, cookie: &str) -> Result<bool, String> {
 	let response = client
 		.get("https://music.youtube.com/")
 		.header(reqwest::header::COOKIE, cookie)
 		.header(reqwest::header::CACHE_CONTROL, "no-cache")
 		.send()
-		.await?
-		.error_for_status()?;
+		.await
+		.map_err(|e| e.to_string())?
+		.error_for_status()
+		.map_err(|e| e.to_string())?;
 	if !is_youtube_page(response.url()) {
-		return Ok(false);
+		return Err("Session check redirected away from YouTube".to_string());
 	}
-	Ok(page_is_signed_in(&response.text().await?))
+	let html = response.text().await.map_err(|e| e.to_string())?;
+	page_login_status(&html).ok_or_else(|| "YouTube returned no explicit sign-in status".to_string())
 }
 
 #[cfg(test)]
@@ -99,6 +108,20 @@ mod tests {
 		assert!(!page_is_signed_in(
 			r#"ytcfg.set({"LOGGED_IN":true}); ytcfg.set({"LOGGED_IN":false});"#
 		));
+	}
+
+	#[test]
+	fn unknown_pages_are_not_signed_out_verdicts() {
+		assert_eq!(page_login_status("<html>Consent or challenge</html>"), None);
+		assert_eq!(page_login_status(r#"ytcfg.set({"LOGGED_IN":"true"});"#), None);
+		assert_eq!(
+			page_login_status(r#"ytcfg.set({"LOGGED_IN":false});"#),
+			Some(false)
+		);
+		assert_eq!(
+			page_login_status(r#"ytcfg.set({"LOGGED_IN":true});"#),
+			Some(true)
+		);
 	}
 
 	#[test]

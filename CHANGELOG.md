@@ -10,6 +10,8 @@
 
 ### Bug fixes
 
+- Fixed unexpected Google account logouts when profile information is temporarily unavailable; session checks now preserve saved credentials and recover newer browser cookies when possible.
+
 ## [0.6.1] - 2026-10-31
 
 ### Features

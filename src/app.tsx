@@ -571,20 +571,22 @@ function Layout() {
 				const cookie = await window.electron.getCookie();
 				if (!cookie) return;
 				await getYoutubeClient(cookie);
-				const profile = await getUserProfile();
-				if (disposed || revision !== authRevision.current) return;
+				let profile = await getUserProfile();
+				let signedIn = !!profile;
 				if (!profile) {
-					authBusy.current = true;
-					try {
-						await window.electron.logout();
-					} finally {
-						authBusy.current = false;
+					const verifiedCookie = await window.electron.validateSession();
+					signedIn = !!verifiedCookie;
+					if (verifiedCookie) {
+						// Rebuild a client whose cached signed-in flag may be stale.
+						await getYoutubeClient(verifiedCookie, true);
+						profile = await getUserProfile();
 					}
-					window.location.reload();
-					return;
 				}
-				setUserProfile(profile);
-				setIsLoggedIn(true);
+				if (disposed || revision !== authRevision.current) return;
+				// Profile metadata is optional. A missing name must never erase the
+				// saved session or shared browser cookies.
+				if (profile || !signedIn) setUserProfile(profile);
+				setIsLoggedIn(signedIn);
 			} catch (error) {
 				// Offline, rate-limited and server failures do not invalidate cookies.
 				console.error("Failed to check Google session:", error);
@@ -611,11 +613,8 @@ function Layout() {
 		try {
 			const cookie = await window.electron.login();
 			if (!cookie) return;
-			await getYoutubeClient(cookie);
-			if (!(await getUserProfile())) {
-				await window.electron.logout();
-			}
-			// Refetch all mounted views with the validated session (or signed out).
+			// The native login command already verified the session with YouTube.
+			// Refetch all mounted views with the validated session.
 			window.location.reload();
 		} catch (error) {
 			console.error("Google sign-in failed:", error);

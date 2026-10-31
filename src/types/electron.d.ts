@@ -4,6 +4,7 @@ declare global {
 		electron: {
 			login: () => Promise<string | null>;
 			getCookie: () => Promise<string | null>;
+			validateSession: () => Promise<string | null>;
 			logout: () => Promise<boolean>;
 		};
 	}

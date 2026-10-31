@@ -222,12 +222,13 @@ async function getClientFromSlot(
 	slot: ClientSlot,
 	lang: string,
 	cookie?: string,
+	refresh = false,
 ): Promise<Innertube> {
 	const desired = cookie || (await window.electron.getCookie()) || null;
 
 	// Reuse the current client when it already matches; never downgrade an
 	// authenticated client just because no cookie was available this call.
-	if (slot.instance && (desired === slot.cookie || !desired)) {
+	if (!refresh && slot.instance && (desired === slot.cookie || !desired)) {
 		return slot.instance;
 	}
 
@@ -269,8 +270,8 @@ async function getClientFromSlot(
 }
 
 /** The app's Innertube client, pinned to English to match the UI. */
-export function getYoutubeClient(cookie?: string) {
-	return getClientFromSlot(enClientSlot, "en", cookie);
+export function getYoutubeClient(cookie?: string, refresh = false) {
+	return getClientFromSlot(enClientSlot, "en", cookie, refresh);
 }
 
 export async function getUserProfile() {

@@ -19,6 +19,51 @@ fn cookie_path(app: &AppHandle) -> Result<PathBuf, String> {
 	Ok(dir.join("cookie.json"))
 }
 
+fn read_cookie(app: &AppHandle) -> Result<Option<String>, String> {
+	let path = cookie_path(app)?;
+	if !path.exists() {
+		return Ok(None);
+	}
+	let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+	let value: Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+	Ok(value
+		.get("cookie")
+		.and_then(|cookie| cookie.as_str())
+		.map(dedup_cookie_header))
+}
+
+fn write_cookie(app: &AppHandle, cookie: &str) -> Result<(), String> {
+	let path = cookie_path(app)?;
+	let data = serde_json::to_string(&serde_json::json!({ "cookie": cookie }))
+		.map_err(|e| e.to_string())?;
+	fs::write(&path, data).map_err(|e| e.to_string())
+}
+
+/// The shared webview cookie store's Google/YouTube cookies joined into one
+/// header value. All origins carry the same session; duplicate names are
+/// dropped, keeping the first occurrence.
+fn collect_login_cookies<R: tauri::Runtime>(
+	window: &tauri::WebviewWindow<R>,
+) -> Result<String, String> {
+	let urls = [
+		Url::parse("https://www.youtube.com/").map_err(|e| e.to_string())?,
+		Url::parse("https://m.youtube.com/").map_err(|e| e.to_string())?,
+		Url::parse("https://music.youtube.com/").map_err(|e| e.to_string())?,
+	];
+	let mut seen = std::collections::HashSet::new();
+	let mut parts: Vec<String> = Vec::new();
+	for url in urls {
+		if let Ok(cookies) = window.cookies_for_url(url) {
+			for cookie in cookies {
+				if seen.insert(cookie.name().to_string()) {
+					parts.push(format!("{}={}", cookie.name(), cookie.value()));
+				}
+			}
+		}
+	}
+	Ok(parts.join("; "))
+}
+
 /// Joins cookies into a header value, keeping only the first occurrence of
 /// each name. Google rejects headers that list a cookie twice with a
 /// redirect to accounts.google.com/CookieMismatch; older YuMusic versions
@@ -37,16 +82,7 @@ fn dedup_cookie_header(header: &str) -> String {
 
 #[tauri::command]
 fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
-	let path = cookie_path(&app)?;
-	if !path.exists() {
-		return Ok(None);
-	}
-	let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-	let value: Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-	Ok(value
-		.get("cookie")
-		.and_then(|cookie| cookie.as_str())
-		.map(dedup_cookie_header))
+	read_cookie(&app)
 }
 
 #[tauri::command]
@@ -104,6 +140,47 @@ async fn logout(app: AppHandle) -> Result<bool, String> {
 	Ok(true)
 }
 
+/// Client used to ask YouTube whether a cookie session is still signed in.
+/// The desktop user agent keeps the response on the page shape
+/// the session verifier reads.
+async fn session_verifier() -> Result<reqwest::Client, String> {
+	http_client::builder()
+		.await?
+		.timeout(Duration::from_secs(10))
+		.user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+		.build()
+		.map_err(|e| e.to_string())
+}
+
+/// A profile lookup can fail while the Google session is still valid. Only
+/// YouTube's explicit verdict marks it expired, and never erase credentials
+/// here: the shared browser store may still recover the session later.
+#[tauri::command]
+async fn validate_session(app: AppHandle) -> Result<Option<String>, String> {
+	let Some(saved) = read_cookie(&app)? else {
+		return Ok(None);
+	};
+	let verifier = session_verifier().await?;
+	if login_session::verify_login(&verifier, &saved).await? {
+		return Ok(Some(saved));
+	}
+	// A browser view may have rotated the cookies since cookie.json was saved.
+	if let Some(window) = app.get_webview_window("main") {
+		let current = collect_login_cookies(&window)?;
+		if current != saved
+			&& login_session::has_login_cookies(&current)
+			&& login_session::verify_login(&verifier, &current).await?
+		{
+			// Do not resurrect a session if the user signed out during verification.
+			if read_cookie(&app)?.as_deref() == Some(saved.as_str()) {
+				write_cookie(&app, &current)?;
+				return Ok(Some(current));
+			}
+		}
+	}
+	Ok(None)
+}
+
 #[tauri::command]
 async fn login(app: AppHandle) -> Result<Option<String>, String> {
 	po_token::reset(&app);
@@ -112,10 +189,7 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 	login_url
 		.query_pairs_mut()
 		.append_pair("continue", "https://music.youtube.com/");
-	let verifier = http_client::builder().await?
-		.timeout(Duration::from_secs(10))
-		.user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-		.build().map_err(|e| e.to_string())?;
+	let verifier = session_verifier().await?;
 
 	let mut builder = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(login_url))
 		.title("Sign in with Google")
@@ -138,16 +212,6 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 
 	let window = builder.build().map_err(|e| e.to_string())?;
 
-	// Check both the desktop and mobile YouTube origins: after signing in, the
-	// webview can land on m.youtube.com, whose cookies would not be returned
-	// when querying www.youtube.com on some platforms (e.g. Android). The
-	// music origin is queried too in case the session is scoped to it.
-	let youtube_urls = [
-		Url::parse("https://www.youtube.com/").map_err(|e| e.to_string())?,
-		Url::parse("https://m.youtube.com/").map_err(|e| e.to_string())?,
-		Url::parse("https://music.youtube.com/").map_err(|e| e.to_string())?,
-	];
-
 	let mut last_verification: Option<(String, std::time::Instant)> = None;
 
 	loop {
@@ -165,22 +229,7 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 			continue;
 		}
 
-		// Both origins carry the same session cookies; deduplicate by name.
-		// A Cookie header that lists every cookie twice gets rejected by
-		// Google with a redirect to accounts.google.com/CookieMismatch,
-		// which then looks like a signed-out session everywhere.
-		let mut seen = std::collections::HashSet::new();
-		let mut parts: Vec<String> = Vec::new();
-		for url in &youtube_urls {
-			if let Ok(cookies) = window.cookies_for_url(url.clone()) {
-				for cookie in cookies {
-					if seen.insert(cookie.name().to_string()) {
-						parts.push(format!("{}={}", cookie.name(), cookie.value()));
-					}
-				}
-			}
-		}
-		let header = parts.join("; ");
+		let header = collect_login_cookies(&window)?;
 
 		if !login_session::has_login_cookies(&header) {
 			continue;
@@ -211,10 +260,7 @@ async fn login(app: AppHandle) -> Result<Option<String>, String> {
 		{
 			continue;
 		}
-		let path = cookie_path(&app)?;
-		let data = serde_json::to_string(&serde_json::json!({ "cookie": header.clone() }))
-			.map_err(|e| e.to_string())?;
-		fs::write(&path, data).map_err(|e| e.to_string())?;
+		write_cookie(&app, &header)?;
 
 		if cfg!(target_os = "android") {
 			// Android runs the whole app in a single activity, so closing
@@ -346,6 +392,7 @@ pub fn run() {
 		.invoke_handler(tauri::generate_handler![
 			po_token::mint_po_token,
 			get_cookie,
+			validate_session,
 			login,
 			logout,
 			discord::set_discord_activity,

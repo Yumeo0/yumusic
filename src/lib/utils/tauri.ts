@@ -9,6 +9,7 @@ if (typeof window !== "undefined") {
 	window.electron = {
 		login: () => invoke<string | null>("login"),
 		getCookie: () => invoke<string | null>("get_cookie"),
+		validateSession: () => invoke<string | null>("validate_session"),
 		logout: () => invoke<boolean>("logout"),
 	};
 }

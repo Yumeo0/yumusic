@@ -10,7 +10,7 @@ interface ProfileClient {
 	account: { getInfo: (all: true) => Promise<readonly SessionAccount[]> };
 }
 
-/** Null means signed out; transport/server failures must remain retryable. */
+/** Null means no usable profile; session expiry requires separate verification. */
 export async function readSessionProfile(client: ProfileClient) {
 	if (!client.session.logged_in) return null;
 	let accounts: readonly SessionAccount[];
