@@ -24,7 +24,6 @@ import {
 	useDownloads,
 } from "@/lib/downloads/downloads";
 import { shareSong } from "@/lib/services/share";
-import { showToast } from "@/lib/stores/toast";
 import { IS_MOBILE, proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { getSongPreview, type SongPreview } from "@/lib/youtube/song-info";
@@ -89,7 +88,7 @@ function downloadAction(
  * will use. Mobile has no paste flow — its share sheet handles links instead.
  */
 export function LinkPreviewDialog() {
-	const { addToQueue, currentSong, play, playNext, queue } = usePlayer();
+	const { addToQueue, play, playNext } = usePlayer();
 	const downloads = useDownloads();
 	const [videoId, setVideoId] = useState<string | null>(null);
 	const [preview, setPreview] = useState<SongPreview | null>(null);
@@ -149,19 +148,11 @@ export function LinkPreviewDialog() {
 
 	const playNextTo = (selected: Song) => {
 		playNext(selected);
-		showToast("Playing next");
 		close();
 	};
 
 	const queueSong = (selected: Song) => {
-		// Nothing playing and nothing queued: there is no queue to add behind,
-		// so start the song instead (same as the row menu).
-		if (!currentSong && queue.length === 0) {
-			play(selected);
-		} else {
-			addToQueue([selected]);
-			showToast("Added to queue");
-		}
+		addToQueue([selected]);
 		close();
 	};
 

@@ -28,6 +28,11 @@ bun run tauri dev
 
 For the frontend alone, run `bun run dev`.
 
+For Android, install the Android SDK and NDK and set `JAVA_HOME` to a JDK
+supported by the Gradle wrapper (Java 17–25; tested with Java 25). The project
+uses Gradle 9.1.0, Android Gradle Plugin 8.13.2, and Kotlin 2.3.21.
+Run `bun run tauri android dev` to develop on a connected device.
+
 ```sh
 bun run build                         # Type-check and build the frontend
 bun run test                          # Run the test suite

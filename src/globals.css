@@ -297,6 +297,16 @@
 	transform: scale(1.3);
 }
 
+/* Touch long-press belongs to the song menu, not native text selection. */
+@media (any-pointer: coarse) {
+	.context-menu-highlight,
+	.context-menu-highlight * {
+		-webkit-user-select: none;
+		user-select: none;
+		-webkit-touch-callout: none;
+	}
+}
+
 /* While a context menu is open, highlight the row or card it targets.
    The menu trigger is `display: contents`, so the overlay lands on the
    wrapped element (a row, a card, or its swipe wrapper). Painted as a

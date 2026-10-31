@@ -3,6 +3,7 @@ interface SessionAccount {
 	is_disabled?: boolean;
 	account_name?: { text?: string };
 	account_photo?: { url: string }[];
+	channel_handle?: { text?: string };
 }
 
 interface ProfileClient {
@@ -31,5 +32,10 @@ export async function readSessionProfile(client: ProfileClient) {
 		available.find((account) => account.is_selected) ?? available[0];
 	const name = selected?.account_name?.text?.trim();
 	if (!name) return null;
-	return { name, photo: selected?.account_photo?.[0]?.url };
+	const accountId = selected?.channel_handle?.text?.trim();
+	return {
+		name,
+		photo: selected?.account_photo?.[0]?.url,
+		...(accountId ? { accountId } : {}),
+	};
 }

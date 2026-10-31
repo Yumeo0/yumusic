@@ -466,7 +466,7 @@ export default function ArtistPage() {
 															/>
 														</h3>
 														<p className="truncate text-xs text-muted-foreground">
-															<ArtistLinks song={song} />
+															<ArtistLinks showType song={song} />
 														</p>
 													</div>
 												</button>
@@ -558,7 +558,7 @@ export default function ArtistPage() {
 									</h3>
 									<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
 										{item.song ? (
-											<ArtistLinks song={item.song} />
+											<ArtistLinks showType song={item.song} />
 										) : (
 											item.subtitle
 										)}

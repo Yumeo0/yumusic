@@ -185,7 +185,11 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 					isArtist && "text-center",
 				)}
 			>
-				{item.kind === "song" ? <ArtistLinks song={item.song} /> : subtitle}
+				{item.kind === "song" ? (
+					<ArtistLinks showType song={item.song} />
+				) : (
+					subtitle
+				)}
 			</p>
 		</button>
 	);
@@ -296,7 +300,7 @@ function FeedRow({
 				</span>
 				<span className="mt-0.5 block truncate text-xs text-muted-foreground">
 					{item.kind === "song" ? (
-						<ArtistLinks song={item.song} />
+						<ArtistLinks showType song={item.song} />
 					) : (
 						item.subtitle
 					)}
@@ -353,7 +357,7 @@ function swipeHintDismissed(): boolean {
  * fighting a horizontal scroller. Renders nothing while signed out.
  */
 export function HomeFeed() {
-	const { play, addToQueue, currentSong, queue } = usePlayer();
+	const { play, addToQueue, currentSong } = usePlayer();
 	const navigate = useNavigate();
 	const [settings, update] = useSettings();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
@@ -437,12 +441,7 @@ export function HomeFeed() {
 	 */
 	const queueSong = (song: Song) => {
 		dismissSwipeHint();
-		if (!currentSong && queue.length === 0) {
-			play(song);
-			return;
-		}
 		addToQueue([song]);
-		showToast("Added to queue");
 	};
 
 	/** Plays a row and queues the rest of its section behind it. */

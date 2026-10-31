@@ -9,6 +9,7 @@ import {
 	artistIdOf,
 	artistListOf,
 	artistNames,
+	artistSubtitle,
 	isVideoId,
 	videoIdOf,
 } from "@/lib/youtube/youtube.utils";
@@ -166,7 +167,7 @@ function twoRowFeedItem(item: YTNodes.MusicTwoRowItem): FeedItem | null {
 							.map((a) => a.name)
 							.filter(Boolean)
 							.join(", ") ||
-						item.subtitle?.text ||
+						artistSubtitle(item.subtitle?.text) ||
 						"",
 					artistId:
 						artistList.find((a) => a.id)?.id ??
@@ -225,7 +226,7 @@ function multiRowFeedItem(
 			song: {
 				id: videoId,
 				title,
-				artist: subtitle || "Unknown Artist",
+				artist: artistSubtitle(subtitle) || "Unknown Artist",
 				thumbnail,
 			},
 		};

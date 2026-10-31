@@ -24,6 +24,8 @@ import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
 import { UserMenu } from "./components/app/user-menu";
 import { DownloadQueueButton } from "./components/downloads/download-queue";
+import { RoomPlaybackBridge } from "./components/listen-together/playback-bridge";
+import { RoomActivity } from "./components/listen-together/room-activity";
 import { Player } from "./components/player/player";
 import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
@@ -38,8 +40,12 @@ import {
 	useNowPlayingMotion,
 	useNowPlayingSwipe,
 } from "./lib/motion/now-playing-motion";
+import { dismissTopOverlay, handleAppBack } from "./lib/player/app-back";
 import { listeningSession } from "./lib/player/listening";
 import {
+	getNowPlayingOpen,
+	getQueueOpen,
+	setNowPlayingOpen,
 	setQueueOpen,
 	toggleNowPlaying,
 	toggleQueue,
@@ -75,6 +81,7 @@ import {
 } from "./lib/youtube/youtube-client";
 import ArtistPage from "./pages/artist";
 import HomePage from "./pages/home";
+import ListenTogetherPage from "./pages/listen-together";
 import { NowPlayingPage } from "./pages/now-playing";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
 import SettingsPage from "./pages/settings";
@@ -216,6 +223,7 @@ function MediaSessionSync() {
 		next,
 		previous,
 		videoElementRef,
+		seek,
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
 	const [settings] = useSettings();
@@ -235,6 +243,7 @@ function MediaSessionSync() {
 		previous,
 		toggle,
 		videoElementRef,
+		seek,
 	});
 	live.current = {
 		canGoNext,
@@ -244,6 +253,7 @@ function MediaSessionSync() {
 		previous,
 		toggle,
 		videoElementRef,
+		seek,
 	};
 
 	useEffect(() => {
@@ -272,12 +282,12 @@ function MediaSessionSync() {
 					break;
 				case "seek-by":
 					if (video && typeof position === "number") {
-						video.currentTime = Math.max(0, video.currentTime + position);
+						live.current.seek(Math.max(0, video.currentTime + position));
 					}
 					break;
 				case "set-position":
 					if (video && typeof position === "number") {
-						video.currentTime = position;
+						live.current.seek(position);
 					}
 					break;
 			}
@@ -507,6 +517,43 @@ function AmbientSync() {
 	return null;
 }
 
+function NativeBackNavigation() {
+	const navigate = useNavigate();
+	const location = useLocation();
+	useEffect(() => {
+		const back = () =>
+			handleAppBack({
+				dismissOverlay: dismissTopOverlay,
+				closeQueue: () => {
+					if (!getQueueOpen()) return false;
+					setQueueOpen(false);
+					return true;
+				},
+				closePlayer: () => {
+					if (!getNowPlayingOpen()) return false;
+					setNowPlayingOpen(false);
+					return true;
+				},
+				navigateBack: () => {
+					if ((window.history.state?.idx ?? 0) > 0) {
+						navigate(-1);
+						return true;
+					}
+					if (location.pathname !== "/" && location.pathname !== "/home") {
+						navigate("/", { replace: true });
+						return true;
+					}
+					return false;
+				},
+			});
+		window.__yumusicBack = back;
+		return () => {
+			if (window.__yumusicBack === back) delete window.__yumusicBack;
+		};
+	}, [navigate, location.pathname]);
+	return null;
+}
+
 function NowPlayingOverlay() {
 	const isNowPlayingOpen = useNowPlayingOpen();
 	const isQueueOpen = useQueueOpen();
@@ -521,7 +568,8 @@ function NowPlayingOverlay() {
 	useEffect(() => {
 		if (!isNowPlayingOpen) return;
 		const handler = (e: KeyboardEvent) => {
-			if (e.key !== "Escape") return;
+			if (e.key !== "Escape" || e.defaultPrevented) return;
+			e.preventDefault();
 			if (isQueueOpen) {
 				setQueueOpen(false);
 			} else {
@@ -695,6 +743,9 @@ function AppShell({
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
 			<MediaSessionSync />
+			<NativeBackNavigation />
+			<RoomPlaybackBridge />
+			<RoomActivity playing={!!currentSong} />
 			<UpdateNotifier />
 			<Titlebar />
 			<div
@@ -822,6 +873,7 @@ function AppShell({
 								<Routes>
 									<Route element={<HomePage />} path="/" />
 									<Route element={<HomePage />} path="/home" />
+									<Route element={<ListenTogetherPage />} path="/listen" />
 									<Route element={<PlaylistsPage />} path="/playlists" />
 									<Route element={<PlaylistDetails />} path="/playlists/:id" />
 									<Route element={<ArtistPage />} path="/artist/:id" />

@@ -652,7 +652,11 @@ function TopResultCard({
 							)}
 						</h3>
 						<p className="mt-1 truncate text-sm text-muted-foreground">
-							{isPlayable ? <ArtistLinks song={entry.song} /> : entry.subtitle}
+							{isPlayable ? (
+								<ArtistLinks showType song={entry.song} />
+							) : (
+								entry.subtitle
+							)}
 						</p>
 					</div>
 					{isPlayable && (
@@ -779,7 +783,7 @@ function PlayableRow({
 							/>
 						</h3>
 						<p className="truncate text-xs text-muted-foreground">
-							<ArtistLinks song={song} />
+							<ArtistLinks showType song={song} />
 						</p>
 					</div>
 					<div className="flex items-center gap-2 pr-1">

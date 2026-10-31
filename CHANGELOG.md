@@ -4,13 +4,22 @@
 
 ### Features
 
+- Added Listen together to listen with friends using synchronized playback, a shared queue, and song requests.
+
 ### Improvements
 
+- Added pinning to the playlist details “More” menu.
 - Home now preloads and caches all recommendation sections without waiting for scrolling, while images load as needed.
+- Simplified the top controls in the mobile fullscreen player.
+- Song listings now show “Song” before the artist instead of video view counts.
 
 ### Bug fixes
 
+- Fixed Android back navigation.
+- Fixed Android builds failing with Java 25.
 - Fixed unexpected Google account logouts when profile information is temporarily unavailable; session checks now preserve saved credentials and recover newer browser cookies when possible.
+- Fixed song title parsing for quoted music-video titles and “Official Audio” labels.
+- Fixed text selection when long-pressing songs to open the context menu on mobile.
 
 ## [0.6.1] - 2026-10-31
 

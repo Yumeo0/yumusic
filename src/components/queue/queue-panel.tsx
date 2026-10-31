@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, Shuffle, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
+import { RoomButton } from "@/components/listen-together/room-button";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -15,7 +16,6 @@ import {
 	useNowPlayingOpen,
 	useQueueState,
 } from "@/lib/player/player-ui";
-import { useSettings } from "@/lib/stores/settings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
@@ -35,6 +35,7 @@ export function QueuePanel() {
 		queue,
 		currentIndex,
 		autoplayTracks,
+		autoplayEnabled,
 		play,
 		playAutoplayAt,
 		shuffleQueue,
@@ -42,7 +43,6 @@ export function QueuePanel() {
 	const { isPlaying } = usePlayerControls();
 	// Video entries already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
-	const [settings] = useSettings();
 	const sheetRef = useQueueSheetRef();
 	const sheetGesture = useQueueSheetGesture();
 	const queueState = useQueueState();
@@ -60,7 +60,7 @@ export function QueuePanel() {
 	// so the queue visibly continues instead of ending at the last item.
 	const separatorIndex = queue.length;
 	const showSeparator =
-		settings.autoplay && (queue.length > 0 || autoplayTracks.length > 0);
+		autoplayEnabled && (queue.length > 0 || autoplayTracks.length > 0);
 	const autoplayOffset = showSeparator ? 1 : 0;
 	const rowCount = queue.length + autoplayTracks.length + autoplayOffset;
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -162,6 +162,7 @@ export function QueuePanel() {
 					)}
 				</div>
 				<div className="flex items-center gap-1">
+					<RoomButton />
 					<button
 						aria-label="Shuffle queue"
 						className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
@@ -289,6 +290,7 @@ export function QueuePanel() {
 											<p className="truncate text-xs text-muted-foreground">
 												<ArtistLinks song={song} />
 											</p>
+											{song.addedBy && <p className="truncate text-[10px] text-muted-foreground/70" title={`Added by ${song.addedBy}`}>Added by {song.addedBy}</p>}
 										</div>
 										<div className="flex items-center gap-2 pr-1">
 											<DownloadedBadge songId={song.id} />

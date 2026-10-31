@@ -754,6 +754,27 @@ export function PlaylistDetails() {
 									sideOffset={8}
 								>
 									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+										<Menu.Item
+											className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
+											onClick={() =>
+												id &&
+												togglePinned({
+													id,
+													title: playlist.title,
+													thumbnail: playlist.thumbnail,
+												})
+											}
+										>
+											<Pin
+												className={cn(
+													"size-4 text-muted-foreground",
+													isPinned(id ?? "") && "fill-current",
+												)}
+											/>
+											{isPinned(id ?? "")
+												? "Unpin from sidebar"
+												: "Pin to sidebar"}
+										</Menu.Item>
 										{playlist.editable && (
 											<Menu.Item
 												className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"

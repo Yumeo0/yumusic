@@ -18,6 +18,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { RoomButton } from "@/components/listen-together/room-button";
 import { LyricsPanel } from "@/components/lyrics/lyrics";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
@@ -30,6 +31,7 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { useRoomRole } from "@/lib/listen-together/room";
 import { useLyricsMorph } from "@/lib/motion/lyrics-motion";
 import {
 	mergeTouchHandlers,
@@ -223,13 +225,16 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				)}
 			</div>
 
-			{/* Top-right actions: queue + close. The queue button stays visible
-			    on mobile — bottom-edge swipes belong to Android's gesture
-			    navigation, so the artwork swipe alone is not reliable. While
-			    the player is dismissed they shrink away (scale, not opacity)
-			    as the page slides off. */}
+			{/* Top-right actions: room, desktop queue, and close. While the player
+			    is dismissed they shrink away (scale, not opacity) as the page
+			    slides off. */}
 			<div
-				className="absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,var(--safe-area-top))] max-md:right-4 flex items-center gap-2"
+				className={cn(
+					"absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,var(--safe-area-top))] max-md:right-4 flex items-center gap-2",
+					isQueueOpen &&
+						!showLyrics &&
+						"max-md:[&_button]:bg-black/50 max-md:[&_button]:text-white max-md:[&_button]:backdrop-blur-md max-md:[&_button:hover]:bg-black/65 max-md:[&_button[aria-pressed=true]]:text-primary",
+				)}
 				data-np-chrome
 				style={{
 					transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 3))",
@@ -237,14 +242,15 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				}}
 			>
 				{/* Mobile: the transport's left slot carries the lyrics toggle,
-				    so the rating pair sits here beside the queue button. */}
+				    so the rating pair sits here beside the room button. */}
 				<div className="md:hidden">
 					<RatingButtons songId={currentSong.id} />
 				</div>
+				<RoomButton />
 				<button
 					aria-label="Toggle queue"
 					className={cn(
-						"grid size-9 place-items-center rounded-full transition-colors duration-200",
+						"hidden size-9 place-items-center rounded-full transition-colors duration-200 md:grid",
 						isQueueOpen
 							? "bg-primary/15 text-primary"
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -868,10 +874,12 @@ function NowPlayingSeek({
 		songId,
 		knownDuration,
 	);
+	const { seek } = usePlayer();
+	const roomRole = useRoomRole();
 	const handleSeek = (percent: number) => {
 		const videoEl = videoElementRef?.current;
 		if (videoEl && duration > 0) {
-			videoEl.currentTime = percent * duration;
+			seek(percent * duration);
 		}
 	};
 	return (
@@ -888,7 +896,8 @@ function NowPlayingSeek({
 				}}
 			>
 				<ProgressBar
-					onSeek={handleSeek}
+					onSeek={roomRole === "guest" ? undefined : handleSeek}
+					onSeekCommit={handleSeek}
 					progress={duration > 0 ? currentTime / duration : 0}
 				/>
 			</div>
@@ -916,6 +925,7 @@ function NowPlayingLyrics({
 	videoElementRef: VideoRef;
 	knownDuration?: number;
 }) {
+	const { seek } = usePlayer();
 	const { currentTime, duration } = useMediaTime(
 		videoElementRef,
 		song.id,
@@ -924,9 +934,9 @@ function NowPlayingLyrics({
 	const onSeekTime = useCallback(
 		(seconds: number) => {
 			const videoEl = videoElementRef?.current;
-			if (videoEl) videoEl.currentTime = seconds;
+			if (videoEl) seek(seconds);
 		},
-		[videoElementRef],
+		[videoElementRef, seek],
 	);
 	return (
 		<LyricsPanel

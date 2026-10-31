@@ -16,6 +16,67 @@ const main = (title: string, artist?: string) =>
 	formatTitleParts(title, "original", true, artist).main;
 
 describe("noise, credit and decoration tails", () => {
+	test("official audio labels are removed from uploader titles", () => {
+		const title = "Fox Stevenson - Human In The Evening (Official Audio)";
+		expect(main(title, "Fox Stevenson")).toBe("Human In The Evening");
+		expect(scrobbleTitle(title, "Fox Stevenson").trackName).toBe(
+			"Human In The Evening",
+		);
+		expect(displayTitle(title, "both", false, "Fox Stevenson")).toBe(title);
+		for (const title of [
+			"Song （Official Audio）",
+			"Song - Official Audio",
+			"Song (official audio) (Official Video)",
+		]) {
+			expect(main(title)).toBe("Song");
+		}
+		const parts = formatTitleParts(
+			"Song (Official Audio) feat. Guest",
+			"both",
+			true,
+		);
+		expect(parts.main).toBe("Song");
+		expect(parts.feats).toEqual(["Guest"]);
+		expect(main("Song (Audio Mix)")).toBe("Song (Audio Mix)");
+	});
+
+	test("artist MV wrappers keep the quoted song title", () => {
+		const title = "沙花叉クロヱ MV - 「擬態ごっこ」";
+		const artist = "Chloe ch. 沙花叉クロヱ - holoX -, Sakamata Chloe";
+		expect(formatTitleParts(title, "both", true, artist)).toEqual({
+			main: "擬態ごっこ",
+			feats: [],
+			credits: [],
+			coverArtists: [],
+		});
+		expect(main(title)).toBe("擬態ごっこ");
+		expect(displayTitle(title, "original", true, artist)).toBe("擬態ごっこ");
+		expect(scrobbleTitle(title, artist).trackName).toBe("擬態ごっこ");
+		expect(displayTitle(title, "both", false, artist)).toBe(title);
+	});
+
+	test("quoted MV songs accept video-marker variants and keep feature credits", () => {
+		for (const title of [
+			"沙花叉クロヱ MV – 『擬態ごっこ』",
+			"沙花叉クロヱ M/V — 「擬態ごっこ」",
+			"沙花叉クロヱ Music Video - 「擬態ごっこ」",
+			"沙花叉クロヱ Official Music Video - 「擬態ごっこ」",
+		]) {
+			expect(main(title)).toBe("擬態ごっこ");
+		}
+		const parts = formatTitleParts(
+			"Artist MV - 「Song」 (feat. Guest)",
+			"both",
+			true,
+		);
+		expect(parts.main).toBe("Song");
+		expect(parts.feats).toEqual(["Guest"]);
+		expect(main("「擬態ごっこ」")).toBe("擬態ごっこ");
+		expect(main("Artist MV - Song Without Quotes")).toBe(
+			"Artist MV - Song Without Quotes",
+		);
+	});
+
 	test("character EP videos use the quoted song as their title", () => {
 		const title = 'Ellen EP - "Shark\'s Gotta Bite" | Zenless Zone Zero';
 		expect(formatTitleParts(title, "both", true, "Zenless Zone Zero")).toEqual({

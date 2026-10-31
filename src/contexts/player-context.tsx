@@ -16,6 +16,16 @@ import {
 	type DownloadEntry,
 	getDownloadEntry,
 } from "@/lib/downloads/downloads";
+import {
+	actionCategory,
+	type RoomAction,
+} from "@/lib/listen-together/guest-permissions";
+import {
+	listenRoom,
+	useRoomAutoplay,
+	useRoomRepeat,
+	useRoomRole,
+} from "@/lib/listen-together/room";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
@@ -26,6 +36,7 @@ import {
 	rememberSongVersion,
 	songVersionReplacement,
 } from "@/lib/stores/song-versions";
+import { showToast } from "@/lib/stores/toast";
 import { applySongDescription } from "@/lib/utils/description";
 import {
 	biggestThumb,
@@ -39,6 +50,7 @@ import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	getAutoplaySongs,
 	getPlaybackStream,
+	getSongStream,
 	getSongVersion,
 	getTrackMeta,
 	type TrackMeta,
@@ -48,6 +60,8 @@ export interface Song {
 	id: string;
 	title: string;
 	artist: string;
+	/** Room username that added this particular queue entry. */
+	addedBy?: string;
 	/** Channel id (UC…) of the primary artist, when known */
 	artistId?: string;
 	/** All artists with their channel ids, when known */
@@ -91,6 +105,7 @@ interface PlayerContextType {
 	currentIndex: number;
 	/** Upcoming radio tracks shown below the queue's "Autoplay" separator. */
 	autoplayTracks: Song[];
+	autoplayEnabled: boolean;
 	/** Plays an autoplay track, promoting it and its predecessors to the queue. */
 	playAutoplayAt: (index: number) => void;
 	addToQueue: (songs: Song[]) => void;
@@ -116,6 +131,12 @@ interface PlayerContextType {
 	 * listings — using it made the player show e.g. 2:54 vs the playlist's 2:55.
 	 */
 	duration: number;
+	seek: (seconds: number) => void;
+	prepareRoomTrack: (song: Song, queue: Song[], index: number) => Promise<void>;
+	setRoomPlaying: (playing: boolean) => void;
+	applyRoomQueue: (songs: Song[], index: number) => void;
+	applyRoomAutoplay: (songs: Song[]) => void;
+	getPlaybackGeneration: () => number;
 }
 
 interface PlayerControlsContextType {
@@ -293,9 +314,46 @@ function pickArtwork(
 			: best.url;
 }
 
+function sendGuestAction(action: RoomAction) {
+	const result = listenRoom.requestAction(action);
+	if (result === "disconnected")
+		showToast("Wait until you are connected to the room.");
+	else if (result === "denied")
+		showToast("The host does not allow this action.");
+	else if (
+		listenRoom.getSnapshot().permissions[actionCategory(action)] === "suggest"
+	)
+		showToast("Request sent to the host.");
+}
+function localControl<T extends unknown[]>(
+	action: (...args: T) => unknown,
+	remote?: (...args: T) => RoomAction,
+) {
+	return (...args: T) => {
+		if (listenRoom.getSnapshot().role === "guest") {
+			if (remote) sendGuestAction(remote(...args));
+			else showToast("The host controls this action.");
+			return;
+		}
+		return action(...args);
+	};
+}
+function selectionAction(songs: Song[], index: number): RoomAction {
+	const start = Math.max(0, index - 100);
+	return {
+		type: "playQueue",
+		songs: songs.slice(start, start + 300),
+		index: index - start,
+	};
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
+	const roomRole = useRoomRole();
 	const [settings, updateSettings] = useSettings();
-	const repeatMode = settings.repeatMode;
+	const roomAutoplay = useRoomAutoplay();
+	const autoplayEnabled = roomRole === "guest" ? roomAutoplay : settings.autoplay;
+	const sharedRepeat = useRoomRepeat();
+	const repeatMode = sharedRepeat ?? settings.repeatMode;
 	const setRepeatMode = useCallback(
 		(mode: RepeatMode) => updateSettings({ repeatMode: mode }),
 		[updateSettings],
@@ -533,8 +591,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		if (!videoInfo || !innertube) return;
 		const deck = decksRef.current[activeDeckRef.current];
 		if (!deck || deck.videoId === videoInfo.basic_info.id) return;
-		void mountTrack(deck, { videoInfo, innertube }, { autoPlay: true });
-	}, [videoInfo, innertube, mountTrack]);
+		void mountTrack(
+			deck,
+			{ videoInfo, innertube },
+			{ autoPlay: isPlaying && listenRoom.getSnapshot().role !== "guest" },
+		);
+	}, [videoInfo, innertube, isPlaying, mountTrack]);
 
 	/** Stops any in-flight crossfade and frees the preloaded deck. */
 	const abortCrossfade = useCallback(() => {
@@ -791,9 +853,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 * window, and aborts everything when the target changes.
 	 */
 	const updateCrossfade = useCallback(() => {
-		const seconds = settings.crossfade
-			? clampCrossfadeSeconds(settings.crossfadeSeconds)
-			: 0;
+		const seconds =
+			settings.crossfade && !roomRole
+				? clampCrossfadeSeconds(settings.crossfadeSeconds)
+				: 0;
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
 		if (
 			!seconds ||
@@ -869,6 +932,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			startFade(armed);
 		}
 	}, [
+		roomRole,
 		settings.crossfade,
 		settings.crossfadeSeconds,
 		settings.autoplay,
@@ -1019,7 +1083,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	const playSong = useCallback(
-		async (song: Song) => {
+		async (song: Song, exact = false) => {
 			// Any queued crossfade targets the old track; drop it.
 			abortCrossfade();
 			const request = ++loadRequestRef.current;
@@ -1040,11 +1104,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (localEntry) {
 				const deck = decksRef.current[activeDeckRef.current];
 				const mounted = deck
-					? await mountLocalTrack(deck, song, localEntry, { autoPlay: true })
+					? await mountLocalTrack(deck, song, localEntry, { autoPlay: !exact })
 					: false;
 				if (request !== loadRequestRef.current) return;
 				if (mounted) {
-					setIsPlaying(true);
+					setIsPlaying(!exact);
 					return;
 				}
 				// Stream this play instead. The stored file is deliberately
@@ -1059,9 +1123,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
 					);
 				}
-				const result = await getPlaybackStream(song.id);
+				const result = exact
+					? { ...(await getSongStream(song.id)), videoId: song.id }
+					: await getPlaybackStream(song.id);
 				// A newer play request superseded this one while it loaded.
 				if (request !== loadRequestRef.current) return;
+				if (exact && !result.videoInfo.streaming_data)
+					throw new Error("This track is unavailable on this device.");
 				if (result) {
 					// The stream may be the album track of a music video: the
 					// track *is* that song, so adopt its entry everywhere.
@@ -1083,7 +1151,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					}
 					setVideoInfo(result.videoInfo);
 					setInnertube(result.innertube);
-					setIsPlaying(true);
+					setIsPlaying(!exact);
 
 					// Store the uploader description and apply its credits to
 					// every copy of the track on screen (player, queue, radio).
@@ -1129,6 +1197,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					error,
 					error instanceof Error ? error.stack : undefined,
 				);
+				if (exact) throw error;
 			}
 		},
 		[abortCrossfade, markUpload, mountLocalTrack, teardownDeck],
@@ -1182,6 +1251,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	// the in-flight fetch and then block the retry for the same id.
 	const autoplaySongId = currentSong?.id ?? null;
 	useEffect(() => {
+		if (roomRole === "guest") return;
 		if (!settings.autoplay || !autoplaySongId) {
 			setAutoplayTracks([]);
 			autoplayForRef.current = null;
@@ -1203,12 +1273,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			cancelled = true;
 			autoplayLoadingRef.current = false;
 		};
-	}, [settings.autoplay, autoplaySongId, autoplayTracks.length]);
+	}, [roomRole, settings.autoplay, autoplaySongId, autoplayTracks.length]);
+
+	const attributeLocal = (song: Song): Song => {
+		const room = listenRoom.getSnapshot();
+		const username = room.members.find((m) => m.id === room.selfId)?.profile.username;
+		return room.role === "host" && username && !song.addedBy
+			? { ...song, addedBy: username }
+			: song;
+	};
 
 	const play = useCallback(
 		async (song: Song, newQueue?: Song[]) => {
 			// The entry may resolve to its album track: match and queue that.
-			const target = songVersionReplacement(song.id) ?? song;
+			const target = attributeLocal({ ...(songVersionReplacement(song.id) ?? song), addedBy: song.addedBy });
 			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
@@ -1226,7 +1304,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			// If a new queue is provided, add the current song to the front and set it
 			if (newQueue) {
-				setQueueState([target, ...newQueue]);
+				setQueueState([target, ...newQueue.map(attributeLocal)]);
 				setCurrentIndex(0);
 			} else {
 				// Find the song in the existing queue
@@ -1251,10 +1329,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 */
 	const playQueue = useCallback(
 		async (songs: Song[], index: number) => {
+			songs = songs.map(attributeLocal);
 			const song = songs[index];
 			if (!song) return;
 			// The entry may resolve to its album track: match and queue that.
-			const target = songVersionReplacement(song.id) ?? song;
+			const target = { ...(songVersionReplacement(song.id) ?? song), addedBy: song.addedBy };
 			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
@@ -1330,7 +1409,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 */
 	const handleEnded = useCallback(
 		(deckIndex: number) => {
-			if (deckIndex !== activeDeckRef.current) return;
+			if (
+				deckIndex !== activeDeckRef.current ||
+				listenRoom.getSnapshot().role === "guest"
+			)
+				return;
 			const nextIndex = nextQueueIndex(
 				currentIndex,
 				queue.length,
@@ -1423,7 +1506,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const addToQueue = useCallback((songs: Song[]) => {
-		setQueueState((prev) => [...prev, ...songs]);
+		setQueueState((prev) => [...prev, ...songs.map(attributeLocal)]);
 	}, []);
 
 	const playNext = useCallback(
@@ -1431,7 +1514,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			const insertAt = currentIndex < 0 ? 0 : currentIndex + 1;
 			setQueueState((prev) => {
 				const next = [...prev];
-				next.splice(insertAt, 0, song);
+				next.splice(insertAt, 0, attributeLocal(song));
 				return next;
 			});
 		},
@@ -1446,6 +1529,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				// Removing the playing entry advances to what now occupies its
 				// slot, so audio and highlighted row stay in sync.
 				if (nextQueue.length === 0) {
+					loadRequestRef.current++;
+					setIsPlaying(false);
+					setCurrentSong(null);
+					setVideoInfo(null);
+					setInnertube(null);
+					const deck = decksRef.current[activeDeckRef.current];
+					if (deck) teardownDeck(deck);
 					setCurrentIndex(-1);
 				} else {
 					const nextIndex = Math.min(currentIndex, nextQueue.length - 1);
@@ -1456,7 +1546,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setCurrentIndex(currentIndex - 1);
 			}
 		},
-		[queue, currentIndex, playSong],
+		[queue, currentIndex, playSong, teardownDeck],
 	);
 
 	const shuffleQueue = useCallback(() => {
@@ -1466,9 +1556,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		setQueueState((prev) => shuffleFrom(prev, currentIndex + 1));
 	}, [currentIndex]);
 
-	const setQueue = useCallback((songs: Song[]) => {
-		setQueueState(songs);
-	}, []);
+	const setQueue = useCallback(
+		(songs: Song[]) => {
+			const current = queue[currentIndex];
+			const nextIndex = current ? songs.indexOf(current) : -1;
+			if (nextIndex >= 0) setCurrentIndex(nextIndex);
+			setQueueState(songs);
+		},
+		[queue, currentIndex],
+	);
 
 	const pause = useCallback(() => setIsPlaying(false), []);
 	const resume = useCallback(() => setIsPlaying(true), []);
@@ -1476,7 +1572,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	const hasNext =
 		nextQueueIndex(currentIndex, queue.length, repeatMode) !== null ||
-		(settings.autoplay && !!currentSong);
+		(autoplayEnabled && !!currentSong);
 	const hasPrevious =
 		currentIndex > 0 ||
 		history.length > 0 ||
@@ -1484,32 +1580,141 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const duration =
 		parseDuration(currentSong?.duration) || videoInfo?.basic_info.duration || 0;
 
+	const seek = useCallback((seconds: number) => {
+		if (!Number.isFinite(seconds)) return;
+		if (listenRoom.getSnapshot().role === "guest") {
+			sendGuestAction({ type: "seek", position: seconds });
+			return;
+		}
+		const element = videoElementRef.current;
+		if (element)
+			element.currentTime = Math.max(
+				0,
+				Math.min(
+					seconds,
+					Number.isFinite(element.duration) ? element.duration : seconds,
+				),
+			);
+	}, []);
+	const prepareRoomTrack = useCallback(
+		async (song: Song, songs: Song[], index: number) => {
+			setQueueState(songs);
+			setCurrentIndex(index);
+			await playSong(song, true);
+		},
+		[playSong],
+	);
+	const getPlaybackGeneration = useCallback(() => loadRequestRef.current, []);
+	const applyRoomQueue = useCallback((songs: Song[], index: number) => {
+		setQueueState(songs);
+		setCurrentIndex(index);
+	}, []);
+	const applyRoomAutoplay = useCallback((songs: Song[]) => {
+		setAutoplayTracks(songs);
+	}, []);
+
+	useEffect(() => {
+		if (roomRole) abortCrossfade();
+		if (roomRole === "guest") setAutoplayTracks([]);
+		if (roomRole === "host") {
+			setQueueState((songs) => songs.map(attributeLocal));
+		}
+		return () => {
+			if (roomRole === "guest") {
+				// Detach synchronization without removing the track underneath an
+				// open fullscreen player. Keep the queue, position and stream so
+				// playback can resume locally, including a track still loading.
+				setIsPlaying(false);
+				const media = videoElementRef.current;
+				media?.pause();
+				if (media) media.playbackRate = 1;
+			}
+		};
+	}, [roomRole, abortCrossfade]);
+
+	const enqueue = useCallback(
+		(songs: Song[]) => {
+			if (!songs.length) return;
+			if (!currentSong && queue.length === 0)
+				return play(songs[0], songs.slice(1));
+			else {
+				addToQueue(songs);
+				showToast("Added to queue");
+			}
+		},
+		[currentSong, queue.length, play, addToQueue],
+	);
+
 	const playerValue = useMemo<PlayerContextType>(
 		() => ({
 			currentSong,
 			currentAlbum,
-			play,
-			playQueue,
+			play: localControl(play, (song, songs) =>
+				songs ? selectionAction([song, ...songs], 0) : { type: "play", song },
+			),
+			playQueue: localControl(playQueue, selectionAction),
 			videoInfo,
 			innertube,
 			queue,
 			currentIndex,
 			autoplayTracks,
-			playAutoplayAt,
-			addToQueue,
-			setQueue,
-			playNext,
-			removeFromQueueAt,
-			shuffleQueue,
+			autoplayEnabled,
+			playAutoplayAt: localControl(playAutoplayAt, (index) => ({
+				type: "autoplay",
+				index,
+				queueKey: JSON.stringify(autoplayTracks.map((song) => song.id)),
+			})),
+			addToQueue: localControl(enqueue, (songs) => ({
+				type: "add",
+				songs: songs.slice(0, 300),
+			})),
+			setQueue: localControl(setQueue, (songs) => {
+				const used = new Set<number>();
+				return {
+					type: "reorder",
+					order: songs.map((song) => {
+						let index = queue.findIndex(
+							(item, i) => item === song && !used.has(i),
+						);
+						if (index < 0)
+							index = queue.findIndex(
+								(item, i) => item.id === song.id && !used.has(i),
+							);
+						used.add(index);
+						return index;
+					}),
+				};
+			}),
+			playNext: localControl(
+				(song: Song) => {
+					playNext(song);
+					showToast("Playing next");
+				},
+				(song) => ({ type: "playNext", song }),
+			),
+			removeFromQueueAt: localControl(removeFromQueueAt, (index) => ({
+				type: "remove",
+				index,
+			})),
+			shuffleQueue: localControl(shuffleQueue, () => ({ type: "shuffle" })),
 			repeatMode,
-			setRepeatMode,
-			next,
-			previous,
+			setRepeatMode: localControl(setRepeatMode, (mode) => ({
+				type: "repeat",
+				mode,
+			})),
+			next: localControl(next, () => ({ type: "next" })),
+			previous: localControl(previous, () => ({ type: "previous" })),
 			hasNext,
 			hasPrevious,
 			videoContainerRef,
 			videoElementRef,
 			duration,
+			seek,
+			prepareRoomTrack,
+			setRoomPlaying: setIsPlaying,
+			applyRoomQueue,
+			applyRoomAutoplay,
+			getPlaybackGeneration,
 		}),
 		[
 			currentSong,
@@ -1521,8 +1726,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			queue,
 			currentIndex,
 			autoplayTracks,
+			autoplayEnabled,
 			playAutoplayAt,
-			addToQueue,
+			enqueue,
 			setQueue,
 			playNext,
 			removeFromQueueAt,
@@ -1535,11 +1741,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			hasPrevious,
 			videoContainerRef,
 			duration,
+			seek,
+			prepareRoomTrack,
+			getPlaybackGeneration,
+			applyRoomQueue,
+			applyRoomAutoplay,
 		],
 	);
 
 	const controlsValue = useMemo<PlayerControlsContextType>(
-		() => ({ isPlaying, pause, resume, toggle }),
+		() => ({
+			isPlaying,
+			pause: localControl(pause, () => ({ type: "pause" })),
+			resume: localControl(resume, () => ({ type: "resume" })),
+			toggle: localControl(toggle, () => ({
+				type: isPlaying ? "pause" : "resume",
+			})),
+		}),
 		[isPlaying, pause, resume, toggle],
 	);
 

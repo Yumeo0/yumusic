@@ -146,10 +146,8 @@ export function SongContextMenu({
 }) {
 	const {
 		addToQueue,
-		play,
 		playNext,
 		removeFromQueueAt,
-		queue,
 		currentSong,
 		duration: playerDuration,
 	} = usePlayer();
@@ -179,21 +177,13 @@ export function SongContextMenu({
 								label="Play next"
 								onClick={() => {
 									playNext(song);
-									showToast("Playing next");
 								}}
 							/>
 							<MenuItem
 								icon={ListPlus}
 								label="Add to queue"
 								onClick={() => {
-									// Nothing playing and nothing queued: there is no
-									// queue to add behind, so start the song instead.
-									if (!currentSong && queue.length === 0) {
-										play(song);
-										return;
-									}
 									addToQueue([song]);
-									showToast("Added to queue");
 								}}
 							/>
 							<MenuItem

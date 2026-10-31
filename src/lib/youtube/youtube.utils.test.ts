@@ -1,5 +1,57 @@
 import { describe, expect, test } from "bun:test";
-import { extractVideoId, findVideoId } from "./youtube.utils";
+import type { YTNodes } from "youtubei.js/web";
+import {
+	artistListOf,
+	artistNames,
+	artistSubtitle,
+	extractVideoId,
+	findVideoId,
+} from "./youtube.utils";
+
+describe("song subtitle credits", () => {
+	test("keeps artists without type labels, counts, or durations", () => {
+		expect(artistSubtitle("Video • Fox Stevenson • 1.4M views • 5:21")).toBe(
+			"Fox Stevenson",
+		);
+		expect(artistSubtitle("Song · Artist · 2026 · 1,234 views")).toBe("Artist");
+		expect(artistSubtitle("1 view")).toBe("");
+		expect(artistSubtitle("Views")).toBe("Views");
+		expect(artistSubtitle("3OH!3")).toBe("3OH!3");
+	});
+	test("responsive video info columns never credit view counts as artists", () => {
+		const item = {
+			flex_columns: [
+				{},
+				{
+					title: {
+						runs: [
+							"Video",
+							" · ",
+							"Fox Stevenson",
+							" · ",
+							"1.4M views",
+							" · ",
+							"5:21",
+						].map((text) => ({ text })),
+					},
+				},
+			],
+		} as unknown as YTNodes.MusicResponsiveListItem;
+		expect(artistNames(item)).toBe("Fox Stevenson");
+		expect(artistListOf(item).map((artist) => artist.name)).toEqual([
+			"Fox Stevenson",
+		]);
+	});
+	test("plain subtitle fallback also excludes statistics", () => {
+		const item = {
+			subtitle: "Video • Fox Stevenson • 12M views",
+		} as unknown as YTNodes.MusicResponsiveListItem;
+		expect(artistNames(item)).toBe("Fox Stevenson");
+		expect(artistListOf(item).map((artist) => artist.name)).toEqual([
+			"Fox Stevenson",
+		]);
+	});
+});
 
 describe("extractVideoId", () => {
 	test("watch URLs, with and without extra params", () => {

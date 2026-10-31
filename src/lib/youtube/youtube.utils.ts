@@ -104,6 +104,22 @@ function linkedArtists(
 	return artists;
 }
 
+/** Remove type labels and statistics from an unstructured song subtitle. */
+export function artistSubtitle(text: string | undefined): string {
+	return (text ?? "")
+		.split(/\s*[•·]\s*/u)
+		.map((part) => part.trim())
+		.filter(
+			(part) =>
+				part &&
+				!/^(?:song|video|album|single|ep|playlist)$/iu.test(part) &&
+				!/^\d+(?::\d{2}){1,2}$/u.test(part) &&
+				!/^[12]\d{3}$/u.test(part) &&
+				!/^\d[\d.,\s]*[KMB]?\s*views?$/iu.test(part),
+		)
+		.join(", ");
+}
+
 /** Info-column runs as artist credits, keeping their channel links. */
 function infoColumnArtists(
 	item: YTNodes.MusicResponsiveListItem,
@@ -111,7 +127,7 @@ function infoColumnArtists(
 	const runs = item.flex_columns?.at(1)?.title?.runs ?? [];
 	const artists: Array<{ name: string; id?: string }> = [];
 	for (const run of runs) {
-		const text = (run as { text?: string }).text?.trim() ?? "";
+		const text = artistSubtitle((run as { text?: string }).text);
 		if (!text) continue;
 		if (/^[•·|,;&+\s]+$/.test(text)) continue; // separators
 		if (/^\d+:\d{2}(:\d{2})?$/.test(text)) continue; // duration
@@ -139,7 +155,7 @@ export function artistNames(item: YTNodes.MusicResponsiveListItem): string {
 	if (linked.length > 0) return linked.map((a) => a.name).join(", ");
 	const runs = infoColumnArtists(item);
 	if (runs.length > 0) return runs.map((a) => a.name).join(", ");
-	const subtitle = item.subtitle?.toString().trim();
+	const subtitle = artistSubtitle(item.subtitle?.toString());
 	return subtitle || "Unknown Artist";
 }
 

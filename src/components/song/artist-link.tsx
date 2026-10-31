@@ -8,6 +8,7 @@ import {
 	useFormatTitle,
 } from "@/lib/utils/title";
 import { cn } from "@/lib/utils/utils";
+import { artistSubtitle } from "@/lib/youtube/youtube.utils";
 
 interface ArtistLinkProps {
 	id?: string;
@@ -62,15 +63,23 @@ function foldName(name: string): string {
 export function ArtistLinks({
 	song,
 	className,
+	showType = false,
 }: {
 	song: Song;
 	className?: string;
+	showType?: boolean;
 }) {
 	const formatTitle = useFormatTitle();
-	const list = (song.artists ?? []).filter((a) => a.name);
+	const cleanCredit = (artist: { name: string; id?: string }) => ({
+		...artist,
+		name: artist.id ? artist.name : artistSubtitle(artist.name),
+	});
+	const list = (song.artists ?? []).map(cleanCredit).filter((a) => a.name);
 	const { feats, coverArtists } = formatTitle(song.title, song.artist);
 	const primaries =
-		list.length > 0 ? list : [{ name: song.artist, id: song.artistId }];
+		list.length > 0
+			? list
+			: [cleanCredit({ name: song.artist, id: song.artistId })];
 	// Cover performers lack channel ids, so they render as plain names after
 	// the song's own artists. Cross-script duplicates ("Minato Aqua" /
 	// "湊あくあ") merge to the original-script name; placeholder credits
@@ -100,6 +109,7 @@ export function ArtistLinks({
 
 	return (
 		<>
+			{showType && "Song · "}
 			{artists.map((a, i) => (
 				<span
 					// biome-ignore lint/suspicious/noArrayIndexKey: artists may repeat names

@@ -725,6 +725,17 @@ const BARE_COVER_MARKER =
 	/\s*[歌弾踊叩]ってみた(?:\s*ver(?:sion)?\.?\s*\S{1,60})?\s*$/iu;
 
 const TITLE_NOISE: NoiseRule[] = [
+	// Treat official audio labels as upload packaging, not a song version.
+	/\s*[(（]\s*official\s+audio\s*[)）]\s*$/iu,
+	/\s+[-–—]\s*official\s+audio\s*$/iu,
+	// "沙花叉クロヱ MV - 「擬態ごっこ」": the quoted song follows an
+	// artist/video label. Extract it before trailing quote brackets are peeled
+	// as decorations, keeping any feature or version tail for later cleanup.
+	{
+		pattern:
+			/^[^「『]{1,80}?\s+(?:M\/V|MV|(?:Official\s+)?Music\s+Video)\s*[-–—]\s*[「『]([^」』]+)[」』]/iu,
+		replacement: "$1",
+	},
 	// 'Ellen EP - "Shark\'s Gotta Bite" | Zenless Zone Zero': the quoted
 	// song replaces the character/video label; keep the tail for credit cleanup.
 	{

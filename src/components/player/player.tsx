@@ -13,6 +13,7 @@ import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { useRoomRole } from "@/lib/listen-together/room";
 import { useNowPlayingSwipe } from "@/lib/motion/now-playing-motion";
 import {
 	toggleNowPlaying,
@@ -254,15 +255,18 @@ function MiniProgress({
 		songId,
 		knownDuration,
 	);
+	const { seek } = usePlayer();
+	const roomRole = useRoomRole();
 	const handleSeek = (percent: number) => {
 		const videoEl = videoElementRef?.current;
 		if (videoEl && duration > 0) {
-			videoEl.currentTime = percent * duration;
+			seek(percent * duration);
 		}
 	};
 	return (
 		<ProgressBar
-			onSeek={handleSeek}
+			onSeek={roomRole === "guest" ? undefined : handleSeek}
+			onSeekCommit={handleSeek}
 			progress={duration > 0 ? currentTime / duration : 0}
 		/>
 	);
