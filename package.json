@@ -15,6 +15,7 @@
 		"setup:mcp": "bun scripts/prepare-mcp.ts",
 		"dev": "bun ./node_modules/vite/bin/vite.js",
 		"release": "bun scripts/release.ts",
+		"release:notes": "bun scripts/changelog.ts",
 		"build": "bun ./node_modules/typescript/bin/tsc --noEmit && bun ./node_modules/vite/bin/vite.js build",
 		"sources:flatpak": "bun scripts/flatpak-sources.ts",
 		"check:flatpak-sources": "bun scripts/flatpak-sources.ts --check",

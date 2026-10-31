@@ -36,3 +36,19 @@ bun run tauri build                   # Build desktop bundles
 bun run build:android                 # Build Android APKs
 bun run release patch --no-push        # Create a local release commit and tag
 ```
+
+## Release notes
+
+Keep user-facing patch notes in [CHANGELOG.md](CHANGELOG.md) under **Unreleased**,
+grouped into Features, Improvements, and Bug fixes. Describe what users gain or
+what now works correctly; leave dependency bumps, CI changes, and other internal
+maintenance out unless they affect users.
+
+Preview the next release with `bun run release:notes`, or a documented version
+with `bun run release:notes 0.5.1`. `bun run release patch|minor|major` moves the
+Unreleased notes into the new version, adds the release date, and includes them
+in the release commit. Empty notes stop the release before version files change.
+
+Forgejo releases and the in-app updater use these same notes from the tagged
+version. Manually created tags need a matching changelog entry; the publishing
+workflow also accepts an explicit `RELEASE_NOTES` override.

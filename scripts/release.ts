@@ -6,6 +6,7 @@
 // publishes the signed bundles and updater manifest. Pass --no-push to keep
 // the commit and tag local.
 import { file, fileURLToPath, write } from "bun";
+import { prepareReleaseChangelog } from "./changelog";
 import { runGit } from "./git";
 import { addMetainfoRelease } from "./metainfo";
 
@@ -66,6 +67,14 @@ if (git("tag", "-l", tag)) {
 	fail(`Tag ${tag} already exists.`);
 }
 
+const date = new Date().toISOString().slice(0, 10);
+const changelogPath = new URL("../CHANGELOG.md", import.meta.url);
+const changelog = prepareReleaseChangelog(
+	await file(changelogPath).text(),
+	version,
+	date,
+);
+
 await updateJsonVersion(packagePath, version);
 await updateJsonVersion(
 	new URL("../src-tauri/tauri.conf.json", import.meta.url),
@@ -96,15 +105,13 @@ const metainfoPath = new URL(
 );
 await write(
 	metainfoPath,
-	addMetainfoRelease(
-		await file(metainfoPath).text(),
-		version,
-		new Date().toISOString().slice(0, 10),
-	),
+	addMetainfoRelease(await file(metainfoPath).text(), version, date),
 );
+await write(changelogPath, changelog);
 
 gitInherit(
 	"add",
+	"CHANGELOG.md",
 	"package.json",
 	"src-tauri/tauri.conf.json",
 	"src-tauri/Cargo.toml",

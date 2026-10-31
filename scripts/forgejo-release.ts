@@ -13,9 +13,10 @@
 //   BUNDLE_DIR          Tauri bundle output (publish only)
 //   UPDATER_TARGET      override the updater platform key (defaults to the
 //                       build machine's platform)
-//   RELEASE_NOTES       optional override of the generated commit notes
+//   RELEASE_NOTES       optional override of the reviewed CHANGELOG.md notes
 
 import { file, Glob, write } from "bun";
+import { releaseNotes as changelogReleaseNotes } from "./changelog";
 import { runGit } from "./git";
 
 /** Artifact paths can come from either a Windows or Linux build runner. */
@@ -87,31 +88,15 @@ async function findRelease(name: string): Promise<ForgejoRelease | null> {
 	return (await response.json()) as ForgejoRelease;
 }
 
-/** Release notes from the commits since the previous v* tag. */
+/** Read the reviewed notes from the exact source revision being published. */
 function releaseNotes(): string {
-	let previous = "";
-	try {
-		const tags = runGit(["tag", "-l", "v*", "--sort=-v:refname"])
-			.split("\n")
-			.map((line) => line.trim())
-			.filter(Boolean);
-		previous = tags.find((name) => name !== tag) ?? "";
-	} catch {
-		// Best effort: fall back to the full history.
-	}
-	const range = previous ? `${previous}..${tag}` : tag;
-	let log = "";
-	try {
-		log = runGit(["log", range, "--pretty=format:- %s"]);
-	} catch {
-		// ignore
-	}
-	return `Release ${tag}\n\n## Changes\n${log || "- No changes recorded."}`;
+	const changelog = runGit(["show", `${tag}:CHANGELOG.md`]);
+	return changelogReleaseNotes(changelog, tag);
 }
 
 async function ensureRelease(
 	name: string,
-	body: string,
+	body: string | (() => string),
 ): Promise<ForgejoRelease> {
 	const existing = await findRelease(name);
 	if (existing) return existing;
@@ -120,7 +105,7 @@ async function ensureRelease(
 		body: JSON.stringify({
 			tag_name: name,
 			name,
-			body,
+			body: typeof body === "function" ? body() : body,
 			draft: false,
 			prerelease: false,
 		}),
@@ -226,7 +211,7 @@ async function publish() {
 	const bundleDir = process.env.BUNDLE_DIR ?? "src-tauri/target/release/bundle";
 	const release = await ensureRelease(
 		tag,
-		process.env.RELEASE_NOTES ?? releaseNotes(),
+		() => process.env.RELEASE_NOTES ?? releaseNotes(),
 	);
 	const target = process.env.UPDATER_TARGET ?? updaterTarget();
 	const artifacts = await signedArtifacts(bundleDir, version);
