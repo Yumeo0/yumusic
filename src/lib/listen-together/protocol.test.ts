@@ -18,6 +18,8 @@ const playback: RoomPlayback = {
 	revision: 1,
 	instance: "track-1",
 	queue: [song, song],
+	autoplayQueue: [],
+	autoplayEnabled: false,
 	index: 1,
 	song,
 	position: 12,
@@ -31,6 +33,34 @@ const parse = (p: unknown) =>
 	);
 
 describe("room protocol", () => {
+	test("shares bounded autoplay and per-entry attribution but strips forged guest attribution", () => {
+		const shared = {
+			...playback,
+			queue: [
+				{ ...song, addedBy: "Host" },
+				{ ...song, addedBy: "Guest" },
+			],
+			autoplayQueue: [song],
+			autoplayEnabled: true,
+		};
+		const message = parse(shared);
+		expect(
+			message?.type === "state" &&
+				message.playback.queue.map((entry) => entry.addedBy),
+		).toEqual(["Host", "Guest"]);
+		expect(message?.type === "state" && message.playback.autoplayQueue).toEqual(
+			[song],
+		);
+		expect(
+			parse({ ...shared, autoplayQueue: Array(101).fill(song) }),
+		).toBeNull();
+		expect(
+			parseRoomAction({ type: "add", songs: [{ ...song, addedBy: "Forged" }] }),
+		).toEqual({ type: "add", songs: [song] });
+		expect(
+			parseRoomAction({ type: "autoplay", index: -1, queueKey: "[]" }),
+		).toBeNull();
+	});
 	test("guest commands are bounded and reorder commands must be permutations", () => {
 		expect(parseRoomAction({ type: "play", song })?.type).toBe("play");
 		expect(parseRoomAction({ type: "add", songs: [] })).toBeNull();

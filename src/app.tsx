@@ -43,6 +43,10 @@ import {
 import { dismissTopOverlay, handleAppBack } from "./lib/player/app-back";
 import { listeningSession } from "./lib/player/listening";
 import {
+	NATIVE_AUDIO_EVENT,
+	type NativeAudioEvent,
+} from "./lib/player/native-audio";
+import {
 	getNowPlayingOpen,
 	getQueueOpen,
 	setNowPlayingOpen,
@@ -260,8 +264,7 @@ function MediaSessionSync() {
 		if (!isTauri()) return;
 		let disposed = false;
 		let unlisten: (() => void) | undefined;
-		listen<MediaControlPayload>("media-control", (event) => {
-			const { action, position } = event.payload;
+		const handle = ({ action, position }: MediaControlPayload) => {
 			const video = live.current.videoElementRef?.current;
 			switch (action) {
 				case "play":
@@ -291,13 +294,23 @@ function MediaSessionSync() {
 					}
 					break;
 			}
-		}).then((fn) => {
+		};
+		const nativeControl = (event: Event) => {
+			const data = (event as CustomEvent<NativeAudioEvent>).detail;
+			if (data.type === "control" && data.action)
+				handle({ action: data.action, position: data.position });
+		};
+		window.addEventListener(NATIVE_AUDIO_EVENT, nativeControl);
+		listen<MediaControlPayload>("media-control", (event) =>
+			handle(event.payload),
+		).then((fn) => {
 			if (disposed) fn();
 			else unlisten = fn;
 		});
 		return () => {
 			disposed = true;
 			unlisten?.();
+			window.removeEventListener(NATIVE_AUDIO_EVENT, nativeControl);
 		};
 	}, []);
 

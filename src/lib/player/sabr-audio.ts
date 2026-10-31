@@ -5,12 +5,13 @@ import type { Innertube, YT } from "youtubei.js/web";
 import { botguardService } from "../youtube/botguard-service";
 import { fetchFunction } from "../youtube/youtube-client";
 import { mountBufferedAudio } from "./media-buffer";
+import { nativeAudio } from "./native-audio";
 
 export async function mountSabrAudio(
 	media: HTMLMediaElement,
 	videoInfo: YT.VideoInfo,
 	innertube: Innertube,
-	options: { signal: AbortSignal; onReady: () => void },
+	options: { signal: AbortSignal; onReady: () => void; autoPlay?: boolean },
 ) {
 	const videoId = videoInfo.basic_info.id;
 	const streaming = videoInfo.streaming_data;
@@ -45,31 +46,34 @@ export async function mountSabrAudio(
 		audioHighWaterMark: 256 * 1024,
 		videoHighWaterMark: 0,
 	};
-	await mountBufferedAudio(
-		media,
-		(startTimeMs) => {
-			const stream = new SabrStream(config);
-			try {
-				const { audioStream, selectedFormats } = stream.start({
-					enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
-					audioPreferences: {},
-					isPostLiveDvr: false,
-					startTimeMs,
-				});
-				const mime = selectedFormats.audioFormat.mimeType;
-				if (!mime) throw new Error("SABR audio format is missing");
-				return {
-					audio: audioStream as ReadableStream<Uint8Array>,
-					mime,
-					dispose: () => {
-						void stream.abort().catch(() => undefined);
-					},
-				};
-			} catch (error) {
-				void stream.abort().catch(() => undefined);
-				throw error;
-			}
-		},
-		{ ...options, duration: videoInfo.basic_info.duration ?? 0 },
-	);
+	const createSession = (startTimeMs: number) => {
+		const stream = new SabrStream(config);
+		try {
+			const { audioStream, selectedFormats } = stream.start({
+				enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
+				audioPreferences: {},
+				isPostLiveDvr: false,
+				startTimeMs,
+			});
+			const mime = selectedFormats.audioFormat.mimeType;
+			if (!mime) throw new Error("SABR audio format is missing");
+			return {
+				audio: audioStream as ReadableStream<Uint8Array>,
+				mime,
+				dispose: () => {
+					void stream.abort().catch(() => undefined);
+				},
+			};
+		} catch (error) {
+			void stream.abort().catch(() => undefined);
+			throw error;
+		}
+	};
+	const streamOptions = {
+		...options,
+		duration: videoInfo.basic_info.duration ?? 0,
+	};
+	const native = nativeAudio(media);
+	if (native) await native.mountStream(createSession, streamOptions);
+	else await mountBufferedAudio(media, createSession, streamOptions);
 }

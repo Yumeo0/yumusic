@@ -17,6 +17,12 @@ QR codes are generated and read locally. After camera permission is granted, the
 
 ## Guest controls
 
+Queue entries show **Added by** with the contributor's room username, including
+accepted requests. Attribution follows each entry through reordering and song
+version changes. The host's autoplay setting and up to 100 recommendations are
+shared with guests. Selecting a recommendation uses **Choose songs** permissions
+and is rejected if the recommendation list changed before approval.
+
 Under **Settings**, the **Guest controls** panel offers **Allow**, **Request approval**, and **Deny** independently for choosing songs, adding/playing next, skipping/previous, removal, reordering/shuffle, play/pause, seeking, and repeat mode. **Host only**, **Ask first**, and **Shared controls** apply one mode to all categories. New rooms default to **Shared controls**. Settings persist locally, can be changed while hosting, and are shown to guests. Song additions work even when the queue is empty, including when approval is required.
 
 Allowed actions are executed by the host's player and then synchronized to everyone. Requested actions appear under **Guest requests**, with cover art for songs and a description of the requested action. Approve or decline them there. Denied actions never change the host player, including attempts to send commands outside the UI. Switching a category to Deny cancels its pending requests.

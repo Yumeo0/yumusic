@@ -122,8 +122,15 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 	const songs = value.songs;
 	switch (value.type) {
 		case "autoplay":
-			return Number.isInteger(value.index) && Number(value.index) >= 0 && Number(value.index) < 100 && text(value.queueKey, 2000)
-				? { type: "autoplay", index: Number(value.index), queueKey: String(value.queueKey) }
+			return Number.isInteger(value.index) &&
+				Number(value.index) >= 0 &&
+				Number(value.index) < 100 &&
+				text(value.queueKey, 2000)
+				? {
+						type: "autoplay",
+						index: Number(value.index),
+						queueKey: String(value.queueKey),
+					}
 				: null;
 		case "play":
 		case "playNext":
@@ -140,7 +147,10 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 			)
 				return null;
 			if (value.type === "add")
-				return { type: "add", songs: songs.map((song) => wireSong(song, false)) };
+				return {
+					type: "add",
+					songs: songs.map((song) => wireSong(song, false)),
+				};
 			return Number.isInteger(value.index) &&
 				Number(value.index) >= 0 &&
 				Number(value.index) < songs.length
@@ -191,7 +201,7 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 
 /** Only small, bounded, versioned JSON messages cross the room boundary. */
 export function parseMessage(raw: unknown): RoomMessage | null {
-	if (typeof raw !== "string" || raw.length > 1_200_000) return null;
+	if (typeof raw !== "string" || raw.length > 1_500_000) return null;
 	try {
 		const m: unknown = JSON.parse(raw);
 		if (!record(m)) return null;

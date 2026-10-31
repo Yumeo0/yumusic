@@ -225,7 +225,10 @@ export function QueuePanel() {
 							const source = isAutoplayRow ? autoplayTracks[i] : queue[i];
 							// Show and play the album track when the video was
 							// resolved to one while playing.
-							const song = versions.get(source.id) ?? source;
+							const version = versions.get(source.id);
+							const song = version
+								? { ...version, addedBy: source.addedBy }
+								: source;
 							const isCurrent = !isAutoplayRow && i === currentIndex;
 							return (
 								<SongContextMenu
@@ -290,7 +293,14 @@ export function QueuePanel() {
 											<p className="truncate text-xs text-muted-foreground">
 												<ArtistLinks song={song} />
 											</p>
-											{song.addedBy && <p className="truncate text-[10px] text-muted-foreground/70" title={`Added by ${song.addedBy}`}>Added by {song.addedBy}</p>}
+											{song.addedBy && (
+												<p
+													className="truncate text-[10px] text-muted-foreground/70"
+													title={`Added by ${song.addedBy}`}
+												>
+													Added by {song.addedBy}
+												</p>
+											)}
 										</div>
 										<div className="flex items-center gap-2 pr-1">
 											<DownloadedBadge songId={song.id} />

@@ -30,7 +30,9 @@ export function songVersionReplacement(id: string): Song | undefined {
  */
 export function rememberSongVersion(song: Song, version: Song): void {
 	if (song.id === version.id) return;
-	replacements.set(song.id, version);
+	// Queue ownership must never leak into the global song metadata cache.
+	const { addedBy: _addedBy, ...metadata } = version;
+	replacements.set(song.id, metadata);
 	snapshot = new Map(replacements);
 	for (const listener of listeners) listener();
 }

@@ -6,14 +6,12 @@
 use std::sync::Mutex;
 use std::time::Duration;
 
-use playwire::{
-	Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, Repeat, Track,
-};
+use playwire::{Capabilities, Event, MediaControls, PlaybackState, PlayerConfig, Repeat, Track};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 /// Snapshot of the player, pushed from the frontend.
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct MediaState {
 	pub id: Option<String>,
@@ -139,7 +137,16 @@ impl MediaSession {
 }
 
 #[tauri::command]
-pub fn update_media_session(app: AppHandle, snapshot: MediaState) {
-	use tauri::Manager;
-	app.state::<MediaSession>().update(snapshot);
+pub async fn update_media_session(app: AppHandle, snapshot: MediaState) -> Result<(), String> {
+	#[cfg(target_os = "android")]
+	{
+		let _ = app;
+		super::native_audio::metadata(&snapshot).await
+	}
+	#[cfg(not(target_os = "android"))]
+	{
+		use tauri::Manager;
+		app.state::<MediaSession>().update(snapshot);
+		Ok(())
+	}
 }

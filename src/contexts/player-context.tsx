@@ -25,8 +25,10 @@ import {
 	useRoomAutoplay,
 	useRoomRepeat,
 	useRoomRole,
+	useRoomUsername,
 } from "@/lib/listen-together/room";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
+import { NativeAudioElement, nativeAudio } from "@/lib/player/native-audio";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
@@ -38,6 +40,7 @@ import {
 } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { applySongDescription } from "@/lib/utils/description";
+import { IS_ANDROID } from "@/lib/utils/tauri";
 import {
 	biggestThumb,
 	hiResThumb,
@@ -107,11 +110,11 @@ interface PlayerContextType {
 	autoplayTracks: Song[];
 	autoplayEnabled: boolean;
 	/** Plays an autoplay track, promoting it and its predecessors to the queue. */
-	playAutoplayAt: (index: number) => void;
-	addToQueue: (songs: Song[]) => void;
+	playAutoplayAt: (index: number, addedBy?: string) => void;
+	addToQueue: (songs: Song[], contributor?: string) => void;
 	setQueue: (songs: Song[]) => void;
 	/** Insert a song directly after the current one without starting it. */
-	playNext: (song: Song) => void;
+	playNext: (song: Song, contributor?: string) => void;
 	/** Remove the entry at `index`; advances playback when it was current. */
 	removeFromQueueAt: (index: number) => void;
 	/** Shuffles the tracks after the current one; playback stays untouched. */
@@ -347,11 +350,22 @@ function selectionAction(songs: Song[], index: number): RoomAction {
 	};
 }
 
+function attributeLocal(song: Song): Song {
+	const room = listenRoom.getSnapshot();
+	const username = room.members.find((m) => m.id === room.selfId)?.profile
+		.username;
+	return room.role === "host" && username && !song.addedBy
+		? { ...song, addedBy: username }
+		: song;
+}
+
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const roomRole = useRoomRole();
+	const roomUsername = useRoomUsername();
 	const [settings, updateSettings] = useSettings();
 	const roomAutoplay = useRoomAutoplay();
-	const autoplayEnabled = roomRole === "guest" ? roomAutoplay : settings.autoplay;
+	const autoplayEnabled =
+		roomRole === "guest" ? roomAutoplay : settings.autoplay;
 	const sharedRepeat = useRoomRepeat();
 	const repeatMode = sharedRepeat ?? settings.repeatMode;
 	const setRepeatMode = useCallback(
@@ -391,6 +405,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const deckARef = useRef<HTMLVideoElement | null>(null);
 	const deckBRef = useRef<HTMLVideoElement | null>(null);
+	const endedHandlerRef = useRef<(index: number) => void>(() => undefined);
 	/**
 	 * The deck owning playback. Flipped when a crossfade completes (the
 	 * preloaded deck becomes active), which is also when `videoElementRef`
@@ -426,6 +441,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	/** Read by the fade loop so volume changes mid-fade stay respected. */
 	const volumeRef = useRef(volume);
 	volumeRef.current = volume;
+
+	useEffect(() => {
+		if (!IS_ANDROID) return;
+		const elements = [new NativeAudioElement(0), new NativeAudioElement(1)];
+		elements.forEach((element, index) => {
+			decksRef.current[index].ref.current =
+				element as unknown as HTMLVideoElement;
+			element.addEventListener("ended", () => endedHandlerRef.current(index));
+		});
+		videoElementRef.current =
+			decksRef.current[activeDeckRef.current].ref.current;
+		return () => {
+			for (const element of elements) element.dispose();
+		};
+	}, []);
 
 	// The app reads playback through `videoElementRef`; point it at deck A
 	// before any track loads so consumers never hold a stale element.
@@ -479,6 +509,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			try {
 				await mountSabrAudio(videoEl, videoInfo, innertube, {
 					signal: controller.signal,
+					autoPlay: options.autoPlay,
 					onReady: () => {
 						deck.ready = true;
 						if (options.autoPlay) {
@@ -517,6 +548,38 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		): Promise<boolean> => {
 			const videoEl = deck.ref.current;
 			if (!videoEl) return Promise.resolve(false);
+			const native = nativeAudio(videoEl);
+			if (native) {
+				teardownDeck(deck);
+				const controller = new AbortController();
+				deck.stop = () => controller.abort();
+				deck.videoId = song.id;
+				return native
+					.mountFile(
+						entry.path,
+						parseDuration(song.duration),
+						controller.signal,
+						options.autoPlay,
+					)
+					.then(() => {
+						if (controller.signal.aborted) return true;
+						deck.ready = true;
+						options.onReady?.();
+						if (options.autoPlay) {
+							native.volume = volumeRef.current;
+							void native.play().catch(() => undefined);
+						}
+						return true;
+					})
+					.catch((error: unknown) => {
+						if (controller.signal.aborted) return true;
+						console.warn(
+							"[PlayerContext] Native downloaded playback failed:",
+							error,
+						);
+						return false;
+					});
+			}
 
 			teardownDeck(deck);
 			deck.generation += 1;
@@ -651,7 +714,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				// queue entry takes over so the current row stays consistent.
 				setQueueState((prev) =>
 					prev.map((entry) =>
-						entry.id === state.originalId ? state.nextSong : entry,
+						entry.id === state.originalId
+							? { ...state.nextSong, addedBy: entry.addedBy }
+							: entry,
 					),
 				);
 			}
@@ -1141,7 +1206,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 							played = applySongVersion(song, version);
 							rememberSongVersion(song, played);
 							const replace = (entry: Song) =>
-								entry.id === song.id ? played : entry;
+								entry.id === song.id
+									? { ...played, addedBy: entry.addedBy }
+									: entry;
 							setCurrentSong((prev) =>
 								prev && prev.id === song.id ? played : prev,
 							);
@@ -1275,18 +1342,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		};
 	}, [roomRole, settings.autoplay, autoplaySongId, autoplayTracks.length]);
 
-	const attributeLocal = (song: Song): Song => {
-		const room = listenRoom.getSnapshot();
-		const username = room.members.find((m) => m.id === room.selfId)?.profile.username;
-		return room.role === "host" && username && !song.addedBy
-			? { ...song, addedBy: username }
-			: song;
-	};
-
 	const play = useCallback(
 		async (song: Song, newQueue?: Song[]) => {
 			// The entry may resolve to its album track: match and queue that.
-			const target = attributeLocal({ ...(songVersionReplacement(song.id) ?? song), addedBy: song.addedBy });
+			const target = attributeLocal({
+				...(songVersionReplacement(song.id) ?? song),
+				addedBy: song.addedBy,
+			});
 			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
@@ -1333,7 +1395,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			const song = songs[index];
 			if (!song) return;
 			// The entry may resolve to its album track: match and queue that.
-			const target = { ...(songVersionReplacement(song.id) ?? song), addedBy: song.addedBy };
+			const target = {
+				...(songVersionReplacement(song.id) ?? song),
+				addedBy: song.addedBy,
+			};
 			if (currentSong?.id === target.id) {
 				setIsPlaying(true);
 				return;
@@ -1344,11 +1409,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			// A fresh start gets a fresh radio (same as `play`).
 			setAutoplayTracks([]);
 			autoplayForRef.current = null;
-			setQueueState(
-				song === target
-					? songs
-					: songs.map((entry) => (entry.id === song.id ? target : entry)),
-			);
+			setQueueState(songs.map((entry, i) => (i === index ? target : entry)));
 			setCurrentIndex(index);
 			await playSong(target);
 		},
@@ -1488,12 +1549,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	}, [currentIndex, queue, history, currentSong, playSong, repeatMode]);
 
 	const playAutoplayAt = useCallback(
-		(index: number) => {
-			const picked = autoplayTracks[index];
+		(index: number, addedBy?: string) => {
+			const promoted = autoplayTracks
+				.slice(0, index + 1)
+				.map((song) => (addedBy ? { ...song, addedBy } : attributeLocal(song)));
+			const picked = promoted[index];
 			if (!picked) return;
 			// Everything up to the picked track joins the user queue above the
 			// separator; the rest stays in the autoplay section.
-			const promoted = autoplayTracks.slice(0, index + 1);
 			setAutoplayTracks(autoplayTracks.slice(index + 1));
 			setQueueState((prev) => [...prev, ...promoted]);
 			if (currentSong) {
@@ -1505,16 +1568,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[autoplayTracks, queue.length, currentSong, playSong],
 	);
 
-	const addToQueue = useCallback((songs: Song[]) => {
-		setQueueState((prev) => [...prev, ...songs.map(attributeLocal)]);
+	const addToQueue = useCallback((songs: Song[], contributor?: string) => {
+		const additions = songs.map((song) =>
+			attributeLocal({ ...song, addedBy: contributor }),
+		);
+		setQueueState((prev) => [...prev, ...additions]);
 	}, []);
 
 	const playNext = useCallback(
-		(song: Song) => {
+		(song: Song, contributor?: string) => {
+			const addition = attributeLocal({ ...song, addedBy: contributor });
 			const insertAt = currentIndex < 0 ? 0 : currentIndex + 1;
 			setQueueState((prev) => {
 				const next = [...prev];
-				next.splice(insertAt, 0, attributeLocal(song));
+				next.splice(insertAt, 0, addition);
 				return next;
 			});
 		},
@@ -1614,11 +1681,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	}, []);
 
 	useEffect(() => {
-		if (roomRole) abortCrossfade();
-		if (roomRole === "guest") setAutoplayTracks([]);
-		if (roomRole === "host") {
+		if (roomRole === "host" && roomUsername) {
 			setQueueState((songs) => songs.map(attributeLocal));
 		}
+	}, [roomRole, roomUsername]);
+
+	useEffect(() => {
+		if (roomRole) abortCrossfade();
 		return () => {
 			if (roomRole === "guest") {
 				// Detach synchronization without removing the track underneath an
@@ -1633,12 +1702,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	}, [roomRole, abortCrossfade]);
 
 	const enqueue = useCallback(
-		(songs: Song[]) => {
+		(songs: Song[], contributor?: string) => {
 			if (!songs.length) return;
 			if (!currentSong && queue.length === 0)
-				return play(songs[0], songs.slice(1));
+				return play(
+					attributeLocal({ ...songs[0], addedBy: contributor }),
+					songs
+						.slice(1)
+						.map((song) => attributeLocal({ ...song, addedBy: contributor })),
+				);
 			else {
-				addToQueue(songs);
+				addToQueue(songs, contributor);
 				showToast("Added to queue");
 			}
 		},
@@ -1662,7 +1736,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			playAutoplayAt: localControl(playAutoplayAt, (index) => ({
 				type: "autoplay",
 				index,
-				queueKey: JSON.stringify(autoplayTracks.map((song) => song.id)),
+				queueKey: JSON.stringify(
+					autoplayTracks.slice(0, 100).map((song) => song.id),
+				),
 			})),
 			addToQueue: localControl(enqueue, (songs) => ({
 				type: "add",
@@ -1686,8 +1762,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				};
 			}),
 			playNext: localControl(
-				(song: Song) => {
-					playNext(song);
+				(song: Song, contributor?: string) => {
+					playNext(song, contributor);
 					showToast("Playing next");
 				},
 				(song) => ({ type: "playNext", song }),
@@ -1766,6 +1842,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[volume, setVolume],
 	);
 
+	endedHandlerRef.current = handleEnded;
 	return (
 		<PlayerContext.Provider value={playerValue}>
 			<PlayerControlsContext.Provider value={controlsValue}>
@@ -1775,18 +1852,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 						{/* Two hidden media decks — one plays, the idle one buffers
 						    the next track so a crossfade can overlap the two. Both
 						    must always be mounted so streams can attach. */}
-						<video
-							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
-							onEnded={() => handleEnded(0)}
-							playsInline
-							ref={deckARef}
-						/>
-						<video
-							className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
-							onEnded={() => handleEnded(1)}
-							playsInline
-							ref={deckBRef}
-						/>
+						{!IS_ANDROID && (
+							<>
+								<video
+									className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+									onEnded={() => handleEnded(0)}
+									playsInline
+									ref={deckARef}
+								/>
+								<video
+									className="pointer-events-none fixed top-0 left-0 h-px w-px opacity-0"
+									onEnded={() => handleEnded(1)}
+									playsInline
+									ref={deckBRef}
+								/>
+							</>
+						)}
 					</QueueSheetContext.Provider>
 				</PlayerVolumeContext.Provider>
 			</PlayerControlsContext.Provider>

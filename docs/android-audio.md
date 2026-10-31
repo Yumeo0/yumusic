@@ -1,0 +1,48 @@
+# Android audio
+
+Android plays streams and downloaded files through Media3/ExoPlayer in a
+`MediaSessionService`. It exposes YuMusic metadata, artwork, play/pause, seeking,
+previous and next to Android's media notification, lock screen, Bluetooth and
+headset controls. Audio focus, headphone disconnection and the playback wake lock
+are managed natively. System controls follow the same Listen together permissions
+as the in-app controls.
+
+The two native playback decks share an Android audio session. The service sends
+the standard `OPEN_AUDIO_EFFECT_CONTROL_SESSION` and
+`CLOSE_AUDIO_EFFECT_CONTROL_SESSION` broadcasts for external equalizers and
+audio-effect apps. Compatibility depends on the device and effect app.
+
+YouTube authentication, PO tokens and SABR fetching stay in the app. Compressed
+audio is passed in batches of at most 64 KiB to a bounded 2 MiB native pipe per
+deck. Native decoders handle extraction, decoding and output; Android does not
+create hidden HTML media elements or an MSE audio buffer. The native player keeps
+up to 45 seconds ahead, and applies backpressure to the producer. Unbuffered
+seeks restart SABR at the requested time with a fresh initialization segment;
+MP4 and WebM use a time-based extractor seek map. Downloaded audio plays directly
+from its local file. Missing MP4/WebM seek indexes are rebuilt from fragment
+headers on the native loader thread and cached for the track's lifetime.
+
+Backgrounding the app or locking the screen keeps the playback service running.
+Removing the app from recent tasks stops playback because its queue and SABR
+producer belong to the activity. Playback resumption after process death and
+Android Auto browsing are not implemented.
+
+Rebuild and reinstall the Android app after changing Kotlin, the manifest or
+Rust commands; Vite hot reload alone cannot update the native service.
+
+Validation:
+
+```powershell
+bun test src/lib/player/native-audio.test.ts
+cd src-tauri/gen/android
+./gradlew.bat :app:testArm64DebugUnitTest -x :app:rustBuildArm64Debug
+```
+
+The native tests use generated silent AAC/MP4 and Opus/WebM fixtures and check
+unbuffered forward/backward seeks, bounded buffering and session lifecycle.
+Re-generate the fixtures with FFmpeg:
+
+```sh
+ffmpeg -f lavfi -i anullsrc=r=48000:cl=stereo -t 20 -c:a aac -b:a 32k -movflags empty_moov+frag_keyframe+default_base_moof -frag_duration 2000000 -f mp4 fragmented.m4a
+ffmpeg -f lavfi -i anullsrc=r=48000:cl=stereo -t 20 -c:a libopus -b:a 32k -cluster_time_limit 2000 -live 1 -f webm fragmented.webm
+```

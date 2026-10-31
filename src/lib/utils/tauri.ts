@@ -54,6 +54,7 @@ export function proxiedFetch(
  * are omitted there.
  */
 export const IS_MOBILE = OS === "android" || OS === "ios";
+export const IS_ANDROID = OS === "android";
 
 /**
  * Android WebView's `shouldInterceptRequest` does not expose request bodies

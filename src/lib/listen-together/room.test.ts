@@ -155,6 +155,8 @@ const state: Omit<RoomPlayback, "revision" | "sentAt"> = {
 	queue: [
 		{ id: "abcdefghijk", title: "Test", artist: "Artist", thumbnail: "" },
 	],
+	autoplayQueue: [],
+	autoplayEnabled: false,
 	index: 0,
 	song: { id: "abcdefghijk", title: "Test", artist: "Artist", thumbnail: "" },
 	position: 25,
@@ -163,6 +165,45 @@ const state: Omit<RoomPlayback, "revision" | "sentAt"> = {
 };
 
 describe("PeerJS room lifecycle", () => {
+	test("attributes approved and allowed additions to the verified guest and syncs autoplay updates", async () => {
+		const network = new Network();
+		const host = create(network);
+		const guest = create(network);
+		host.setJoinPolicy("everyone");
+		await host.connect(profile("Host"));
+		host.broadcastPlayback({
+			...state,
+			autoplayQueue: state.queue,
+			autoplayEnabled: true,
+		});
+		await guest.connect(profile("Guest"), host.getSnapshot().invite);
+		await until(guest, (s) => s.status === "connected" && !!s.playback);
+		expect(guest.getSnapshot().playback?.autoplayQueue).toEqual(state.queue);
+		const applied: RoomAction[] = [];
+		host.setActionHandler((action) => {
+			applied.push(action);
+		});
+		for (const mode of ["allow", "suggest"] as const) {
+			host.setGuestPermissions({ ...defaultPermissions, add: mode });
+			await flush();
+			guest.requestAction({
+				type: "add",
+				songs: state.queue.map((song) => ({ ...song, addedBy: "Host" })),
+			});
+			await flush();
+			if (mode === "suggest") {
+				host.resolveRequest(host.getSnapshot().requests[0].id, true);
+				await flush();
+			}
+		}
+		expect(
+			applied.map((action) => action.type === "add" && action.songs[0].addedBy),
+		).toEqual(["Guest", "Guest"]);
+		host.broadcastPlayback({ ...state, autoplayEnabled: false });
+		await flush();
+		expect(guest.getSnapshot().playback?.autoplayEnabled).toBe(false);
+		expect(guest.getSnapshot().playback?.autoplayQueue).toEqual([]);
+	});
 	test("trusted auto-approval admits friends and leaves strangers awaiting approval", async () => {
 		const network = new Network();
 		const identity = generateRoomIdentity();

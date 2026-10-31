@@ -990,6 +990,11 @@ function QueueRow({
 					<p className="truncate text-xs text-muted-foreground">
 						<ArtistLinks song={song} />
 					</p>
+					{song.addedBy && (
+						<p className="truncate text-[10px] text-muted-foreground/70">
+							Added by {song.addedBy}
+						</p>
+					)}
 				</div>
 				<div className="flex items-center gap-2 pr-1">
 					<DownloadedBadge songId={song.id} />

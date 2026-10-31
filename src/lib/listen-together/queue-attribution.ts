@@ -7,8 +7,13 @@ export function attributeSongs(songs: Song[], username: string): Song[] {
 }
 
 /** Only the host stamps guest actions, using the admitted participant's profile. */
-export function attributeAction(action: RoomAction, username: string): RoomAction {
+export function attributeAction(
+	action: RoomAction,
+	username: string,
+): RoomAction {
 	switch (action.type) {
+		case "autoplay":
+			return { ...action, addedBy: username };
 		case "play":
 		case "playNext":
 			return { ...action, song: attributeSongs([action.song], username)[0] };

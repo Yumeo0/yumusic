@@ -4,7 +4,8 @@
 
 ### Features
 
-- Added Listen together to listen with friends using synchronized playback, a shared queue, and song requests.
+- Added Listen together with synchronized playback, a shared queue with contributor names and autoplay recommendations, and song requests.
+- Added native Android audio playback with lock-screen controls, background playback, and equalizer support.
 
 ### Improvements
 

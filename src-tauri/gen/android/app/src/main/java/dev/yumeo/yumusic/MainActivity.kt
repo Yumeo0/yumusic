@@ -5,10 +5,13 @@ import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.Keep
+import androidx.media3.common.util.UnstableApi
+import dev.yumeo.yumusic.audio.AudioBridge
 import java.security.KeyStore
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
+@UnstableApi
 class MainActivity : TauriActivity() {
   private val poTokens by lazy { PoTokenWebView(this) }
   private var appWebView: WebView? = null
@@ -16,6 +19,7 @@ class MainActivity : TauriActivity() {
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
     appWebView = webView
+    AudioBridge.attach(webView)
   }
 
   @Keep
@@ -26,6 +30,15 @@ class MainActivity : TauriActivity() {
 
   @Keep
   fun resetPoToken() = poTokens.reset()
+
+  @Keep
+  fun nativeAudioCommand(data: String) = AudioBridge.command(this, data)
+
+  @Keep
+  fun nativeAudioAppend(deck: Int, id: String, epoch: Int, bytes: ByteArray): Boolean = AudioBridge.append(deck, id, epoch, bytes)
+
+  @Keep
+  fun updateAudioMetadata(data: String) = AudioBridge.metadata(data)
 
   @Keep
   fun trustedRootCertificates(): Array<ByteArray> {
@@ -57,6 +70,7 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    AudioBridge.detach(appWebView)
     poTokens.reset()
     super.onDestroy()
   }

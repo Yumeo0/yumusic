@@ -41,9 +41,13 @@ export function RoomPlaybackBridge() {
 					throw new Error("The queue changed. Please try again.");
 				switch (action.type) {
 					case "autoplay":
-						if (queueKey(p.autoplayTracks.slice(0, 100)) !== action.queueKey || !p.autoplayTracks[action.index])
+						if (
+							!p.autoplayEnabled ||
+							queueKey(p.autoplayTracks.slice(0, 100)) !== action.queueKey ||
+							!p.autoplayTracks[action.index]
+						)
 							throw new Error("The autoplay queue changed. Please try again.");
-						p.playAutoplayAt(action.index);
+						p.playAutoplayAt(action.index, action.addedBy);
 						break;
 					case "play":
 						await p.play(action.song);
@@ -52,10 +56,10 @@ export function RoomPlaybackBridge() {
 						await p.playQueue(action.songs, action.index);
 						break;
 					case "add":
-						await p.addToQueue(action.songs);
+						await p.addToQueue(action.songs, action.songs[0]?.addedBy);
 						break;
 					case "playNext":
-						p.playNext(action.song);
+						p.playNext(action.song, action.song.addedBy);
 						break;
 					case "next":
 						await p.next();
@@ -145,6 +149,10 @@ export function RoomPlaybackBridge() {
 				const actualSong = p.currentSong
 					? {
 							...p.currentSong,
+							addedBy:
+								p.queue[p.currentIndex]?.id === p.currentSong.id
+									? p.queue[p.currentIndex].addedBy
+									: p.currentSong.addedBy,
 							id: p.videoInfo?.basic_info.id || p.currentSong.id,
 						}
 					: null;
@@ -169,8 +177,12 @@ export function RoomPlaybackBridge() {
 					const start = Math.max(0, index - 100);
 					listenRoom.broadcastPlayback({
 						instance,
-						queue: queue.slice(start, start + 300).map((song) => wireSong(song)),
-						autoplayQueue: p.autoplayEnabled ? p.autoplayTracks.slice(0, 100).map((song) => wireSong(song)) : [],
+						queue: queue
+							.slice(start, start + 300)
+							.map((song) => wireSong(song)),
+						autoplayQueue: p.autoplayEnabled
+							? p.autoplayTracks.slice(0, 100).map((song) => wireSong(song))
+							: [],
 						autoplayEnabled: p.autoplayEnabled,
 						index: p.currentSong ? index - start : -1,
 						song: actualSong ? wireSong(actualSong) : null,

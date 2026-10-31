@@ -41,7 +41,7 @@ export type RoomAction =
 	| { type: "playQueue"; songs: Song[]; index: number }
 	| { type: "add"; songs: Song[] }
 	| { type: "playNext"; song: Song }
-	| { type: "autoplay"; index: number; queueKey: string }
+	| { type: "autoplay"; index: number; queueKey: string; addedBy?: string }
 	| { type: "next" | "previous" | "pause" | "resume" | "toggle" | "shuffle" }
 	| { type: "remove"; index: number }
 	| { type: "reorder"; order: number[] }
@@ -103,7 +103,9 @@ export function actionLabel(action: RoomAction, subject?: Song | null): string {
 		case "playQueue":
 			return `Play ${action.songs[action.index]?.title} and its queue`;
 		case "autoplay":
-			return subject ? `Play ${subject.title}` : "Play an autoplay recommendation";
+			return subject
+				? `Play ${subject.title}`
+				: "Play an autoplay recommendation";
 		case "add":
 			return action.songs.length === 1
 				? `Queue ${action.songs[0].title}`

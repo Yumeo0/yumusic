@@ -3,6 +3,7 @@ mod downloads;
 mod http_client;
 mod login_session;
 mod media_controls;
+mod native_audio;
 mod po_token;
 mod proxy;
 
@@ -390,6 +391,8 @@ pub fn run() {
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
+			native_audio::native_audio_command,
+			native_audio::native_audio_append,
 			po_token::mint_po_token,
 			get_cookie,
 			validate_session,

@@ -29,7 +29,6 @@ import {
 	validPolicy,
 } from "./join-settings";
 import { type RoomProfile, validProfile } from "./profile";
-import { attributeAction } from "./queue-attribution";
 import {
 	type Participant,
 	parseInvite,
@@ -38,6 +37,7 @@ import {
 	type RoomMessage,
 	type RoomPlayback,
 } from "./protocol";
+import { attributeAction } from "./queue-attribution";
 
 export interface RoomState {
 	selfId: string | null;
@@ -1122,7 +1122,9 @@ export class ListenRoom {
 			id,
 			song:
 				actionSong(action) ??
-				(action.type === "autoplay" ? this.state.playback?.autoplayQueue[action.index] : null) ??
+				(action.type === "autoplay"
+					? this.state.playback?.autoplayQueue[action.index]
+					: null) ??
 				(action.type === "remove"
 					? (this.state.playback?.queue[action.index] ?? null)
 					: null),
@@ -1191,7 +1193,10 @@ export class ListenRoom {
 						throw new Error("The queue changed. Please try again.");
 					if (!this.actionHandler)
 						throw new Error("The host player is not ready yet.");
-					await this.actionHandler(attributeAction(request.action, request.profile.username), request.context);
+					await this.actionHandler(
+						attributeAction(request.action, request.profile.username),
+						request.context,
+					);
 				} catch (error) {
 					if (approved)
 						this.update({
@@ -1278,6 +1283,16 @@ export const useRoomRepeat = () =>
 	);
 
 export const useRoomAutoplay = () =>
-	useSyncExternalStore(listenRoom.subscribe, () =>
-		listenRoom.getSnapshot().playback?.autoplayEnabled ?? false,
+	useSyncExternalStore(
+		listenRoom.subscribe,
+		() => listenRoom.getSnapshot().playback?.autoplayEnabled ?? false,
 	);
+
+export const useRoomUsername = () =>
+	useSyncExternalStore(listenRoom.subscribe, () => {
+		const room = listenRoom.getSnapshot();
+		return (
+			room.members.find((member) => member.id === room.selfId)?.profile
+				.username ?? null
+		);
+	});
