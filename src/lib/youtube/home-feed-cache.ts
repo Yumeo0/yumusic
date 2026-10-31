@@ -1,79 +1,127 @@
 import type { Song } from "@/contexts/player-context";
+import { normalizeHomeSectionTitle } from "@/lib/stores/home-sections";
 import type { HomeSection } from "./feed-items";
-import { homeSectionsFromFeed, withUpdatedSong } from "./feed-items";
+import {
+	feedItemKey,
+	homeSectionsFromFeed,
+	withUpdatedSong,
+} from "./feed-items";
 import { getYoutubeClient, type HomeFeed } from "./youtube-client";
 
-/**
- * Home recommendations change slowly, so a snapshot is reused instead of
- * refetching every time the home page remounts (e.g. switching tabs). Thirty
- * minutes keeps the feed feeling current without a request on every visit.
- */
 export const HOME_FEED_TTL_MS = 30 * 60 * 1000;
+/** Guard against an upstream feed that never ends. */
+const MAX_HOME_CONTINUATION_PAGES = 10;
 
 export interface HomeFeedSnapshot {
-	/** Live feed handle; still valid for continuation requests while cached. */
 	feed: HomeFeed;
-	/** Parsed sections of the first page. */
 	sections: HomeSection[];
 }
-
 interface CacheEntry extends HomeFeedSnapshot {
 	timestamp: number;
+	pages: number;
 }
 
-let entry: CacheEntry | null = null;
-/** In-flight load shared by concurrent callers. */
-let inFlight: Promise<HomeFeedSnapshot> | null = null;
-
-function isFresh(cached: CacheEntry | null): cached is CacheEntry {
-	return !!cached && Date.now() - cached.timestamp < HOME_FEED_TTL_MS;
+function isFresh(entry: CacheEntry | null): entry is CacheEntry {
+	return !!entry && Date.now() - entry.timestamp < HOME_FEED_TTL_MS;
 }
 
-/**
- * The cached first page while it is still fresh, otherwise null. Lets a view
- * paint the previous feed immediately instead of flashing its skeleton when
- * navigating back within the TTL.
- */
-export function readCachedHomeFeed(): HomeSection[] | null {
-	return isFresh(entry) ? entry.sections : null;
-}
+/** Loads all page data independently of scrolling; artwork stays lazy-loaded. */
+export class HomeFeedCache {
+	private entry: CacheEntry | null = null;
+	private inFlight: Promise<HomeFeedSnapshot> | null = null;
+	private listeners = new Set<(sections: HomeSection[]) => void>();
 
-/**
- * Returns the home feed's first page, reusing a snapshot fetched less than
- * {@link HOME_FEED_TTL_MS} ago. Concurrent callers share one request; a failed
- * load is not cached, so the next visit retries.
- */
-export async function getHomeFeed(): Promise<HomeFeedSnapshot> {
-	if (isFresh(entry)) return entry;
-	if (!inFlight) {
-		inFlight = loadHomeFeed().finally(() => {
-			inFlight = null;
-		});
+	constructor(
+		private fetchFeed: () => Promise<HomeFeed>,
+		private parseFeed = homeSectionsFromFeed,
+	) {}
+
+	read(): HomeSection[] | null {
+		return isFresh(this.entry) ? this.entry.sections : null;
 	}
-	return inFlight;
+
+	async get(
+		onUpdate?: (sections: HomeSection[]) => void,
+	): Promise<HomeFeedSnapshot> {
+		if (onUpdate) this.listeners.add(onUpdate);
+		try {
+			if (isFresh(this.entry)) onUpdate?.(this.entry.sections);
+			if (!this.inFlight) {
+				this.inFlight = this.load().finally(() => {
+					this.inFlight = null;
+				});
+			}
+			return await this.inFlight;
+		} finally {
+			if (onUpdate) this.listeners.delete(onUpdate);
+		}
+	}
+
+	patchSong(updated: Song) {
+		if (!this.entry) return;
+		this.entry.sections = withUpdatedSong(this.entry.sections, updated);
+	}
+
+	private publish(sections: HomeSection[]) {
+		for (const listener of this.listeners) listener(sections);
+	}
+
+	private async load(): Promise<HomeFeedSnapshot> {
+		let entry = this.entry;
+		if (!isFresh(entry)) {
+			const feed = await this.fetchFeed();
+			entry = {
+				feed,
+				sections: this.parseFeed(feed),
+				timestamp: Date.now(),
+				pages: 0,
+			};
+			this.entry = entry;
+			this.publish(entry.sections);
+		}
+		const sectionKey = (section: HomeSection) =>
+			`${normalizeHomeSectionTitle(section.title)}::${
+				section.items[0] ? feedItemKey(section.items[0]) : ""
+			}`;
+		const seen = new Set(entry.sections.map(sectionKey));
+		while (
+			entry.feed.has_continuation &&
+			entry.pages < MAX_HOME_CONTINUATION_PAGES
+		) {
+			// Tokens depend on the preceding page. Continue even if the view unmounts.
+			const next = await entry.feed.getContinuation();
+			const sections = this.parseFeed(next).filter((section) => {
+				const key = sectionKey(section);
+				if (seen.has(key)) return false;
+				seen.add(key);
+				return true;
+			});
+			entry.feed = next;
+			entry.pages++;
+			entry.sections = [...entry.sections, ...sections];
+			this.publish(entry.sections);
+		}
+		const snapshot = entry;
+		// Empty responses should be retried on the next visit.
+		if (snapshot.sections.length === 0) this.entry = null;
+		return snapshot;
+	}
 }
 
-/**
- * Applies an enriched song to the cached first page, so a view restored from
- * the cache shows resolved titles/credits without re-running the prefetch.
- * Continuation pages are not cached; updates for their songs are no-ops.
- */
-export function patchCachedHomeFeedSong(updated: Song) {
-	if (!entry) return;
-	entry.sections = withUpdatedSong(entry.sections, updated);
-}
-
-async function loadHomeFeed(): Promise<HomeFeedSnapshot> {
+const cache = new HomeFeedCache(async () => {
 	const client = await getYoutubeClient();
-	const feed = await client.music.getHomeFeed();
-	const snapshot: HomeFeedSnapshot = {
-		feed,
-		sections: homeSectionsFromFeed(feed),
-	};
-	// An empty first page is treated as a failed load: return it so the view can
-	// show its empty state, but do not pin it in the cache for half an hour.
-	if (snapshot.sections.length > 0) {
-		entry = { ...snapshot, timestamp: Date.now() };
-	}
-	return snapshot;
+	return client.music.getHomeFeed();
+});
+
+export function readCachedHomeFeed(): HomeSection[] | null {
+	return cache.read();
+}
+
+/** Shared full-feed preload with progressive updates and a 30-minute cache. */
+export function getHomeFeed(onUpdate?: (sections: HomeSection[]) => void) {
+	return cache.get(onUpdate);
+}
+
+export function patchCachedHomeFeedSong(updated: Song) {
+	cache.patchSong(updated);
 }

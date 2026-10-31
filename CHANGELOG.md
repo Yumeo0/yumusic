@@ -6,6 +6,8 @@
 
 ### Improvements
 
+- Home now preloads and caches all recommendation sections without waiting for scrolling, while images load as needed.
+
 ### Bug fixes
 
 ## [0.6.1] - 2026-10-31

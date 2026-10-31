@@ -25,7 +25,6 @@ import { usePlayer } from "@/contexts/player-context";
 import {
 	hideHomeSection,
 	isHomeSectionHidden,
-	normalizeHomeSectionTitle,
 	showHomeSection,
 } from "@/lib/stores/home-sections";
 import { usePinnedPlaylists } from "@/lib/stores/pinned";
@@ -41,7 +40,6 @@ import {
 	feedItemKey,
 	feedSongs,
 	type HomeSection,
-	homeSectionsFromFeed,
 	withUpdatedSong,
 } from "@/lib/youtube/feed-items";
 import {
@@ -61,8 +59,6 @@ const TOUCH_QUERY = "(any-pointer: coarse)";
 /** Rows per home section on phones before "Show more". */
 const MOBILE_SECTION_PREVIEW = 5;
 const SWIPE_HINT_KEY = "yumusic:swipe-queue-hint";
-/** Safety cap for the feed's continuation pages. */
-const MAX_HOME_CONTINUATION_PAGES = 10;
 
 /** Per-section menu; currently exposes hiding the row. */
 function SectionMenu({ title, onHide }: { title: string; onHide: () => void }) {
@@ -373,9 +369,6 @@ export function HomeFeed() {
 	);
 	const [failed, setFailed] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
-	const [hasMore, setHasMore] = useState(false);
-	const loadMoreRef = useRef<(() => void) | null>(null);
-	const continuationRef = useRef<HTMLDivElement | null>(null);
 	const [expandedSections, setExpandedSections] = useState<Set<string>>(
 		() => new Set(),
 	);
@@ -466,7 +459,7 @@ export function HomeFeed() {
 		const cancels: Array<() => void> = [];
 		const applyUpdatedSong = (updated: Song): void => {
 			setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
-			// Keep the cached first page in step with what the view resolved, so
+			// Keep the cached feed in step with what the view resolved, so
 			// reopening within the TTL skips the enrichment request entirely.
 			patchCachedHomeFeedSong(updated);
 		};
@@ -485,97 +478,35 @@ export function HomeFeed() {
 				enrichSongsWithUploads(songs, applyUpdatedSong),
 			);
 		};
-		const sectionKey = (section: HomeSection) =>
-			`${normalizeHomeSectionTitle(section.title)}::${
-				section.items[0] ? feedItemKey(section.items[0]) : ""
-			}`;
-
-		(async () => {
-			try {
-				const { feed: cachedFeed, sections: cachedSections } =
-					await getHomeFeed();
-				let feed = cachedFeed;
-				const seen = new Set<string>();
-				const accept = (incoming: HomeSection[]): HomeSection[] => {
-					const fresh: HomeSection[] = [];
-					for (const section of incoming) {
-						const key = sectionKey(section);
-						if (seen.has(key)) continue;
-						seen.add(key);
-						fresh.push(section);
-					}
-					return fresh;
-				};
-
-				const initial = accept(cachedSections);
-				totalSections = initial.length;
-				if (cancelled) return;
-				setSections(initial);
-				setFailed(false);
-				enrich(initial);
-
-				// Fetch additional pages only when the user approaches them to avoid
-				// retaining the full feed and decoding all of its artwork at startup.
-				let page = 0;
-				let loading = false;
-				loadMoreRef.current = async () => {
-					if (cancelled || loading || !feed.has_continuation) return;
-					loading = true;
-					setLoadingMore(true);
-					try {
-						feed = await feed.getContinuation();
-						page++;
-						if (cancelled) return;
-						const next = accept(homeSectionsFromFeed(feed));
-						if (next.length > 0) {
-							setSections((prev) => (prev ? [...prev, ...next] : next));
-							enrich(next);
-						}
-						setHasMore(
-							page < MAX_HOME_CONTINUATION_PAGES && feed.has_continuation,
-						);
-					} catch (error) {
-						console.warn("[HomeFeed] failed to load more sections:", error);
-						if (!cancelled) setHasMore(false);
-					} finally {
-						loading = false;
-						if (!cancelled) setLoadingMore(false);
-					}
-				};
-				setHasMore(feed.has_continuation);
-			} catch (error) {
-				console.warn("[HomeFeed] failed to load recommendations:", error);
-				if (cancelled) return;
-				setSections([]);
-				setFailed(true);
-			} finally {
+		setLoadingMore(true);
+		void getHomeFeed((loaded) => {
+			if (cancelled) return;
+			const added = loaded.slice(totalSections);
+			totalSections = loaded.length;
+			setSections(loaded);
+			setFailed(false);
+			enrich(added);
+		})
+			.catch((error) => {
+				console.warn("[HomeFeed] failed to preload recommendations:", error);
+				// Keep any sections already loaded if a later page fails.
+				if (!cancelled && totalSections === 0) {
+					setSections([]);
+					setFailed(true);
+				}
+			})
+			.finally(() => {
 				if (!cancelled) {
 					setLoadingMore(false);
 					if (totalSections === 0) setFailed(true);
 				}
-			}
-		})();
+			});
 
 		return () => {
 			cancelled = true;
-			loadMoreRef.current = null;
 			for (const cancel of cancels) cancel();
 		};
 	}, []);
-
-	useEffect(() => {
-		const sentinel = continuationRef.current;
-		if (!sentinel || !hasMore || loadingMore) return;
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries.some((entry) => entry.isIntersecting))
-					loadMoreRef.current?.();
-			},
-			{ rootMargin: "600px" },
-		);
-		observer.observe(sentinel);
-		return () => observer.disconnect();
-	}, [hasMore, loadingMore]);
 
 	if (sections === null) {
 		if (isMobile) {
@@ -821,9 +752,6 @@ export function HomeFeed() {
 					<Loader2 className="size-4 animate-spin" />
 					Loading more sections…
 				</div>
-			)}
-			{hasMore && (
-				<div aria-hidden="true" className="h-px" ref={continuationRef} />
 			)}
 		</div>
 	);
