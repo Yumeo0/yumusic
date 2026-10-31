@@ -179,15 +179,15 @@ fn cache_lookup(
 	Some(response)
 }
 
-fn client() -> &'static reqwest::Client {
-	static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-	CLIENT.get_or_init(|| {
-		reqwest::Client::builder()
+async fn client() -> Result<&'static reqwest::Client, String> {
+	static CLIENT: tokio::sync::OnceCell<reqwest::Client> = tokio::sync::OnceCell::const_new();
+	CLIENT.get_or_try_init(|| async {
+		super::http_client::builder().await?
 			.pool_max_idle_per_host(2)
 			.pool_idle_timeout(Duration::from_secs(30))
 			.build()
-			.expect("proxy HTTP client")
-	})
+			.map_err(|e| e.to_string())
+	}).await
 }
 
 #[cfg(test)]
@@ -229,7 +229,71 @@ mod tests {
 	#[test]
 	fn https_client_initializes_without_panicking() {
 		// A providerless TLS backend compiles but panics on the first proxy request.
-		let _ = super::client();
+		tauri::async_runtime::block_on(super::client()).expect("proxy HTTP client");
+	}
+
+	#[test]
+	fn proxy_errors_remain_readable_across_origins() {
+		for (uri, headers) in [
+			("http://proxy.localhost/iframe_api", "{}"),
+			(
+				"http://proxy.localhost/iframe_api?__host=www.youtube.com",
+				"invalid json",
+			),
+		] {
+			let request = Request::builder()
+				.uri(uri)
+				.header("origin", "http://localhost:5173")
+				.header("x-proxy-headers", headers)
+				.body(Vec::new())
+				.unwrap();
+			let response = tauri::async_runtime::block_on(process_with_cors(request));
+			assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+			assert_eq!(
+				response.headers()["access-control-allow-origin"],
+				"http://localhost:5173"
+			);
+			assert_eq!(response.headers()["access-control-allow-credentials"], "true");
+			assert!(!response.body().is_empty());
+		}
+	}
+
+	#[test]
+	fn proxy_preflight_allows_the_frontend_headers() {
+		let request = Request::builder()
+			.method(Method::OPTIONS)
+			.uri("http://proxy.localhost/iframe_api?__host=www.youtube.com")
+			.header("origin", "http://localhost:5173")
+			.body(Vec::new())
+			.unwrap();
+		let response = tauri::async_runtime::block_on(process_with_cors(request));
+		assert_eq!(response.status(), StatusCode::OK);
+		assert_eq!(
+			response.headers()["access-control-allow-origin"],
+			"http://localhost:5173"
+		);
+		assert!(response.headers()["access-control-allow-headers"]
+			.to_str().unwrap().contains("X-Proxy-Headers"));
+	}
+
+	#[test]
+	#[ignore = "requires a live YouTube connection"]
+	fn youtube_player_bootstrap_smoke_test() {
+		let request = Request::builder()
+			.uri("http://proxy.localhost/iframe_api?__host=www.youtube.com")
+			.header("origin", "http://localhost:5173")
+			.body(Vec::new())
+			.unwrap();
+		let response = tauri::async_runtime::block_on(process_with_cors(request));
+		assert_eq!(
+			response.status(), StatusCode::OK,
+			"{}", String::from_utf8_lossy(response.body())
+		);
+		assert_eq!(
+			response.headers()["access-control-allow-origin"],
+			"http://localhost:5173"
+		);
+		assert!(String::from_utf8_lossy(response.body()).contains("YT"));
 	}
 }
 
@@ -324,9 +388,26 @@ pub fn handle<R: Runtime>(
 	responder: UriSchemeResponder,
 ) {
 	tauri::async_runtime::spawn(async move {
-		let response = process(request).await.unwrap_or_else(internal_error);
+		let response = process_with_cors(request).await;
 		responder.respond(response);
 	});
+}
+
+async fn process_with_cors(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
+	let origin = request
+		.headers()
+		.get("origin")
+		.and_then(|value| value.to_str().ok())
+		.unwrap_or_default()
+		.to_owned();
+	let mut response = process(request).await.unwrap_or_else(|error| {
+		log::warn!("Proxy request failed: {error}");
+		internal_error(error)
+	});
+	// Error paths bypass process()'s successful-response CORS setup. Without
+	// this boundary the browser hides the actual error as "Failed to fetch".
+	apply_cors(&mut response, &origin);
+	response
 }
 
 fn internal_error(message: String) -> Response<Vec<u8>> {
@@ -505,7 +586,7 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 			upstream_headers.insert("user-agent", agent.clone());
 		}
 	}
-	if host.contains("youtube") {
+	if host == "youtube.com" || host.ends_with(".youtube.com") || host.ends_with(".googlevideo.com") {
 		upstream_headers.insert(
 			"origin",
 			HeaderValue::from_static("https://www.youtube.com"),
@@ -544,7 +625,7 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 	let upstream_response = {
 		let mut attempt = 0usize;
 		loop {
-			let mut upstream_request = client()
+			let mut upstream_request = client().await?
 				.request(method.clone(), &target)
 				.headers(upstream_headers.clone());
 			if !body.is_empty() {
@@ -554,7 +635,10 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 				upstream_request = upstream_request.timeout(IMAGE_TIMEOUT);
 			}
 
-			let response = upstream_request.send().await.map_err(|e| e.to_string())?;
+			let response = upstream_request
+				.send()
+				.await
+				.map_err(|e| format!("Upstream request failed: {e:?}"))?;
 			let status = response.status();
 			let retryable = status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
 			if !is_artwork || !retryable || attempt + 1 >= MAX_IMAGE_ATTEMPTS {

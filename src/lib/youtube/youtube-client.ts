@@ -122,9 +122,22 @@ export async function fetchFunction(
 		extractHeaders(init.headers);
 	}
 
-	// Ensure cookie is present if we have it
-	if (userCookie && !headersObj.cookie && !headersObj.Cookie) {
-		headersObj.Cookie = userCookie;
+	// Match the browser session that minted the token, including Android's
+	// dedicated desktop YouTube view rather than the music view's mobile UA.
+	const isYoutube =
+		url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com");
+	if (
+		(isYoutube || url.hostname.endsWith(".googlevideo.com")) &&
+		botguardService.playbackUserAgent &&
+		!headersObj["User-Agent"] &&
+		!headersObj["user-agent"]
+	) {
+		headersObj["User-Agent"] = botguardService.playbackUserAgent;
+	}
+	const cookie =
+		userCookie || (isYoutube ? botguardService.playbackCookie : undefined);
+	if (cookie && !headersObj.cookie && !headersObj.Cookie) {
+		headersObj.Cookie = cookie;
 	}
 
 	let body: BodyInit | null = null;
@@ -1122,16 +1135,9 @@ export async function getSearchCompletions(query: string): Promise<string[]> {
 export async function getSongStream(videoId: string) {
 	const client = await getYoutubeClient();
 
-	const visitorData = client.session.context.client.visitorData;
-	if (!visitorData) {
-		throw new Error("Missing visitor data");
-	}
-
-	// The /player endpoint rejects requests without a PoToken, so pass a
-	// visitor-bound one here. Playback mints separate per-video tokens.
-	await botguardService.init();
-	const poToken = await botguardService.mintToken(visitorData);
-	client.session.po_token = poToken;
+	// Both /player and SABR need tokens bound to this video's ID. The native
+	// minter also supplies the visitor context used to attest the request.
+	const poToken = await botguardService.preparePlayback(client, videoId);
 
 	const playerResponse = await client.actions.execute("/player", {
 		videoId,

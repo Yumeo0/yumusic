@@ -1,7 +1,9 @@
 mod discord;
 mod downloads;
+mod http_client;
 mod login_session;
 mod media_controls;
+mod po_token;
 mod proxy;
 
 use std::fs;
@@ -49,6 +51,7 @@ fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn logout(app: AppHandle) -> Result<bool, String> {
+	po_token::reset(&app);
 	let path = cookie_path(&app)?;
 	if path.exists() {
 		fs::remove_file(&path).map_err(|e| e.to_string())?;
@@ -103,12 +106,13 @@ async fn logout(app: AppHandle) -> Result<bool, String> {
 
 #[tauri::command]
 async fn login(app: AppHandle) -> Result<Option<String>, String> {
+	po_token::reset(&app);
 	let mut login_url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
 		.map_err(|e| e.to_string())?;
 	login_url
 		.query_pairs_mut()
 		.append_pair("continue", "https://music.youtube.com/");
-	let verifier = reqwest::Client::builder()
+	let verifier = http_client::builder().await?
 		.timeout(Duration::from_secs(10))
 		.user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 		.build().map_err(|e| e.to_string())?;
@@ -340,6 +344,7 @@ pub fn run() {
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
+			po_token::mint_po_token,
 			get_cookie,
 			login,
 			logout,
