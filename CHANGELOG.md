@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [0.6.0] - 2026-10-31
+
+### Features
+
 - Added Flatpak packaging for Linux.
 
 ### Improvements
