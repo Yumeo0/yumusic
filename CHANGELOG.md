@@ -4,9 +4,15 @@
 
 ### Features
 
-- Linux releases now include a Flatpak download.
-
 ### Improvements
+
+### Bug fixes
+
+## [0.6.1] - 2026-10-31
+
+### Features
+
+- Linux releases now include a Flatpak download.
 
 ### Bug fixes
 
