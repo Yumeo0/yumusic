@@ -7,6 +7,11 @@ import {
 	setQueueReveal,
 	setQueueState,
 } from "@/lib/player/player-ui";
+import {
+	clipTextRect,
+	PLAYER_SECONDARY_PAIRS,
+	projectPlayerItem,
+} from "./player-items";
 
 /**
  * Queue sheet resting offsets, as a fraction of its height: "full" shows the
@@ -309,6 +314,8 @@ export function useQueueSheetGesture(canStart?: QueueGestureCheck) {
 /** Where the dismiss morph sends everything, measured at drag start. */
 export interface DismissGeometry {
 	page: HTMLElement | null;
+	mini: HTMLElement;
+	release: () => void;
 	/** Finger travel that moves the artwork onto the mini-player thumbnail. */
 	travel: number;
 	/** Full page height: the overlay slides this far to be fully off-screen. */
@@ -320,9 +327,13 @@ export function textRect(element: Element): DOMRect {
 	const range = document.createRange();
 	range.selectNodeContents(element);
 	const rect = range.getBoundingClientRect();
-	return rect.width > 0 && rect.height > 0
-		? rect
-		: element.getBoundingClientRect();
+	if (rect.width <= 0 || rect.height <= 0)
+		return element.getBoundingClientRect();
+	const clip = (
+		element.closest(".truncate") ?? element
+	).getBoundingClientRect();
+	const painted = clipTextRect(rect, clip);
+	return new DOMRect(painted.x, painted.y, painted.width, painted.height);
 }
 
 /** Font-size ratio between two elements (the scale a text morph needs). */
@@ -352,10 +363,22 @@ export function measureDismissGeometry(
 	const stage = visible("[data-np-morph-stage]");
 	const cover = visible("[data-np-cover]");
 	const thumb = document.querySelector<HTMLElement>("[data-mini-thumb]");
-	if (!cover || !thumb) return null;
+	const mini = document.querySelector<HTMLElement>("[data-mini-player]");
+	if (!cover || !thumb || !mini) return null;
+	const targets = new Set<Element>();
+	const extras = new Set<Element>();
+	const own = (element: Element) => {
+		element.setAttribute("data-player-morph-target", "");
+		targets.add(element);
+	};
+	const miniVisible = (selector: string) =>
+		Array.from(mini.querySelectorAll<HTMLElement>(selector)).find(
+			(element) => element.getBoundingClientRect().width > 0,
+		) ?? null;
 
 	const stageRect = (stage ?? overlay).getBoundingClientRect();
 	const thumbRect = thumb.getBoundingClientRect();
+	own(thumb);
 	overlay.style.setProperty(
 		"--np-min-cover-left",
 		`${thumbRect.left - stageRect.left}px`,
@@ -377,21 +400,26 @@ export function measureDismissGeometry(
 		target: DOMRect | null,
 		prefix: string,
 		scale: number,
+		text = false,
 	) => {
 		if (!wrapper || !source || !target) return;
 		const origin = wrapper.getBoundingClientRect();
 		const position = Math.min(Math.max(scale, 0.05), 1.5);
-		const ax = source.x + source.width / 2 - origin.x;
-		const ay = source.y + source.height / 2 - origin.y;
-		overlay.style.setProperty(
-			`${prefix}-tx`,
-			`${target.x + target.width / 2 - origin.x - position * ax}px`,
+		const projected = projectPlayerItem(
+			origin,
+			source,
+			target,
+			position,
+			text ? "start" : "center",
 		);
-		overlay.style.setProperty(
-			`${prefix}-ty`,
-			`${target.y + target.height / 2 - origin.y - position * ay}px`,
-		);
+		overlay.style.setProperty(`${prefix}-tx`, `${projected.x}px`);
+		overlay.style.setProperty(`${prefix}-ty`, `${projected.y}px`);
 		overlay.style.setProperty(`${prefix}-s`, String(position));
+		if (text)
+			overlay.style.setProperty(
+				`${prefix}-cut`,
+				`${Math.max(0, origin.width - (source.x - origin.x + target.width / position))}px`,
+			);
 	};
 
 	if (!stage) {
@@ -400,28 +428,32 @@ export function measureDismissGeometry(
 	}
 
 	const titleLine = visible("[data-np-title-line]");
-	const title = titleLine?.firstElementChild ?? null;
-	const miniTitle = document.querySelector("[data-mini-title-line]");
+	const title = titleLine;
+	const miniTitle = miniVisible("[data-mini-title-line]");
 	if (title && miniTitle) {
+		own(miniTitle);
 		pair(
 			titleLine,
 			textRect(title),
 			textRect(miniTitle),
 			"--np-title",
 			fontScale(title, miniTitle),
+			true,
 		);
 	}
 
 	const artistLine = visible("[data-np-artist-line]");
 	const artist = artistLine?.firstElementChild ?? null;
-	const miniArtist = document.querySelector("[data-mini-artist]");
+	const miniArtist = miniVisible("[data-mini-artist]");
 	if (artist && miniArtist) {
+		own(miniArtist);
 		pair(
 			artistLine,
 			textRect(artist),
 			textRect(miniArtist),
 			"--np-artist",
 			fontScale(artist, miniArtist),
+			true,
 		);
 	}
 
@@ -432,8 +464,9 @@ export function measureDismissGeometry(
 	 */
 	const control = (from: string, to: string, prefix: string) => {
 		const source = visible(from);
-		const target = document.querySelector(to);
+		const target = miniVisible(to);
 		if (!source || !target) return;
+		own(target);
 		const a = source.getBoundingClientRect();
 		const b = target.getBoundingClientRect();
 		pair(source, a, b, prefix, b.height / Math.max(a.height, 1));
@@ -442,9 +475,69 @@ export function measureDismissGeometry(
 	control("[data-np-play]", "[data-mini-play]", "--np-play");
 	control("[data-np-next]", "[data-mini-next]", "--np-next");
 
+	// Anything without a visible destination drifts down and fades; paired
+	// metadata and controls stay live all the way to their measured endpoint.
+	for (const element of overlay.querySelectorAll<HTMLElement>(
+		"[data-np-secondary]",
+	)) {
+		element.style.setProperty("--np-item-tx", "0px");
+		element.style.setProperty("--np-item-ty", "64px");
+		element.style.setProperty("--np-item-s", "1");
+		element.style.setProperty("--np-item-fade", "1");
+		element.style.setProperty("--np-item-cut", "0px");
+	}
+	for (const entry of PLAYER_SECONDARY_PAIRS) {
+		const source = visible(entry.selector);
+		const target = miniVisible(entry.target);
+		if (!source) {
+			if (target) {
+				target.setAttribute("data-player-morph-extra", "");
+				extras.add(target);
+			}
+			continue;
+		}
+		source.setAttribute("data-np-secondary", "");
+		const text = "text" in entry && entry.text;
+		const content = source.querySelector("[data-motion-text]") ?? source;
+		const from = text ? textRect(content) : source.getBoundingClientRect();
+		const to =
+			target && (text ? textRect(target) : target.getBoundingClientRect());
+		if (!target || !to || to.width <= 0 || to.height <= 0) {
+			source.style.setProperty("--np-item-tx", "0px");
+			source.style.setProperty("--np-item-ty", "64px");
+			source.style.setProperty("--np-item-s", "1");
+			source.style.setProperty("--np-item-fade", "1");
+			continue;
+		}
+		const scale = text
+			? fontScale(content, target)
+			: to.height / Math.max(from.height, 1);
+		const projected = projectPlayerItem(
+			source.getBoundingClientRect(),
+			from,
+			to,
+			scale,
+			text ? "start" : "center",
+		);
+		if (text) {
+			source.setAttribute("data-np-text-motion", "");
+			const origin = source.getBoundingClientRect();
+			source.style.setProperty(
+				"--np-item-cut",
+				`${Math.max(0, origin.width - (from.x - origin.x + to.width / scale))}px`,
+			);
+		}
+		source.style.setProperty("--np-item-tx", `${projected.x}px`);
+		source.style.setProperty("--np-item-ty", `${projected.y}px`);
+		source.style.setProperty("--np-item-s", String(scale));
+		source.style.setProperty("--np-item-fade", "0");
+		own(target);
+	}
+
 	const seek = visible("[data-np-seek-bar]");
 	const miniProgress = document.querySelector("[data-mini-progress]");
 	if (seek && miniProgress) {
+		own(miniProgress);
 		// Stretch horizontally only, without the clamp `pair` applies: the
 		// desktop mini strip spans the whole window (~3x the seek bar), and
 		// a clamped scale made the bar snap to full width at the very end.
@@ -473,6 +566,14 @@ export function measureDismissGeometry(
 	const height = overlay.offsetHeight || window.innerHeight;
 	return {
 		height,
+		mini,
+		release: () => {
+			for (const target of targets)
+				target.removeAttribute("data-player-morph-target");
+			for (const extra of extras)
+				extra.removeAttribute("data-player-morph-extra");
+			mini.style.removeProperty("--player-reveal");
+		},
 		page: overlay.querySelector<HTMLElement>("[data-np-page]"),
 		travel: travel > 40 ? travel : height * 0.6,
 	};

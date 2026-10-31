@@ -42,6 +42,7 @@ export function useNowPlayingMotion(
 
 		const apply = (value: number) => {
 			progress = value;
+			geometry?.mini.style.setProperty("--player-reveal", String(value));
 			overlay.style.setProperty("--np-dismiss", String(value));
 			overlay.style.setProperty(
 				"--np-slide",
@@ -98,6 +99,7 @@ export function useNowPlayingMotion(
 			if (overlay.dataset.playerMotion) void overlay.offsetHeight;
 			delete overlay.dataset.playerMotion;
 			delete document.documentElement.dataset.playerMorphing;
+			geometry?.release();
 		};
 		const animate = (expanded: boolean) => {
 			const target = expanded ? 0 : 1;

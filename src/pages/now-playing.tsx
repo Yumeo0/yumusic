@@ -186,6 +186,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 			aria-label="Open queue"
 			className="mx-auto flex items-center gap-1.5 rounded-full bg-foreground/6 px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-foreground/10 hover:text-foreground active:scale-95 md:hidden"
 			data-np-queue-pill
+			data-np-secondary
 			onClick={() => onToggleQueue()}
 			type="button"
 		>
@@ -225,9 +226,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				)}
 			</div>
 
-			{/* Top-right actions: room, desktop queue, and close. While the player
-			    is dismissed they shrink away (scale, not opacity) as the page
-			    slides off. */}
+			{/* Each action moves to its mini-player counterpart, or fades downward. */}
 			<div
 				className={cn(
 					"absolute top-12 right-6 z-20 max-md:top-[max(2.75rem,var(--safe-area-top))] max-md:right-4 flex items-center gap-2",
@@ -236,17 +235,15 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						"max-md:[&_button]:bg-black/50 max-md:[&_button]:text-white max-md:[&_button]:backdrop-blur-md max-md:[&_button:hover]:bg-black/65 max-md:[&_button[aria-pressed=true]]:text-primary",
 				)}
 				data-np-chrome
-				style={{
-					transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 3))",
-					transformOrigin: "top right",
-				}}
 			>
 				{/* Mobile: the transport's left slot carries the lyrics toggle,
 				    so the rating pair sits here beside the room button. */}
-				<div className="md:hidden">
+				<div className="md:hidden" data-np-ratings>
 					<RatingButtons songId={currentSong.id} />
 				</div>
-				<RoomButton />
+				<div data-np-secondary>
+					<RoomButton />
+				</div>
 				<button
 					aria-label="Toggle queue"
 					className={cn(
@@ -255,6 +252,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							? "bg-primary/15 text-primary"
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
 					)}
+					data-np-queue
+					data-np-secondary
 					onClick={onToggleQueue}
 					title="Queue"
 					type="button"
@@ -264,6 +263,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				<button
 					aria-label="Close Now Playing"
 					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
+					data-np-secondary
 					onClick={onClose}
 					type="button"
 				>
@@ -288,6 +288,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							: "order-2 h-36 shrink-0 max-md:hidden",
 					)}
 					data-np-lyrics-section
+					data-np-secondary
 					data-swipe-dismiss-ignore
 				>
 					{/* Shrinks as the up-next stack below expands on hover */}
@@ -559,6 +560,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 								</div>
 							</SongContextMenu>
 							<TrackHeading
+								align="start"
 								className="min-w-0 flex-1 text-left"
 								song={currentSong}
 							/>
@@ -695,8 +697,13 @@ function useMorphMetrics(
  * stays put while the page leaves. Targets are measured per pair (see
  * measureDismissGeometry); without them this is the identity.
  */
-function morphStyle(prefix: string): CSSProperties {
+function morphStyle(prefix: string, text = false): CSSProperties {
 	return {
+		...(text
+			? {
+					clipPath: `inset(0 calc(var(${prefix}-cut, 0px) * var(--np-dismiss, 0)) 0 0)`,
+				}
+			: {}),
 		transform: `translate(calc(var(${prefix}-tx, 0px) * var(--np-dismiss, 0)), calc(var(${prefix}-ty, 0px) * var(--np-dismiss, 0) - var(--np-slide, 0px))) scale(calc(1 + (var(${prefix}-s, 1) - 1) * var(--np-dismiss, 0)))`,
 		transformOrigin: "0 0",
 	};
@@ -705,33 +712,44 @@ function morphStyle(prefix: string): CSSProperties {
 /** Track title, artist and release, shared by the mobile stage, compact row and
  * desktop layout. The title and artist are wrapped so the dismiss morph can move and
  * scale each one onto its mini-player counterpart independently. */
-function TrackHeading({ song, className }: { song: Song; className?: string }) {
+function TrackHeading({
+	song,
+	className,
+	align = "center",
+}: {
+	song: Song;
+	className?: string;
+	align?: "start" | "center";
+}) {
 	const { currentAlbum } = usePlayer();
 	return (
 		<div className={cn("max-w-full", className)}>
-			<div
-				className="np-morph transition-transform duration-300 ease-out"
-				data-np-title-line
-				style={morphStyle("--np-title")}
+			<h1
+				className={cn(
+					"flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl",
+					align === "start" ? "justify-start" : "justify-center",
+				)}
+				key={`title-${song.id}`}
 			>
-				<h1
-					className="animate-track-in flex items-center justify-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"
-					key={`title-${song.id}`}
+				<span
+					className="np-morph min-w-0 transition-transform duration-300 ease-out"
+					data-np-title-line
+					style={morphStyle("--np-title", true)}
 				>
-					<span className="min-w-0 truncate">
+					<span className="animate-track-in block truncate">
 						<SongTitle
 							artist={song.artist}
 							keepTitle={song.upload}
 							title={song.title}
 						/>
 					</span>
-					<DownloadedBadge songId={song.id} />
-				</h1>
-			</div>
+				</span>
+				<DownloadedBadge data-np-download data-np-secondary songId={song.id} />
+			</h1>
 			<div
 				className="np-morph transition-transform duration-300 ease-out"
 				data-np-artist-line
-				style={morphStyle("--np-artist")}
+				style={morphStyle("--np-artist", true)}
 			>
 				<p
 					className="animate-track-in mt-1 truncate text-base text-muted-foreground"
@@ -744,11 +762,14 @@ function TrackHeading({ song, className }: { song: Song; className?: string }) {
 			{currentAlbum && (
 				<p
 					className="np-morph mt-1 truncate text-sm text-muted-foreground/80"
+					data-np-album
+					data-np-secondary
 					data-song-release
-					style={{ opacity: "calc(1 - var(--np-dismiss, 0))" }}
 				>
 					<span className="sr-only">Album or single: </span>
-					<AlbumLink album={currentAlbum} />
+					<span data-motion-text>
+						<AlbumLink album={currentAlbum} />
+					</span>
 				</p>
 			)}
 		</div>
@@ -782,7 +803,7 @@ function TransportRow({
 			{/* Left slot: the rating pair on desktop, the lyrics toggle on
 			    mobile (where the top-right chrome carries the ratings). */}
 			<div className="flex min-w-0 flex-1 items-center justify-start">
-				<div className="max-md:hidden">
+				<div className="max-md:hidden" data-np-ratings>
 					<RatingButtons collapse songId={songId} />
 				</div>
 				<button
@@ -794,11 +815,8 @@ function TransportRow({
 							: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
 					)}
 					data-np-lyrics
+					data-np-secondary
 					onClick={onToggleLyrics}
-					style={{
-						transform:
-							"translateX(calc(var(--np-dismiss, 0) * -70px)) scale(max(0, 1 - var(--np-dismiss, 0) * 2.2))",
-					}}
 					title="Lyrics"
 					type="button"
 				>
@@ -849,8 +867,12 @@ function TransportRow({
 			{/* The volume popover opens above its icon so the repeat button and
 			    centered transport stay fixed. Touch devices use hardware volume. */}
 			<div className="flex min-w-0 flex-1 items-center justify-end">
-				<RepeatButton className="size-11" />
-				<VolumeControl className="pointer-coarse:hidden" vertical />
+				<div data-np-repeat data-np-secondary>
+					<RepeatButton className="size-11" />
+				</div>
+				<div data-np-secondary data-np-volume>
+					<VolumeControl className="pointer-coarse:hidden" vertical />
+				</div>
 			</div>
 		</div>
 	);
@@ -904,12 +926,13 @@ function NowPlayingSeek({
 			<div
 				className="np-morph mt-0.5 flex justify-between font-mono text-[11px] text-muted-foreground tabular-nums transition-transform duration-300 ease-out"
 				data-np-seek-times
-				style={{
-					transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 2.5))",
-				}}
 			>
-				<span>{formatTime(currentTime)}</span>
-				<span>{formatDuration(duration)}</span>
+				<span data-np-elapsed data-np-secondary>
+					{formatTime(currentTime)}
+				</span>
+				<span data-np-duration data-np-secondary>
+					{formatDuration(duration)}
+				</span>
 			</div>
 		</>
 	);

@@ -112,29 +112,36 @@ export function Player() {
 						<div className="min-w-0" data-mini-title>
 							<h3
 								className="animate-track-in flex items-center gap-1.5 text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
-								data-mini-title-line
 								key={`t-${currentSong.id}`}
 							>
-								<span className="min-w-0 truncate">
+								<span className="min-w-0 truncate" data-mini-title-line>
 									<SongTitle
 										artist={currentSong.artist}
 										keepTitle={currentSong.upload}
 										title={currentSong.title}
 									/>
 								</span>
-								<DownloadedBadge songId={currentSong.id} />
+								<DownloadedBadge data-mini-download songId={currentSong.id} />
 							</h3>
 							<p
 								className="animate-track-in truncate text-xs text-muted-foreground"
-								data-mini-artist
 								key={`a-${currentSong.id}`}
 								style={{ animationDelay: "60ms" }}
 							>
-								<ArtistLinks song={currentSong} />
+								<span data-mini-artist>
+									<ArtistLinks song={currentSong} />
+								</span>
 								{currentAlbum && (
 									<span title={`Album or single: ${currentAlbum.name}`}>
-										<span aria-hidden> · </span>
-										{currentAlbum.name}
+										<span
+											aria-hidden
+											className="mx-1 inline-block"
+											data-player-morph-extra
+										>
+											{" "}
+											·{" "}
+										</span>
+										<span data-mini-album>{currentAlbum.name}</span>
 									</span>
 								)}
 							</p>
@@ -193,7 +200,9 @@ export function Player() {
 				{/* Timecodes + queue + volume (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
-					<RepeatButton />
+					<div data-mini-repeat>
+						<RepeatButton />
+					</div>
 					<MiniTime
 						knownDuration={knownDuration}
 						songId={currentSong.id}
@@ -203,6 +212,7 @@ export function Player() {
 					    narrower windows, where the title needs the room. */}
 					<div
 						className="player-ctl max-lg:hidden"
+						data-mini-ratings
 						onClick={(e) => e.stopPropagation()}
 					>
 						<RatingButtons songId={currentSong.id} />
@@ -215,6 +225,7 @@ export function Player() {
 								? "bg-primary/12 text-primary"
 								: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
 						)}
+						data-mini-queue
 						onClick={(e) => {
 							e.stopPropagation();
 							toggleQueue();
@@ -225,7 +236,11 @@ export function Player() {
 						<ListMusic className="size-4.5" />
 					</button>
 					{/* Volume interactions must not open the fullscreen */}
-					<div className="player-ctl" onClick={(e) => e.stopPropagation()}>
+					<div
+						className="player-ctl"
+						data-mini-volume
+						onClick={(e) => e.stopPropagation()}
+					>
 						<VolumeControl vertical />
 					</div>
 				</div>
@@ -288,9 +303,16 @@ function MiniTime({
 	);
 	return (
 		<span className="font-mono text-xs text-muted-foreground tabular-nums">
-			<span className="text-foreground/80">{formatTime(currentTime)}</span>
-			<span className="mx-1 text-foreground/25">/</span>
-			{formatDuration(duration)}
+			<span className="text-foreground/80" data-mini-elapsed>
+				{formatTime(currentTime)}
+			</span>
+			<span
+				className="mx-1 inline-block text-foreground/25"
+				data-player-morph-extra
+			>
+				/
+			</span>
+			<span data-mini-duration>{formatDuration(duration)}</span>
 		</span>
 	);
 }

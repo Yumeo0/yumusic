@@ -21,6 +21,7 @@
 - Fixed unexpected Google account logouts when profile information is temporarily unavailable; session checks now preserve saved credentials and recover newer browser cookies when possible.
 - Fixed song title parsing for quoted music-video titles and “Official Audio” labels.
 - Fixed text selection when long-pressing songs to open the context menu on mobile.
+- Some UI elements not moving smoothly between positions
 
 ## [0.6.1] - 2026-10-31
 

@@ -6,6 +6,7 @@ import {
 	useRef,
 } from "react";
 import { textRect } from "@/lib/motion/queue-drag";
+import { PLAYER_SECONDARY_PAIRS } from "./player-items";
 
 /** Matches Tailwind's max-md breakpoint: the lyrics toggle is mobile-only. */
 const MOBILE_QUERY = "(max-width: 767.98px)";
@@ -30,6 +31,10 @@ const PAIRS: { selector: string; text?: boolean; scale?: boolean }[] = [
 	{ selector: "[data-np-next]" },
 	{ selector: "[data-np-lyrics]" },
 	{ selector: "[data-np-queue-pill]" },
+	...PLAYER_SECONDARY_PAIRS.map((entry) => ({
+		selector: entry.selector,
+		text: "text" in entry && entry.text,
+	})),
 ];
 
 interface Snapshot {
@@ -49,7 +54,7 @@ function visible(root: ParentNode, selector: string): HTMLElement | null {
 
 function measure(element: HTMLElement, text?: boolean): DOMRect {
 	return text
-		? textRect(element.firstElementChild ?? element)
+		? textRect(element.querySelector("[data-motion-text]") ?? element)
 		: element.getBoundingClientRect();
 }
 

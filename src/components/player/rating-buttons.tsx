@@ -1,8 +1,5 @@
 import { ThumbsDown, ThumbsUp } from "lucide-react";
-import {
-	loadSongRating,
-	useSongRating,
-} from "@/lib/stores/song-ratings";
+import { loadSongRating, useSongRating } from "@/lib/stores/song-ratings";
 import { cn } from "@/lib/utils/utils";
 
 /**
@@ -69,6 +66,7 @@ export function RatingButtons({
 					hidden &&
 						"hidden group-hover/rating:grid group-focus-within/rating:grid",
 				)}
+				data-rating={kind}
 				disabled={busy || !songId}
 				key={kind}
 				onClick={() => rate(kind)}
