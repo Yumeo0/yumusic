@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [0.8.0] - 2026-11-01
+
+### Features
+
 - Added optional sync through your YouTube Google account for settings, scrobbling, pinned playlists, and Listen together profiles, permissions, and trusted people. Trust covers all linked devices.
 - Added account device discovery, playback transfer, and remote playback controls.
 - Added a remote-control mode for Listen together guests, with optional audio on their own device.
