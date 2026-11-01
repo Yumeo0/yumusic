@@ -756,7 +756,9 @@ function TrackHeading({
 					key={`artist-${song.id}`}
 					style={{ animationDelay: "60ms" }}
 				>
-					<ArtistLinks song={song} />
+					<span data-motion-text>
+						<ArtistLinks song={song} />
+					</span>
 				</p>
 			</div>
 			{currentAlbum && (

@@ -8,9 +8,9 @@ import {
 	setQueueState,
 } from "@/lib/player/player-ui";
 import {
-	clipTextRect,
 	PLAYER_SECONDARY_PAIRS,
 	projectPlayerItem,
+	textRect,
 } from "./player-items";
 
 /**
@@ -320,20 +320,6 @@ export interface DismissGeometry {
 	travel: number;
 	/** Full page height: the overlay slides this far to be fully off-screen. */
 	height: number;
-}
-
-/** Tight box of an element's text, falling back to its border box. */
-export function textRect(element: Element): DOMRect {
-	const range = document.createRange();
-	range.selectNodeContents(element);
-	const rect = range.getBoundingClientRect();
-	if (rect.width <= 0 || rect.height <= 0)
-		return element.getBoundingClientRect();
-	const clip = (
-		element.closest(".truncate") ?? element
-	).getBoundingClientRect();
-	const painted = clipTextRect(rect, clip);
-	return new DOMRect(painted.x, painted.y, painted.width, painted.height);
 }
 
 /** Font-size ratio between two elements (the scale a text morph needs). */

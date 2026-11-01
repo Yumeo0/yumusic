@@ -10,6 +10,7 @@ import {
 	useState,
 } from "react";
 import { LyricSectionHeading } from "@/components/lyrics/lyric-section";
+import { LyricsSourceSelect } from "@/components/lyrics/lyrics-source-select";
 import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
 import { fetchGeniusLyrics } from "@/lib/lyrics/genius";
 import {
@@ -193,34 +194,60 @@ export function LyricsPanel({
 
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col", className)}>
-			{/* Header + provider toggle */}
-			<div className="mb-4 flex items-center gap-2">
-				<MicVocal className="size-3.5 shrink-0 text-muted-foreground" />
-				<span className="text-xs font-medium text-muted-foreground">
-					Lyrics
-				</span>
-				{kind && (
-					<span
-						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-						title={KIND_TITLES[kind]}
-					>
-						{LYRICS_KIND_LABELS[kind]}
+			{/* Mobile: one source picker, with match details on a separate line.
+			    Reserving both rows prevents late sources from moving the lyrics. */}
+			<div className="mb-4 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 md:flex md:flex-wrap md:gap-2">
+				<div className="flex min-w-0 items-center gap-2">
+					<MicVocal
+						aria-hidden
+						className="size-3.5 shrink-0 text-muted-foreground"
+					/>
+					<span className="text-xs font-medium text-muted-foreground">
+						Lyrics
 					</span>
-				)}
-				{active && !active.confirmed && (
-					<span
-						className="animate-in fade-in rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-						title="Matched by title alone — may be a different version of this song"
-					>
-						Loose match
-					</span>
-				)}
+				</div>
+				<div className="relative h-9 w-36 md:hidden">
+					{available.length > 0 ? (
+						<LyricsSourceSelect
+							key={songId}
+							onChange={(provider) => {
+								manualView.current = true;
+								setView(provider);
+							}}
+							providers={available}
+							value={view}
+						/>
+					) : (
+						<span className="flex h-full items-center justify-end text-xs text-muted-foreground">
+							{pending ? "Finding sources…" : "No source"}
+						</span>
+					)}
+				</div>
+				<div className="col-span-2 row-start-2 flex min-h-5 flex-wrap items-center gap-1.5 md:min-h-0">
+					{kind && (
+						<span
+							className="animate-in fade-in shrink-0 whitespace-nowrap rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+							title={KIND_TITLES[kind]}
+						>
+							{LYRICS_KIND_LABELS[kind]}
+						</span>
+					)}
+					{active && !active.confirmed && (
+						<span
+							className="animate-in fade-in shrink-0 whitespace-nowrap rounded-full bg-foreground/6 px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+							title="Matched by title alone — may be a different version of this song"
+						>
+							Loose match
+						</span>
+					)}
+				</div>
 				{available.length >= 2 && (
-					<div className="ml-auto flex items-center gap-0.5 rounded-full bg-foreground/6 p-0.5">
+					<div className="ml-auto hidden max-w-full flex-wrap items-center gap-0.5 rounded-2xl bg-foreground/6 p-0.5 md:flex">
 						{available.map((provider) => (
 							<button
+								aria-pressed={view === provider.id}
 								className={cn(
-									"animate-in fade-in rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
+									"animate-in fade-in shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors duration-150",
 									view === provider.id
 										? "bg-background text-foreground shadow-sm"
 										: "text-muted-foreground hover:text-foreground",

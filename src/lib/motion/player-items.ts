@@ -66,3 +66,18 @@ export function clipTextRect(text: MotionRect, clip: MotionRect): MotionRect {
 		),
 	};
 }
+
+/** Measure the inline contents, not a full-width block row in the Range. */
+export function textRect(element: Element): DOMRect {
+	const content = element.querySelector("[data-motion-text]") ?? element;
+	const range = document.createRange();
+	range.selectNodeContents(content);
+	const rect = range.getBoundingClientRect();
+	if (rect.width <= 0 || rect.height <= 0)
+		return content.getBoundingClientRect();
+	const clip = (
+		content.closest(".truncate") ?? content
+	).getBoundingClientRect();
+	const painted = clipTextRect(rect, clip);
+	return new DOMRect(painted.x, painted.y, painted.width, painted.height);
+}

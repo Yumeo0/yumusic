@@ -5,8 +5,7 @@ import {
 	useLayoutEffect,
 	useRef,
 } from "react";
-import { textRect } from "@/lib/motion/queue-drag";
-import { PLAYER_SECONDARY_PAIRS } from "./player-items";
+import { PLAYER_SECONDARY_PAIRS, textRect } from "./player-items";
 
 /** Matches Tailwind's max-md breakpoint: the lyrics toggle is mobile-only. */
 const MOBILE_QUERY = "(max-width: 767.98px)";
@@ -53,9 +52,7 @@ function visible(root: ParentNode, selector: string): HTMLElement | null {
 }
 
 function measure(element: HTMLElement, text?: boolean): DOMRect {
-	return text
-		? textRect(element.querySelector("[data-motion-text]") ?? element)
-		: element.getBoundingClientRect();
+	return text ? textRect(element) : element.getBoundingClientRect();
 }
 
 /** The cover's rounded element: the box itself or its first rounded child. */
