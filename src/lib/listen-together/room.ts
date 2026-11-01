@@ -92,6 +92,9 @@ export class ListenRoom {
 		private identityProvider: () => Promise<RoomIdentity> = getRoomIdentity,
 		private settings: JoinSettingsStorage = joinSettingsStorage,
 		private permissionStorage: PermissionsStorage = permissionsStorage,
+		private resolveAccount: (
+			fingerprint: string,
+		) => Promise<string | null> = async () => null,
 	) {
 		const saved = settings.read();
 		this.state = {
@@ -113,6 +116,7 @@ export class ListenRoom {
 	private admitted = new Map<string, string>();
 	private approvedKeys = new Set<string>();
 	private verified = new Map<DataConnection, string>();
+	private accountTrust = new Map<string, string>();
 	private challenges = new Map<
 		DataConnection,
 		{
@@ -412,6 +416,7 @@ export class ListenRoom {
 		return !!fingerprint && this.admitted.get(connection.peer) === fingerprint;
 	}
 	private sayHello(connection: DataConnection) {
+		this.accountTrust.delete(connection.peer);
 		if (!this.profile || !this.identity) return;
 		this.sentProfiles.set(connection, this.profile);
 		this.send(connection, {
@@ -460,6 +465,9 @@ export class ListenRoom {
 				pending.profile,
 				message.signature,
 			);
+			const accountId = fingerprint
+				? await this.resolveAccount(fingerprint).catch(() => null)
+				: null;
 			if (
 				this.challenges.get(connection) !== pending ||
 				this.channels.get(id) !== connection ||
@@ -472,6 +480,8 @@ export class ListenRoom {
 				return;
 			}
 			this.verified.set(connection, fingerprint);
+			if (accountId) this.accountTrust.set(id, `account:${accountId}`);
+			else this.accountTrust.delete(id);
 			const member: Participant = {
 				id,
 				profile: pending.profile,
@@ -566,7 +576,10 @@ export class ListenRoom {
 			return;
 		}
 		if (remember && member.fingerprint)
-			this.rememberPerson(member.fingerprint, member.profile.username);
+			this.rememberPerson(
+				this.trustKeyFor(id) ?? member.fingerprint,
+				member.profile.username,
+			);
 		this.update({ pending: this.state.pending.filter((p) => p.id !== id) });
 		const fingerprint = this.verified.get(connection);
 		if (!fingerprint) return;
@@ -590,13 +603,20 @@ export class ListenRoom {
 			this.verified.get(connection) !== member.fingerprint
 		)
 			return;
-		const trusted = this.state.trustedPeople.some(
-			(p) => p.fingerprint === member.fingerprint,
-		);
+		const ownAccount =
+			this.identity?.accountId &&
+			this.accountTrust.get(id) === `account:${this.identity.accountId}`;
+		const trusted =
+			!!ownAccount ||
+			this.state.trustedPeople.some(
+				(p) =>
+					p.fingerprint === member.fingerprint ||
+					p.fingerprint === this.accountTrust.get(id),
+			);
 		if (this.state.joinPolicy === "trusted-only" && !trusted) {
 			this.reject(
 				connection,
-				"This room only accepts trusted devices. Ask the host to approve and trust you in manual mode first.",
+				"This room only accepts trusted devices or linked accounts. Ask the host to approve and trust you in manual mode first.",
 			);
 			return;
 		}
@@ -616,12 +636,43 @@ export class ListenRoom {
 		for (const person of [...this.state.pending])
 			this.applyJoinPolicy(person.id);
 	}
+	/** Refresh trust after cloud sync without changing a guest's host permissions. */
+	reloadSavedSettings() {
+		const saved = this.settings.read();
+		this.update({ joinPolicy: saved.policy, trustedPeople: saved.people });
+		if (this.state.role !== "guest") {
+			this.setGuestPermissions(this.permissionStorage.read());
+			for (const person of [...this.state.pending])
+				this.applyJoinPolicy(person.id);
+		}
+	}
+	/** Account mappings here were verified locally, never supplied by a roster. */
+	trustKeyFor(id: string): string | undefined {
+		return (
+			this.accountTrust.get(id) ??
+			[...this.state.members, ...this.state.pending].find((m) => m.id === id)
+				?.fingerprint
+		);
+	}
 	private rememberPerson(fingerprint: string, username: string) {
+		const replacedDevices = new Set(
+			[...this.accountTrust]
+				.filter(([, key]) => key === fingerprint)
+				.map(
+					([id]) =>
+						[...this.state.members, ...this.state.pending].find(
+							(m) => m.id === id,
+						)?.fingerprint,
+				),
+		);
 		const people = this.state.trustedPeople.filter(
-			(p) => p.fingerprint !== fingerprint,
+			(p) =>
+				p.fingerprint !== fingerprint && !replacedDevices.has(p.fingerprint),
 		);
 		if (people.length >= 100)
-			throw new Error("Remove a trusted device before adding another.");
+			throw new Error(
+				"Remove a trusted person or device before adding another.",
+			);
 		people.push({ fingerprint, username });
 		this.settings.write({ policy: this.state.joinPolicy, people });
 		this.update({ trustedPeople: people });
@@ -667,7 +718,10 @@ export class ListenRoom {
 		const connection = this.channels.get(id);
 		const fingerprint = connection && this.verified.get(connection);
 		if (!member || !fingerprint) return;
-		this.rememberPerson(fingerprint, member.profile.username);
+		this.rememberPerson(
+			this.trustKeyFor(id) ?? fingerprint,
+			member.profile.username,
+		);
 	}
 	forgetPerson(fingerprint: string) {
 		for (const [nonce, pending] of this.trustChallenges)
@@ -677,6 +731,11 @@ export class ListenRoom {
 		);
 		this.settings.write({ policy: this.state.joinPolicy, people });
 		this.approvedKeys.delete(fingerprint);
+		for (const [id, key] of this.accountTrust) {
+			if (key !== fingerprint) continue;
+			const member = this.state.members.find((m) => m.id === id);
+			if (member?.fingerprint) this.approvedKeys.delete(member.fingerprint);
+		}
 		this.update({ trustedPeople: people });
 	}
 	private finishTrust(nonce: string, error?: string) {
@@ -740,6 +799,9 @@ export class ListenRoom {
 			message.signature,
 			"trust",
 		);
+		const accountId = fingerprint
+			? await this.resolveAccount(fingerprint).catch(() => null)
+			: null;
 		if (this.trustChallenges.get(message.challenge.nonce) !== pending) return;
 		const member = this.state.members.find((m) => m.id === pending.target);
 		if (
@@ -754,7 +816,13 @@ export class ListenRoom {
 			return;
 		}
 		try {
-			this.rememberPerson(fingerprint, message.profile.username);
+			if (accountId)
+				this.accountTrust.set(pending.target, `account:${accountId}`);
+			else this.accountTrust.delete(pending.target);
+			this.rememberPerson(
+				this.accountTrust.get(pending.target) ?? fingerprint,
+				message.profile.username,
+			);
 			this.finishTrust(message.challenge.nonce);
 		} catch (error) {
 			this.finishTrust(
@@ -1241,6 +1309,7 @@ export class ListenRoom {
 		this.approvedKeys.clear();
 		this.verified.clear();
 		this.challenges.clear();
+		this.accountTrust.clear();
 		this.sentProfiles.clear();
 		this.trustChallenges.clear();
 		this.seenActions.clear();
@@ -1266,7 +1335,14 @@ export class ListenRoom {
 	}
 }
 
-export const listenRoom = new ListenRoom();
+export const listenRoom = new ListenRoom(
+	undefined,
+	async () => (await import("./account-identity")).getLinkedRoomIdentity(),
+	joinSettingsStorage,
+	permissionsStorage,
+	async (fingerprint) =>
+		(await import("./account-identity")).resolveDeviceAccount(fingerprint),
+);
 export const useListenRoom = () =>
 	useSyncExternalStore(listenRoom.subscribe, listenRoom.getSnapshot);
 export const useRoomRole = () =>

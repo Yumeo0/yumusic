@@ -140,12 +140,15 @@ const create = (
 	identity = generateRoomIdentity(),
 	settings = memorySettings(),
 	permissions = memoryPermissions(),
+	resolveAccount: (fingerprint: string) => Promise<string | null> = async () =>
+		null,
 ) => {
 	const room = new ListenRoom(
 		network.create,
 		() => identity,
 		settings,
 		permissions,
+		resolveAccount,
 	);
 	rooms.push(room);
 	return room;
@@ -165,6 +168,122 @@ const state: Omit<RoomPlayback, "revision" | "sentAt"> = {
 };
 
 describe("PeerJS room lifecycle", () => {
+	test("trusting an account admits a second device and forgetting it revokes both", async () => {
+		const network = new Network();
+		const first = await generateRoomIdentity();
+		const second = await generateRoomIdentity();
+		const account = "11111111-1111-4111-8111-111111111111";
+		const lookup = async (key: string) =>
+			[first.fingerprint, second.fingerprint].includes(key) ? account : null;
+		const host = create(
+			network,
+			generateRoomIdentity(),
+			memorySettings(),
+			memoryPermissions(),
+			lookup,
+		);
+		host.setJoinPolicy("everyone");
+		await host.connect(profile("Host"));
+		const a = create(network, Promise.resolve(first));
+		await a.connect(profile("Friend phone"), host.getSnapshot().invite);
+		await until(a, (s) => s.status === "connected");
+		host.trustPerson(a.getSnapshot().selfId as string);
+		expect(host.getSnapshot().trustedPeople.map((p) => p.fingerprint)).toEqual([
+			`account:${account}`,
+		]);
+		host.setJoinPolicy("trusted-only");
+		a.leave();
+		const b = create(network, Promise.resolve(second));
+		await b.connect(profile("Friend computer"), host.getSnapshot().invite);
+		await until(b, (s) => s.status === "connected");
+		expect(host.getSnapshot().pending).toHaveLength(0);
+		host.forgetPerson(`account:${account}`);
+		b.leave();
+		await a.connect(profile("Friend phone"), host.getSnapshot().invite);
+		await until(a, (s) => s.status === "error");
+		expect(a.getSnapshot().error).toContain("trusted devices");
+		await b.connect(profile("Friend computer"), host.getSnapshot().invite);
+		await until(b, (s) => s.status === "error");
+	});
+
+	test("a host automatically recognizes its own account's other device", async () => {
+		const network = new Network();
+		const accountId = "22222222-2222-4222-8222-222222222222";
+		const ownIdentity = { ...(await generateRoomIdentity()), accountId };
+		const otherIdentity = await generateRoomIdentity();
+		const host = create(
+			network,
+			Promise.resolve(ownIdentity),
+			memorySettings(),
+			memoryPermissions(),
+			async (key) => (key === otherIdentity.fingerprint ? accountId : null),
+		);
+		host.setJoinPolicy("trusted-only");
+		await host.connect(profile("Me"));
+		const other = create(network, Promise.resolve(otherIdentity));
+		await other.connect(profile("My other device"), host.getSnapshot().invite);
+		await until(other, (s) => s.status === "connected");
+		expect(host.getSnapshot().trustedPeople).toEqual([]);
+	});
+
+	test("account lookup failure cannot admit an untrusted signed device", async () => {
+		const network = new Network();
+		const settings = memorySettings();
+		settings.write({
+			policy: "trusted-only",
+			people: [
+				{
+					fingerprint: "account:11111111-1111-4111-8111-111111111111",
+					username: "Friend",
+				},
+			],
+		});
+		const host = create(
+			network,
+			generateRoomIdentity(),
+			settings,
+			memoryPermissions(),
+			async () => {
+				throw new Error("offline");
+			},
+		);
+		await host.connect(profile("Host"));
+		const stranger = create(network);
+		await stranger.connect(profile("Friend"), host.getSnapshot().invite);
+		await until(stranger, (s) => s.status === "error");
+		expect(host.getSnapshot().members).toHaveLength(1);
+	});
+
+	test("a guest's fresh trust proof resolves the account instead of trusting a roster claim", async () => {
+		const network = new Network();
+		const friendIdentity = await generateRoomIdentity();
+		const accountId = "33333333-3333-4333-8333-333333333333";
+		const host = create(network);
+		host.setJoinPolicy("everyone");
+		await host.connect(profile("Host"));
+		const friend = create(network, Promise.resolve(friendIdentity));
+		await friend.connect(profile("Friend"), host.getSnapshot().invite);
+		await until(friend, (s) => s.status === "connected");
+		const guest = create(
+			network,
+			generateRoomIdentity(),
+			memorySettings(),
+			memoryPermissions(),
+			async (key) => (key === friendIdentity.fingerprint ? accountId : null),
+		);
+		await guest.connect(profile("Guest"), host.getSnapshot().invite);
+		await until(
+			guest,
+			(s) => s.status === "connected" && s.members.length === 3,
+		);
+		guest.trustPerson(friend.getSnapshot().selfId as string);
+		await until(guest, (s) => s.trustedPeople.length === 1);
+		expect(guest.getSnapshot().trustedPeople[0].fingerprint).toBe(
+			`account:${accountId}`,
+		);
+		expect(host.getSnapshot().trustedPeople).toEqual([]);
+	});
+
 	test("attributes approved and allowed additions to the verified guest and syncs autoplay updates", async () => {
 		const network = new Network();
 		const host = create(network);

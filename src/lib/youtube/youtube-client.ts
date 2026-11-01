@@ -1,5 +1,6 @@
 import {
 	Innertube,
+	Parser,
 	Platform,
 	type Types,
 	UniversalCache,
@@ -13,7 +14,7 @@ import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
 import { getOembedMetadata } from "./oembed";
-import { readSessionProfile } from "./session-profile";
+import { readSessionProfile, selectedGoogleEmail } from "./session-profile";
 import { type SongVersion, songVersionEntryFromQueue } from "./song-version";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
@@ -276,7 +277,17 @@ export function getYoutubeClient(cookie?: string, refresh = false) {
 
 export async function getUserProfile() {
 	const client = await getYoutubeClient();
-	return readSessionProfile(client);
+	return readSessionProfile({
+		session: client.session,
+		account: { getInfo: async () => {
+            // The default WEB menu retains the owning Google account header.
+            // The full channel-switcher page omits that identity information.
+            const response = await client.actions.execute("/account/accounts_list", { client: "WEB" });
+            const email = selectedGoogleEmail(response.data);
+            const parsed = Parser.parseResponse(response.data);
+            return (parsed.actions_memo?.getType(YTNodes.AccountItem) ?? []).map(item => ({ ...item, google_email: item.is_selected ? email : undefined }));
+		} },
+	});
 }
 
 export async function getUserPlaylists() {

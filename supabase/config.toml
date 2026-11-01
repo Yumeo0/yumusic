@@ -1,0 +1,19 @@
+# One hosted database is shared by development and release builds.
+# Keep credentials and remote Auth settings out of this migration config.
+project_id = "YuMusic"
+
+[api]
+enabled = true
+schemas = ["public"]
+auto_expose_new_tables = false
+
+[db]
+major_version = 17
+
+[db.seed]
+enabled = false
+
+# Registration authenticates the bearer token with Auth and verifies possession
+# of the device key. Anonymous GET exposes only a targeted opaque-account lookup.
+[functions.room-identity]
+verify_jwt = false

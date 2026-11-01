@@ -6,6 +6,7 @@ mod media_controls;
 mod native_audio;
 mod po_token;
 mod proxy;
+mod sync_oauth;
 
 use std::fs;
 use std::path::PathBuf;
@@ -342,6 +343,7 @@ pub fn run() {
 	builder
 		.register_asynchronous_uri_scheme_protocol("proxy", proxy::handle)
 		.manage(media_controls::MediaSession::default())
+		.manage(sync_oauth::SyncOAuth::default())
 		.setup(|app| {
 			#[cfg(all(debug_assertions, feature = "mcp-bridge"))]
 			app.add_capability(
@@ -391,6 +393,8 @@ pub fn run() {
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
+			sync_oauth::begin_sync_oauth,
+			sync_oauth::cancel_sync_oauth,
 			native_audio::native_audio_command,
 			native_audio::native_audio_append,
 			po_token::mint_po_token,

@@ -4,6 +4,8 @@
 
 ### Features
 
+- Added optional sync through your YouTube Google account for settings, scrobbling, pinned playlists, and Listen together profiles, permissions, and trusted people. Trust covers all linked devices.
+
 ### Improvements
 
 - Added a compact lyrics source picker on mobile, with press-and-drag selection and a stable header as sources load.
@@ -12,6 +14,7 @@
 
 - Fixed artist text alignment during player and lyrics transitions.
 - Fixed the volume slider appearing behind the Listen together pill.
+- Fixed clearing caches removing pinned playlists and trusted devices.
 
 ## [0.7.0] - 2026-10-31
 

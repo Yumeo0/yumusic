@@ -1,5 +1,6 @@
 import type { Song } from "@/contexts/player-context";
 import type { RepeatMode } from "@/lib/player/repeat";
+import { notifySyncChange } from "../sync/events";
 
 export type PermissionMode = "allow" | "suggest" | "deny";
 export const permissionLabels = {
@@ -161,6 +162,7 @@ export const permissionsStorage: PermissionsStorage = {
 				"yumusic:guest-permissions:v1",
 				JSON.stringify(value),
 			);
+			notifySyncChange();
 		} catch {
 			throw new Error("Could not save guest permissions.");
 		}

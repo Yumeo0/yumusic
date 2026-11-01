@@ -19,6 +19,7 @@ import {
 	useNavigate,
 } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { CloudSync } from "./components/app/cloud-sync";
 import { Titlebar } from "./components/app/titlebar";
 import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
@@ -68,6 +69,9 @@ import {
 } from "./lib/stores/playlist-cache";
 import { useSettings } from "./lib/stores/settings";
 import { showToast } from "./lib/stores/toast";
+import { signInWithGoogle } from "./lib/sync/oauth";
+import { signOutOfSync } from "./lib/sync/sync";
+import { getYouTubeSyncAccount, setYouTubeSyncAccount } from "./lib/sync/youtube-account";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
@@ -618,6 +622,7 @@ function Layout() {
 	const [userProfile, setUserProfile] = useState<{
 		name?: string;
 		photo?: string;
+		email?: string;
 	} | null>(null);
 
 	useEffect(() => {
@@ -630,7 +635,10 @@ function Layout() {
 			const revision = authRevision.current;
 			try {
 				const cookie = await window.electron.getCookie();
-				if (!cookie) return;
+				if (!cookie) {
+					if (!disposed && revision === authRevision.current) setYouTubeSyncAccount({ status: "signed-out" });
+					return;
+				}
 				await getYoutubeClient(cookie);
 				let profile = await getUserProfile();
 				let signedIn = !!profile;
@@ -648,6 +656,7 @@ function Layout() {
 				// saved session or shared browser cookies.
 				if (profile || !signedIn) setUserProfile(profile);
 				setIsLoggedIn(signedIn);
+				setYouTubeSyncAccount(!signedIn ? { status: "signed-out" } : profile?.email ? { status: "ready", email: profile.email } : { status: "unavailable" });
 			} catch (error) {
 				// Offline, rate-limited and server failures do not invalidate cookies.
 				console.error("Failed to check Google session:", error);
@@ -671,13 +680,28 @@ function Layout() {
 		if (authBusy.current) return;
 		authBusy.current = true;
 		authRevision.current += 1;
+		const previousAccount = getYouTubeSyncAccount();
+		setYouTubeSyncAccount({ status: "checking" });
 		try {
 			const cookie = await window.electron.login();
-			if (!cookie) return;
+			if (!cookie) {
+				setYouTubeSyncAccount(previousAccount);
+				return;
+			}
+			await getYoutubeClient(cookie, true);
+			const profile = await getUserProfile();
+			setIsLoggedIn(true);
+			setUserProfile(profile);
+			setYouTubeSyncAccount(profile?.email ? { status: "ready", email: profile.email } : { status: "unavailable" });
+			if (profile?.email) {
+				try { await signInWithGoogle(); }
+				catch { /* YouTube stays signed in if optional sync consent is cancelled. */ }
+			}
 			// The native login command already verified the session with YouTube.
 			// Refetch all mounted views with the validated session.
 			window.location.reload();
 		} catch (error) {
+			setYouTubeSyncAccount(previousAccount);
 			console.error("Google sign-in failed:", error);
 			showToast("Could not verify Google sign-in. Please try again.");
 		} finally {
@@ -689,12 +713,16 @@ function Layout() {
 		if (authBusy.current) return;
 		authBusy.current = true;
 		authRevision.current += 1;
+		const previousAccount = getYouTubeSyncAccount();
+		setYouTubeSyncAccount({ status: "signed-out" });
 		try {
+			await signOutOfSync();
 			await window.electron.logout();
 			setIsLoggedIn(false);
 			setUserProfile(null);
 			window.location.reload();
 		} catch (error) {
+			setYouTubeSyncAccount(previousAccount);
 			console.error("Google sign-out failed:", error);
 			showToast("Could not clear Google sign-in. Please try again.");
 		} finally {
@@ -753,6 +781,7 @@ function AppShell({
 	return (
 		<>
 			<AmbientSync />
+			<CloudSync />
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
 			<MediaSessionSync />

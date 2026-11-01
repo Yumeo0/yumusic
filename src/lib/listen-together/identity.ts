@@ -1,3 +1,4 @@
+import { accountBindingPayload } from "../../../supabase/functions/_shared/account-proof";
 import type { RoomProfile } from "./profile";
 
 export interface JoinChallenge {
@@ -9,6 +10,8 @@ export interface JoinChallenge {
 export interface RoomIdentity {
 	publicKey: string;
 	fingerprint: string;
+	accountId?: string;
+	bindAccount?: (accountId: string, issuedAt: number) => Promise<string>;
 	sign: (
 		challenge: JoinChallenge,
 		token: string,
@@ -72,6 +75,14 @@ async function fromKeys(keys: CryptoKeyPair): Promise<RoomIdentity> {
 	return {
 		publicKey,
 		fingerprint: await fingerprint(new Uint8Array(raw)),
+		bindAccount: async (accountId, issuedAt) =>
+			encode(
+				await crypto.subtle.sign(
+					signing,
+					keys.privateKey,
+					accountBindingPayload(accountId, publicKey, issuedAt),
+				),
+			),
 		sign: async (challenge, token, profile, purpose = "join") =>
 			encode(
 				await crypto.subtle.sign(
@@ -139,10 +150,11 @@ function transaction<T>(
 		};
 	});
 }
-let identity: Promise<RoomIdentity> | null = null;
+const identities = new Map<string, Promise<RoomIdentity>>();
 
 /** Private CryptoKeys remain non-exportable and local to this app's IndexedDB. */
-export function getRoomIdentity(): Promise<RoomIdentity> {
+export function getRoomIdentity(scope = "device"): Promise<RoomIdentity> {
+	let identity = identities.get(scope);
 	identity ??= (async () => {
 		const db = await new Promise<IDBDatabase>((resolve, reject) => {
 			const request = indexedDB.open("yumusic:room-identity:v1", 1);
@@ -159,7 +171,7 @@ export function getRoomIdentity(): Promise<RoomIdentity> {
 			let keys = await transaction<CryptoKeyPair | undefined>(
 				db,
 				"readonly",
-				(store) => store.get("device"),
+				(store) => store.get(scope),
 			);
 			if (!keys) {
 				const generated = await crypto.subtle.generateKey(algorithm, false, [
@@ -168,7 +180,7 @@ export function getRoomIdentity(): Promise<RoomIdentity> {
 				]);
 				try {
 					await transaction(db, "readwrite", (store) =>
-						store.add(generated, "device"),
+						store.add(generated, scope),
 					);
 					keys = generated;
 				} catch (error) {
@@ -181,7 +193,7 @@ export function getRoomIdentity(): Promise<RoomIdentity> {
 					keys = await transaction<CryptoKeyPair | undefined>(
 						db,
 						"readonly",
-						(store) => store.get("device"),
+						(store) => store.get(scope),
 					);
 				}
 			}
@@ -191,8 +203,9 @@ export function getRoomIdentity(): Promise<RoomIdentity> {
 			db.close();
 		}
 	})().catch((error) => {
-		identity = null;
+		identities.delete(scope);
 		throw error;
 	});
+	identities.set(scope, identity);
 	return identity;
 }

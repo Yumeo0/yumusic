@@ -13,6 +13,7 @@ import {
 import { type CSSProperties, type DragEvent, useEffect, useState } from "react";
 import { UpdatesSection } from "@/components/app/updates";
 import { StorageManagerDialog } from "@/components/settings/storage-manager-dialog";
+import { SyncSection } from "@/components/settings/sync-section";
 import { Input } from "@/components/ui/input";
 import { useDownloads } from "@/lib/downloads/downloads";
 import {
@@ -136,7 +137,7 @@ export default function SettingsPage({
 
 	const clearCaches = () => {
 		for (const key of Object.keys(localStorage)) {
-			if (key.startsWith("yumusic:") && !key.startsWith("yumusic:settings")) {
+			if (/^yumusic:(playlist:|library:|home:|mbids|mb-artists)/.test(key)) {
 				localStorage.removeItem(key);
 			}
 		}
@@ -201,6 +202,8 @@ export default function SettingsPage({
 					)}
 				</div>
 			</section>
+
+			<SyncSection />
 
 			{/* Home feed */}
 			<section className="mt-8">

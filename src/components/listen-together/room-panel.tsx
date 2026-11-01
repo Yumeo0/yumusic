@@ -282,7 +282,8 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 								const trusted =
 									!!member.fingerprint &&
 									room.trustedPeople.some(
-										(person) => person.fingerprint === member.fingerprint,
+										(person) =>
+											person.fingerprint === listenRoom.trustKeyFor(member.id),
 									);
 								return (
 									<div className="flex items-center gap-3 py-2" key={member.id}>
@@ -470,18 +471,20 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 														try {
 															if (
 																room.trustedPeople.some(
-																	(p) => p.fingerprint === member.fingerprint,
+																	(p) =>
+																		p.fingerprint ===
+																		listenRoom.trustKeyFor(member.id),
 																)
 															)
 																listenRoom.forgetPerson(
-																	member.fingerprint as string,
+																	listenRoom.trustKeyFor(member.id) as string,
 																);
 															else listenRoom.trustPerson(member.id);
 														} catch (e) {
 															setError(
 																e instanceof Error
 																	? e.message
-																	: "Could not update device trust.",
+																	: "Could not update trust.",
 															);
 														}
 													}}
@@ -492,10 +495,12 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 													{room.verifyingTrust.includes(member.id)
 														? "Verifying…"
 														: room.trustedPeople.some(
-																	(p) => p.fingerprint === member.fingerprint,
+																	(p) =>
+																		p.fingerprint ===
+																		listenRoom.trustKeyFor(member.id),
 																)
 															? "Trusted · Forget"
-															: "Trust device"}
+															: "Trust person"}
 												</button>
 											)}
 										</div>

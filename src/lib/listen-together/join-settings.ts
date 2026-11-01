@@ -1,3 +1,11 @@
+import { validAccountId } from "../../../supabase/functions/_shared/account-proof";
+import { notifySyncChange } from "../sync/events";
+
+export const validTrustKey = (value: unknown): value is string =>
+	typeof value === "string" &&
+	(/^[a-f0-9]{64}$/.test(value) ||
+		(value.startsWith("account:") && validAccountId(value.slice(8))));
+
 export type JoinPolicy = "manual" | "everyone" | "trusted" | "trusted-only";
 export interface TrustedPerson {
 	fingerprint: string;
@@ -33,8 +41,7 @@ export const joinSettingsStorage: JoinSettingsStorage = {
 						.filter(
 							(person: TrustedPerson) =>
 								person &&
-								typeof person.fingerprint === "string" &&
-								/^[a-f0-9]{64}$/.test(person.fingerprint) &&
+								validTrustKey(person.fingerprint) &&
 								typeof person.username === "string" &&
 								person.username.length <= 40,
 						)
@@ -57,6 +64,7 @@ export const joinSettingsStorage: JoinSettingsStorage = {
 	write(value) {
 		try {
 			localStorage.setItem(KEY, JSON.stringify(value));
+			notifySyncChange();
 		} catch {
 			throw new Error(
 				"Could not save join settings. Check app storage permissions.",

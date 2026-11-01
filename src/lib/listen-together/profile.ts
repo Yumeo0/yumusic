@@ -1,3 +1,5 @@
+import { notifySyncChange } from "../sync/events";
+
 export interface RoomProfile {
 	username: string;
 	avatar: string | null;
@@ -52,6 +54,7 @@ export function saveRoomProfile(source: string, profile: RoomProfile) {
 	// Confirmation can still succeed for this session if storage is unavailable.
 	try {
 		localStorage.setItem(KEY, JSON.stringify({ source, profile }));
+		notifySyncChange();
 	} catch {
 		/* best effort */
 	}

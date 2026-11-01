@@ -50,7 +50,7 @@ export function JoinPolicyPanel() {
 			{room.trustedPeople.length > 0 && (
 				<details className="mt-4 border-t border-foreground/8 pt-3">
 					<summary className="cursor-pointer text-xs font-medium text-muted-foreground">
-						Trusted devices · {room.trustedPeople.length}
+						Trusted people and devices · {room.trustedPeople.length}
 					</summary>
 					<div className="mt-2 max-h-56 overflow-y-auto">
 						{room.trustedPeople.map((person) => (
@@ -64,11 +64,13 @@ export function JoinPolicyPanel() {
 										className="truncate font-mono text-[10px] text-muted-foreground"
 										title={person.fingerprint}
 									>
-										{person.fingerprint.match(/.{1,8}/g)?.join(" ")}
+										{person.fingerprint.startsWith("account:")
+											? "Linked account · all devices"
+											: person.fingerprint.match(/.{1,8}/g)?.join(" ")}
 									</p>
 								</div>
 								<button
-									aria-label={`Forget ${person.username}'s device`}
+									aria-label={`Forget ${person.username}`}
 									className="rounded-full p-2 text-muted-foreground hover:bg-foreground/5 hover:text-destructive"
 									onClick={() => {
 										setError("");
@@ -78,7 +80,7 @@ export function JoinPolicyPanel() {
 											setError(
 												e instanceof Error
 													? e.message
-													: "Could not forget this device.",
+													: "Could not forget this person.",
 											);
 										}
 									}}

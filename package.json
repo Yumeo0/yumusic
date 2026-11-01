@@ -32,6 +32,7 @@
 	"dependencies": {
 		"@base-ui/react": "^1.9.0",
 		"@bufbuild/protobuf": "^2.16.0",
+		"@supabase/supabase-js": "2.118.0",
 		"@tanstack/react-virtual": "^3.14.24",
 		"@tauri-apps/api": "3.0.0-alpha.3",
 		"@tauri-apps/plugin-opener": "3.0.0-alpha.3",

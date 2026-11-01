@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readSessionProfile } from "./session-profile";
+import { readSessionProfile, selectedGoogleEmail } from "./session-profile";
 
 type Client = Parameters<typeof readSessionProfile>[0];
 const account = (name: string, selected = false, disabled = false) => ({
@@ -14,6 +14,58 @@ const client = (getInfo: Client["account"]["getInfo"]): Client => ({
 });
 
 describe("Google session validation", () => {
+	const accountMenu = (email: string, selected = true) => ({
+		accountSectionListRenderer: {
+			header: { googleAccountHeaderRenderer: { email: { simpleText: email } } },
+			contents: [
+				{
+					accountItemSectionRenderer: {
+						contents: [
+							{
+								accountItem: {
+									isSelected: selected,
+									accountName: { simpleText: "Brand channel name" },
+								},
+							},
+						],
+					},
+				},
+			],
+		},
+	});
+	test("reads the Google account owning the selected channel rather than its name", async () => {
+		const email = selectedGoogleEmail({
+			actions: [
+				accountMenu("BrandOwner@Example.com"),
+				accountMenu("other@example.com", false),
+			],
+		});
+		expect(email).toBe("brandowner@example.com");
+		const selected = { ...account("Channel", true), google_email: email };
+		expect(
+			(await readSessionProfile(client(async () => [selected])))?.email,
+		).toBe(email);
+	});
+	test("missing or ambiguous account emails cannot be guessed from a name or other account", () => {
+		expect(
+			selectedGoogleEmail({
+				actions: [
+					accountMenu("first@example.com"),
+					accountMenu("second@example.com"),
+				],
+			}),
+		).toBeUndefined();
+		expect(
+			selectedGoogleEmail(accountMenu("other@example.com", false)),
+		).toBeUndefined();
+		expect(selectedGoogleEmail(accountMenu("Not an email"))).toBeUndefined();
+		expect(
+			selectedGoogleEmail({
+				accountName: "person@example.com",
+				isSelected: true,
+			}),
+		).toBeUndefined();
+	});
 	test("uses the selected account from the cookie-compatible endpoint", async () => {
 		const profile = await readSessionProfile(
 			client(async (all) => {
