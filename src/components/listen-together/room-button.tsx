@@ -1,16 +1,21 @@
 import { Dialog } from "@base-ui/react/dialog";
+import { Popover } from "@base-ui/react/popover";
 import { Headphones } from "lucide-react";
 import { useListenRoom } from "@/lib/listen-together/room";
+import { useMediaQuery } from "@/lib/utils/hooks";
 import { cn } from "@/lib/utils/utils";
 
-/** Connects the pill and player buttons to the single app-wide room dialog. */
+export const ROOM_DESKTOP_QUERY = "(min-width: 768px)";
+/** Player triggers share the responsive app-wide room surface. */
 export const roomDialogHandle = Dialog.createHandle();
+export const roomPopoverHandle = Popover.createHandle();
 
 export function RoomButton() {
+	const desktop = useMediaQuery(ROOM_DESKTOP_QUERY);
 	const room = useListenRoom();
 	const requests = room.pending.length + room.requests.length;
-	return (
-		<Dialog.Trigger
+	const trigger = (
+		<button
 			aria-label={
 				requests
 					? `Listen together, ${requests} pending requests`
@@ -21,10 +26,13 @@ export function RoomButton() {
 				room.role ? "text-primary" : "text-muted-foreground",
 			)}
 			data-swipe-dismiss-ignore
-			handle={roomDialogHandle}
+			onClick={(event) => event.stopPropagation()}
 			title="Listen together"
 			type="button"
-		>
+		/>
+	);
+	const content = (
+		<>
 			<Headphones aria-hidden className="size-5" />
 			{requests > 0 && (
 				<span
@@ -34,6 +42,21 @@ export function RoomButton() {
 					{requests > 99 ? "99+" : requests}
 				</span>
 			)}
+		</>
+	);
+	return desktop ? (
+		<Popover.Trigger
+			closeDelay={300}
+			delay={200}
+			handle={roomPopoverHandle}
+			openOnHover
+			render={trigger}
+		>
+			{content}
+		</Popover.Trigger>
+	) : (
+		<Dialog.Trigger handle={roomDialogHandle} render={trigger}>
+			{content}
 		</Dialog.Trigger>
 	);
 }

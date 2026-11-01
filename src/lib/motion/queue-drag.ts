@@ -9,6 +9,8 @@ import {
 } from "@/lib/player/player-ui";
 import {
 	PLAYER_SECONDARY_PAIRS,
+	prepareArtworkMorph,
+	prepareTitleMorph,
 	projectPlayerItem,
 	textRect,
 } from "./player-items";
@@ -315,6 +317,7 @@ export function useQueueSheetGesture(canStart?: QueueGestureCheck) {
 export interface DismissGeometry {
 	page: HTMLElement | null;
 	mini: HTMLElement;
+	apply: (progress: number) => void;
 	release: () => void;
 	/** Finger travel that moves the artwork onto the mini-player thumbnail. */
 	travel: number;
@@ -364,6 +367,12 @@ export function measureDismissGeometry(
 
 	const stageRect = (stage ?? overlay).getBoundingClientRect();
 	const thumbRect = thumb.getBoundingClientRect();
+	const artwork = cover.querySelector<HTMLElement>("[data-np-cover-art]");
+	const miniArtwork = thumb.querySelector<HTMLElement>("[data-mini-cover-art]");
+	const artworkMorph =
+		artwork && miniArtwork
+			? prepareArtworkMorph(cover, artwork, miniArtwork, !stage)
+			: null;
 	own(thumb);
 	overlay.style.setProperty(
 		"--np-min-cover-left",
@@ -404,28 +413,37 @@ export function measureDismissGeometry(
 		if (text)
 			overlay.style.setProperty(
 				`${prefix}-cut`,
-				`${Math.max(0, origin.width - (source.x - origin.x + target.width / position))}px`,
+				`${origin.width - (source.x - origin.x + target.width / position)}px`,
 			);
 	};
 
 	if (!stage) {
-		const rect = cover.getBoundingClientRect();
-		pair(cover, rect, thumbRect, "--np-cover", thumbRect.width / rect.width);
+		if (artworkMorph) {
+			overlay.style.setProperty("--np-cover-tx", `${artworkMorph.x}px`);
+			overlay.style.setProperty("--np-cover-ty", `${artworkMorph.y}px`);
+			overlay.style.setProperty("--np-cover-s", "1");
+		} else {
+			const rect = cover.getBoundingClientRect();
+			pair(cover, rect, thumbRect, "--np-cover", thumbRect.width / rect.width);
+		}
 	}
 
 	const titleLine = visible("[data-np-title-line]");
 	const title = titleLine;
 	const miniTitle = miniVisible("[data-mini-title-line]");
+	let titleMorph: ReturnType<typeof prepareTitleMorph> | null = null;
 	if (title && miniTitle) {
+		const scale = fontScale(title, miniTitle);
 		own(miniTitle);
 		pair(
 			titleLine,
 			textRect(title),
 			textRect(miniTitle),
 			"--np-title",
-			fontScale(title, miniTitle),
+			scale,
 			true,
 		);
+		titleMorph = prepareTitleMorph(title, miniTitle, scale);
 	}
 
 	const artistLine = visible("[data-np-artist-line]");
@@ -553,7 +571,13 @@ export function measureDismissGeometry(
 	return {
 		height,
 		mini,
+		apply: (progress) => {
+			titleMorph?.apply(progress);
+			artworkMorph?.apply(progress);
+		},
 		release: () => {
+			titleMorph?.release();
+			artworkMorph?.release();
 			for (const target of targets)
 				target.removeAttribute("data-player-morph-target");
 			for (const extra of extras)

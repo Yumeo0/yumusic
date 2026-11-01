@@ -163,7 +163,7 @@ export function artistNames(item: YTNodes.MusicResponsiveListItem): string {
 export function artistIdOf(
 	item: YTNodes.MusicResponsiveListItem,
 ): string | undefined {
-	return linkedArtists(item).find((a) => a.id)?.id;
+	return artistListOf(item).find((a) => a.id)?.id;
 }
 
 const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;

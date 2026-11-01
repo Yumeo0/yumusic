@@ -82,6 +82,10 @@ export function DeviceBridge() {
 					{
 						available,
 						status: () => ({
+							thumbnail: live.current.player.currentSong
+								? wireSong(live.current.player.currentSong).thumbnail
+								: "",
+							upload: live.current.player.currentSong?.upload ?? false,
 							playing: live.current.controls.isPlaying,
 							title: live.current.player.currentSong?.title.slice(0, 500) ?? "",
 							artist:

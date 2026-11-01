@@ -8,7 +8,7 @@ export function JoinPolicyPanel() {
 	const [error, setError] = useState("");
 	const guest = room.role === "guest";
 	return (
-		<section className="mb-5 rounded-2xl border border-foreground/10 p-5">
+		<section>
 			{guest ? (
 				<div>
 					<h2 className="flex items-center gap-2 text-sm font-medium">

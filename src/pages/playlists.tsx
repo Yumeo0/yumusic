@@ -50,14 +50,15 @@ import {
 	usePinnedPlaylists,
 } from "@/lib/stores/pinned";
 import {
-	invalidateLibraryCache,
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
 	type PlaylistView,
 	patchCachedPlaylistSongs,
+	playlistRevision,
 	readCache,
 	SYNC_INTERVAL_MS,
 	subscribeToLibraryChanges,
+	subscribeToPlaylistChanges,
 	writeCache,
 } from "@/lib/stores/playlist-cache";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
@@ -222,7 +223,15 @@ export function PlaylistDetails() {
 
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
+		const revision = playlistRevision(id);
 		const cacheKey = PLAYLIST_CACHE_PREFIX + id;
+		const keepEditedView = () => {
+			if (playlistRevision(id) === revision) return false;
+			const latest = readCache<PlaylistView>(cacheKey);
+			if (!latest) return false;
+			setPlaylist({ ...latest.data, id });
+			return true;
+		};
 
 		const cached = readCache<PlaylistView>(cacheKey);
 		if (
@@ -255,6 +264,7 @@ export function PlaylistDetails() {
 			setError(null);
 			const albumMode = isAlbumId(id);
 			const data = albumMode ? await getAlbum(id) : await getPlaylist(id);
+			if (keepEditedView()) return;
 
 			if (!data) {
 				if (hasContent) {
@@ -299,6 +309,10 @@ export function PlaylistDetails() {
 				let current: Playlist = data;
 				while (current.has_continuation) {
 					const continuation = await loadPlaylistContinuation(current);
+					if (keepEditedView()) {
+						setLoadingMore(false);
+						return;
+					}
 					if (!continuation) break;
 					current = continuation;
 					const batch = collectSongs(current.items ?? [], rowFallback);
@@ -355,6 +369,23 @@ export function PlaylistDetails() {
 		fetchPlaylist();
 		setSearch("");
 	}, [id]);
+	useEffect(() => {
+		if (!id) return;
+		return subscribeToPlaylistChanges(id, (change) => {
+			setPlaylist((prev) => {
+				if (!prev || prev.id !== id) return prev;
+				const next =
+					change.type === "metadata"
+						? { ...prev, ...change.patch }
+						: { ...prev, songs: [change.song, ...prev.songs] };
+				// A first page can be on screen before its full cache is written.
+				// Keep that edited snapshot too, so an older in-flight load cannot
+				// discard the addition when its continuation arrives.
+				writeCache(PLAYLIST_CACHE_PREFIX + id, next);
+				return next;
+			});
+		});
+	}, [id]);
 
 	// The pinned sidebar entry stores its cover from pin time; refresh it
 	// whenever this page has fresher metadata (cached or fetched) so a dead
@@ -409,7 +440,6 @@ export function PlaylistDetails() {
 
 	/** Applies a saved edit to the header and its cache entry. */
 	const onEditSaved = (result: PlaylistEditResult) => {
-		const renamed = result.title !== playlist?.title;
 		setPlaylist((prev) => {
 			if (!prev) return prev;
 			const next = {
@@ -420,9 +450,6 @@ export function PlaylistDetails() {
 			writeCache(PLAYLIST_CACHE_PREFIX + (id ?? ""), next);
 			return next;
 		});
-		// The library list stores the old name; drop it so the next visit
-		// refetches and reconciles pinned sidebar titles.
-		if (renamed) invalidateLibraryCache();
 	};
 
 	if (loading) {
@@ -1051,7 +1078,14 @@ export default function PlaylistsPage() {
 	// bypass the cache and refresh the grid in place.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylists changes on every re-render and should not be used as a hook dependency.
 	useEffect(
-		() => subscribeToLibraryChanges(() => void fetchPlaylists(true)),
+		() =>
+			subscribeToLibraryChanges(() => {
+				const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+				if (cached) {
+					setPlaylists(cached.data);
+					reconcilePinnedPlaylists(cached.data);
+				} else void fetchPlaylists(true);
+			}),
 		[],
 	);
 

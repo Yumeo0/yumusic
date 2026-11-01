@@ -2,13 +2,13 @@
 
 Guests can choose **Listen here** to play synchronized audio on their device, or
 **Remote control** to control the room silently. The choice is local and can be
-changed before joining or at any time in the room panel. Remote control keeps
+changed after joining someone else's room. Remote control keeps
 the shared track, queue, progress and controls visible without loading an audio
 stream or counting listening time. Switching back loads the current host track
 and rejoins at the current room position. All host permissions and approval
 rules apply in both modes.
 
-Open **Listen together** using the bottom-right pill, or the headphones button in the player or queue. These open the same fullscreen view on mobile or a modal on desktop, from anywhere in the app. Closing it keeps the room connected; **Leave** or **End room** disconnects explicitly.
+Open **Listen together** using the headphones button in the miniplayer or fullscreen player. It opens an anchored panel on desktop and a fullscreen view on mobile. Closing it keeps the room connected; **Leave** or **End room** disconnects explicitly.
 
 1. Create a room, paste a friend's room code, or choose **Scan QR code** to scan their invitation with your camera or from an image.
 2. Before connecting for the first time, confirm your username and picture. Google account details are prefilled when available; signed-out listeners choose their own name. Upload a picture or use initials.

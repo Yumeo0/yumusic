@@ -61,6 +61,7 @@ import {
 } from "./lib/player/player-ui";
 import { findRecording, submitListen } from "./lib/services/listenbrainz";
 import {
+	canonicalPlaylistId,
 	reconcilePinnedPlaylists,
 	usePinnedPlaylists,
 } from "./lib/stores/pinned";
@@ -776,7 +777,6 @@ function AppShell({
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { pinned, unpin } = usePinnedPlaylists();
-	const { currentSong } = usePlayer();
 
 	// Load the stored downloads so the player can play them from disk, and
 	// drop caches from older app versions (they survive upgrades and would
@@ -808,7 +808,7 @@ function AppShell({
 			<MediaSessionSync />
 			<NativeBackNavigation />
 			<RoomPlaybackBridge />
-			<RoomActivity playing={!!currentSong} />
+			<RoomActivity />
 			<UpdateNotifier />
 			<Titlebar />
 			<div
@@ -820,10 +820,7 @@ function AppShell({
 				{/* ── Sidebar (desktop) ───────────────────────── */}
 				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div
-						className={cn(
-							"flex min-h-0 flex-1 flex-col px-4 pt-6",
-							currentSong && "pb-26",
-						)}
+						className={cn("flex min-h-0 flex-1 flex-col px-4 pt-6", "pb-26")}
 					>
 						{/* Account — kept at the top of the sidebar */}
 						<div className="pb-3">
@@ -874,7 +871,10 @@ function AppShell({
 								<div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto pb-2 scrollbar-thin">
 									{pinned.map((playlist) => {
 										const isActive =
-											location.pathname === `/playlists/${playlist.id}`;
+											location.pathname.startsWith("/playlists/") &&
+											canonicalPlaylistId(
+												location.pathname.slice("/playlists/".length),
+											) === playlist.id;
 										return (
 											<PlaylistContextMenu
 												isPinned

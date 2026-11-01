@@ -56,6 +56,7 @@ export function SongTitle({
 			{pills.map((pill, i) => (
 				<span
 					className="mr-0.5 inline-block rounded border border-foreground/15 px-1 align-middle font-mono text-[9px] leading-3.5 tracking-wider text-muted-foreground uppercase"
+					data-motion-fixed
 					// biome-ignore lint/suspicious/noArrayIndexKey: pill tags may repeat
 					key={`${pill}-${i}`}
 				>

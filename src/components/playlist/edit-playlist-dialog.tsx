@@ -2,6 +2,8 @@ import { Dialog } from "@base-ui/react/dialog";
 import { ImagePlus, Loader2, Music2, Trash2, X } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { reconcilePinnedPlaylists } from "@/lib/stores/pinned";
+import { patchCachedPlaylistMetadata } from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, hiResThumb } from "@/lib/utils/utils";
@@ -9,6 +11,7 @@ import { fetchPlaylistEditMeta } from "@/lib/youtube/playlist-data";
 import {
 	type PlaylistEdit,
 	type PlaylistPrivacy,
+	patchLibraryPlaylist,
 	removePlaylistThumbnail,
 	setPlaylistThumbnail,
 	updatePlaylist,
@@ -167,6 +170,10 @@ export function EditPlaylistDialog({
 					? ((await fetchPlaylistEditMeta(playlistId))?.thumbnail ??
 						currentThumbnail)
 					: currentThumbnail;
+			const result = { title: name, thumbnail };
+			patchLibraryPlaylist(playlistId, result);
+			patchCachedPlaylistMetadata(playlistId, result);
+			reconcilePinnedPlaylists([{ id: playlistId, ...result }]);
 			showToast("Playlist updated");
 			onSaved?.({ title: name, thumbnail });
 			onOpenChange(false);

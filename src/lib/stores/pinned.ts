@@ -9,12 +9,39 @@ export interface PinnedPlaylist {
 	thumbnail: string | null;
 }
 
+/** YouTube browse ids add VL to the same id used by playlist share links. */
+export const canonicalPlaylistId = (id: string) =>
+	id.startsWith("VL") ? id.slice(2) : id;
+
 export function getPinnedPlaylists(): PinnedPlaylist[] {
 	try {
 		const raw = localStorage.getItem(PINNED_KEY);
 		if (!raw) return [];
 		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? parsed : [];
+		if (!Array.isArray(parsed)) return [];
+		const unique = new Map<string, PinnedPlaylist>();
+		for (const item of parsed) {
+			if (!item || typeof item.id !== "string") continue;
+			const id = canonicalPlaylistId(item.id);
+			const previous = unique.get(id);
+			unique.set(id, {
+				...item,
+				id,
+				thumbnail: item.thumbnail || previous?.thumbnail || null,
+			});
+		}
+		const pinned = [...unique.values()];
+		// Migrate old aliases and duplicate pins on read, including synced
+		// lists. No event here: reads also happen while React is rendering.
+		const normalized = JSON.stringify(pinned);
+		if (normalized !== raw) {
+			try {
+				localStorage.setItem(PINNED_KEY, normalized);
+			} catch {
+				// Still return the normalized list when storage is full.
+			}
+		}
+		return pinned;
 	} catch {
 		return [];
 	}
@@ -27,6 +54,15 @@ function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 		// best-effort
 	}
 	window.dispatchEvent(new Event(PINNED_EVENT));
+}
+
+export function togglePinnedPlaylist(playlist: PinnedPlaylist) {
+	const id = canonicalPlaylistId(playlist.id);
+	const current = getPinnedPlaylists();
+	const next = current.some((p) => p.id === id)
+		? current.filter((p) => p.id !== id)
+		: [...current, { ...playlist, id }];
+	savePinnedPlaylists(next);
 }
 
 /**
@@ -42,7 +78,9 @@ function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 export function reconcilePinnedPlaylists(
 	items: Array<{ id: string; title: string; thumbnail?: string | null }>,
 ) {
-	const fresh = new Map(items.map((item) => [item.id, item]));
+	const fresh = new Map(
+		items.map((item) => [canonicalPlaylistId(item.id), item]),
+	);
 	const current = getPinnedPlaylists();
 	let changed = false;
 	const next = current.map((pinned) => {
@@ -77,16 +115,13 @@ export function usePinnedPlaylists() {
 
 	return {
 		pinned,
-		isPinned: (id: string) => pinned.some((p) => p.id === id),
-		togglePinned: (playlist: PinnedPlaylist) => {
-			const current = getPinnedPlaylists();
-			const next = current.some((p) => p.id === playlist.id)
-				? current.filter((p) => p.id !== playlist.id)
-				: [...current, playlist];
-			savePinnedPlaylists(next);
-		},
+		isPinned: (id: string) =>
+			pinned.some((p) => p.id === canonicalPlaylistId(id)),
+		togglePinned: togglePinnedPlaylist,
 		unpin: (id: string) => {
-			savePinnedPlaylists(getPinnedPlaylists().filter((p) => p.id !== id));
+			savePinnedPlaylists(
+				getPinnedPlaylists().filter((p) => p.id !== canonicalPlaylistId(id)),
+			);
 		},
 	};
 }

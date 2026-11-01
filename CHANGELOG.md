@@ -4,9 +4,28 @@
 
 ### Features
 
+- Added dedicated Playlists and Albums search filters, plus context menus for artist, channel, playlist, and album search results.
+- Pasted YouTube links can now open channels, playlists, and albums, alongside the existing song preview.
+- Android can receive YouTube Music links from other apps and the share sheet, including when YuMusic is not running.
+
 ### Improvements
 
+- Combined volume and device controls into one compact panel that stays above the queue, with the same audio icon in the miniplayer and fullscreen player.
+- Device listings now show cover art with playback status badges, formatted song titles and artists, and clearer transfer controls.
+- The miniplayer stays visible when idle. Listen together and desktop repeat sit beside the playback controls, ratings expand on hover, and playtime appears at the right.
+- Mobile playback uses full app volume controlled by the phone's volume keys; device management is available from the player.
+- Fullscreen transitions now move Listen together and audio controls to their miniplayer positions, fade the moving background, and hide duplicate controls during the handoff.
+- Cover artwork automatically crops black bars, including in search results.
+- Listen together opens in an anchored desktop panel and shows the local audio choice after joining another person's room.
+- Artist and channel pages now include a share button and public Personal mix playlists.
+
 ### Bug fixes
+
+- Fixed playlist edits not updating the Playlists tab and newly added songs not appearing in an open playlist.
+- Fixed duplicate pins when opening the same playlist through the library and a pasted link; existing duplicate pins are merged.
+- Fixed channel search omitting ordinary YouTube channels and added support for opening their pages.
+- Fixed missing artist links on tracks whose artist metadata was unavailable in the initial listing.
+- Fixed the miniplayer album link and channel profile pictures displaying banners instead of avatars.
 
 ## [0.8.0] - 2026-11-01
 

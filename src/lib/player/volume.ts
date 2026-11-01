@@ -4,6 +4,13 @@ export const MAX_VOLUME = 1;
 /** Keep the previous starting loudness when no saved volume exists. */
 export const DEFAULT_VOLUME = 0.15;
 
+/** Saved app attenuation and mute must never override a phone's volume keys. */
+export function volumeForDevice(preferred: number, systemVolume: boolean) {
+	return systemVolume
+		? MAX_VOLUME
+		: Math.min(MAX_VOLUME, Math.max(0, preferred));
+}
+
 /** Give quiet levels more slider travel; halfway is 12.5% output. */
 export function linearToVolume(linear: number): number {
 	return Math.min(1, Math.max(0, linear)) ** 3 * MAX_VOLUME;

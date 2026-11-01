@@ -1,4 +1,5 @@
 import { Dialog } from "@base-ui/react/dialog";
+import { invoke } from "@tauri-apps/api/core";
 import {
 	CircleX,
 	Download,
@@ -12,7 +13,8 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import {
@@ -23,11 +25,18 @@ import {
 	removeDownloads,
 	useDownloads,
 } from "@/lib/downloads/downloads";
+import { closeNowPlaying } from "@/lib/player/player-ui";
 import { shareSong } from "@/lib/services/share";
-import { IS_MOBILE, proxiedImageUrl } from "@/lib/utils/tauri";
+import { showToast } from "@/lib/stores/toast";
+import { IS_ANDROID, proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
+import { findYouTubeLink, youTubeLinkRoute } from "@/lib/youtube/entity-links";
+import {
+	INCOMING_LINKS_EVENT,
+	listenForIncomingLinks,
+} from "@/lib/youtube/incoming-links";
 import { getSongPreview, type SongPreview } from "@/lib/youtube/song-info";
-import { findVideoId } from "@/lib/youtube/youtube.utils";
+import { getYoutubeClient } from "@/lib/youtube/youtube-client";
 import { AddToPlaylistDialog } from "./add-to-playlist-dialog";
 import { ArtistLinks } from "./artist-link";
 import { SongTitle } from "./song-title";
@@ -81,13 +90,14 @@ function downloadAction(
 }
 
 /**
- * Paste-to-preview: pasting a YouTube link anywhere in the desktop app opens
- * a modal with the resolved song and its usual actions (play, play next, add
+ * Pasting a song link opens a modal with its usual actions (play, play next, add
  * to queue/playlist, download, share). The uploader description is applied up
  * front, so the preview shows the same parsed title and credits playback
- * will use. Mobile has no paste flow — its share sheet handles links instead.
+ * will use. Channel, playlist and album links navigate to their pages.
  */
 export function LinkPreviewDialog() {
+	const navigate = useNavigate();
+	const pasteRevision = useRef(0);
 	const { addToQueue, play, playNext } = usePlayer();
 	const downloads = useDownloads();
 	const [videoId, setVideoId] = useState<string | null>(null);
@@ -98,16 +108,59 @@ export function LinkPreviewDialog() {
 	// Global paste listener: clipboard text containing a YouTube link opens
 	// the preview, replacing whatever the modal showed before.
 	useEffect(() => {
-		if (IS_MOBILE) return;
+		const openLink = (text: string) => {
+			const link = findYouTubeLink(text);
+			if (!link) return false;
+			const revision = ++pasteRevision.current;
+			if (link.kind === "video") {
+				setVideoId(link.id as string);
+				return true;
+			}
+			setVideoId(null);
+			void youTubeLinkRoute(link, async (url) =>
+				(await getYoutubeClient()).resolveURL(url),
+			)
+				.then((route) => {
+					if (revision === pasteRevision.current) {
+						closeNowPlaying();
+						navigate(route);
+					}
+				})
+				.catch(() => {
+					if (revision === pasteRevision.current)
+						showToast("Could not open that YouTube link.");
+				});
+			return true;
+		};
 		const onPaste = (event: ClipboardEvent) => {
-			const id = findVideoId(event.clipboardData?.getData("text") ?? "");
-			if (!id) return;
-			event.preventDefault();
-			setVideoId(id);
+			if (openLink(event.clipboardData?.getData("text") ?? ""))
+				event.preventDefault();
 		};
 		window.addEventListener("paste", onPaste);
-		return () => window.removeEventListener("paste", onPaste);
-	}, []);
+		const stopIncoming = IS_ANDROID
+			? listenForIncomingLinks({
+					events: window,
+					take: () => invoke<string[]>("take_pending_links"),
+					receive: (url) => {
+						if (!openLink(url))
+							showToast("Could not open that YouTube Music link.");
+					},
+					onError: (error) =>
+						console.warn("[links] Could not receive incoming links", error),
+				})
+			: undefined;
+		const onResume = () => {
+			if (IS_ANDROID && document.visibilityState === "visible")
+				window.dispatchEvent(new Event(INCOMING_LINKS_EVENT));
+		};
+		document.addEventListener("visibilitychange", onResume);
+		return () => {
+			stopIncoming?.();
+			pasteRevision.current++;
+			window.removeEventListener("paste", onPaste);
+			document.removeEventListener("visibilitychange", onResume);
+		};
+	}, [navigate]);
 
 	// Resolve the pasted id while the modal shows its loading state.
 	useEffect(() => {

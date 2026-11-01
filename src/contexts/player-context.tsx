@@ -33,7 +33,11 @@ import { NativeAudioElement, nativeAudio } from "@/lib/player/native-audio";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
-import { DEFAULT_VOLUME, MAX_VOLUME } from "@/lib/player/volume";
+import {
+	DEFAULT_VOLUME,
+	MAX_VOLUME,
+	volumeForDevice,
+} from "@/lib/player/volume";
 import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
 import {
 	rememberSongVersion,
@@ -41,6 +45,7 @@ import {
 } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { applySongDescription } from "@/lib/utils/description";
+import { useSystemVolume } from "@/lib/utils/hooks";
 import { IS_ANDROID } from "@/lib/utils/tauri";
 import {
 	biggestThumb,
@@ -48,6 +53,7 @@ import {
 	parseDuration,
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
+import { applyArtistCredits } from "@/lib/youtube/artist-credits";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { applySongVersion } from "@/lib/youtube/song-version";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
@@ -362,6 +368,7 @@ function attributeLocal(song: Song): Song {
 }
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+	const systemVolume = useSystemVolume();
 	const roomRole = useRoomRole();
 	const roomPlaying = useRoomPlaying();
 	const roomUsername = useRoomUsername();
@@ -390,8 +397,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		void getTrackMeta(currentSongId)
 			.catch(() => null)
 			.then((meta) => {
-				if (!cancelled)
+				if (!cancelled) {
 					setTrackAlbum({ songId: currentSongId, album: meta?.album ?? null });
+					if (meta?.artists.length) {
+						const enrich = (song: Song) =>
+							song.id === currentSongId
+								? applyArtistCredits(song, meta.artists)
+								: song;
+						setCurrentSong((song) => (song ? enrich(song) : song));
+						setQueueState((songs) => songs.map(enrich));
+					}
+				}
 			});
 		return () => {
 			cancelled = true;
@@ -433,13 +449,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const autoplayLoadingRef = useRef(false);
 	/** Video id the current autoplay suggestions were fetched for. */
 	const autoplayForRef = useRef<string | null>(null);
-	const [volume, _setVolume] = useState(() => {
+	const [preferredVolume, _setVolume] = useState(() => {
 		const savedVolume = localStorage.getItem("yumusic-volume");
 		const parsed = savedVolume ? Number.parseFloat(savedVolume) : NaN;
 		return Number.isFinite(parsed)
 			? Math.min(MAX_VOLUME, Math.max(0, parsed))
 			: DEFAULT_VOLUME;
 	});
+	const volume = volumeForDevice(preferredVolume, systemVolume);
 
 	/** Read by the fade loop so volume changes mid-fade stay respected. */
 	const volumeRef = useRef(volume);
@@ -1143,12 +1160,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		if (videoEl) {
 			videoEl.volume = volume;
 		}
-		localStorage.setItem("yumusic-volume", volume.toString());
-	}, [volume]);
+		if (!systemVolume)
+			localStorage.setItem("yumusic-volume", volume.toString());
+	}, [volume, systemVolume]);
 
-	const setVolume = useCallback((next: number) => {
-		_setVolume(Math.min(MAX_VOLUME, Math.max(0, next)));
-	}, []);
+	const setVolume = useCallback(
+		(next: number) => {
+			if (!systemVolume) _setVolume(volumeForDevice(next, false));
+		},
+		[systemVolume],
+	);
 
 	const playSong = useCallback(
 		async (song: Song, exact = false) => {

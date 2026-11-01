@@ -42,6 +42,7 @@ export function useNowPlayingMotion(
 
 		const apply = (value: number) => {
 			progress = value;
+			geometry?.apply(value);
 			geometry?.mini.style.setProperty("--player-reveal", String(value));
 			overlay.style.setProperty("--np-dismiss", String(value));
 			overlay.style.setProperty(
@@ -100,6 +101,7 @@ export function useNowPlayingMotion(
 			delete overlay.dataset.playerMotion;
 			delete document.documentElement.dataset.playerMorphing;
 			geometry?.release();
+			geometry = null;
 		};
 		const animate = (expanded: boolean) => {
 			const target = expanded ? 0 : 1;

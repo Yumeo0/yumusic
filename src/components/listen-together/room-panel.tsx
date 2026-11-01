@@ -1,3 +1,4 @@
+import { Separator } from "@base-ui/react/separator";
 import {
 	Check,
 	ChevronDown,
@@ -146,8 +147,8 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 		<div
 			className={
 				embedded
-					? "p-4 sm:p-6"
-					: "mx-auto max-w-3xl px-6 pt-8 pb-10 sm:px-8 sm:pt-12"
+					? "@container p-4 sm:p-6"
+					: "@container mx-auto max-w-3xl px-6 pt-8 pb-10 sm:px-8 sm:pt-12"
 			}
 		>
 			{!embedded && (
@@ -158,7 +159,7 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 				</div>
 			)}
 
-			{room.role !== "host" && (
+			{room.role === "guest" && room.status === "connected" && (
 				<fieldset className="mb-5 flex flex-col gap-3 rounded-xl border border-foreground/10 p-4">
 					<legend className="px-1 text-sm font-medium">
 						Audio on this device
@@ -578,8 +579,10 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 							className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
 						/>
 					</summary>
-					<div className="border-t border-foreground/10 p-4 pb-0">
+					<Separator className="h-px w-full shrink-0 bg-border" />
+					<div className="flex flex-col gap-5 p-4">
 						<JoinPolicyPanel />
+						<Separator className="h-px w-full shrink-0 bg-border" />
 						<GuestPermissionsPanel />
 					</div>
 				</details>

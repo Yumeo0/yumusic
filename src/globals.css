@@ -359,6 +359,10 @@ html[data-morph-dragging] .np-morph {
 	transition: none;
 }
 
+.np-overlay [data-np-backdrop] {
+	opacity: calc(1 - var(--np-dismiss, 0));
+}
+
 /* Secondary items share the dismiss clock. Pin them against the page slide:
    matched items land on their footer counterpart, others drift down and fade. */
 .np-overlay[data-player-motion] [data-np-secondary] {
@@ -380,6 +384,17 @@ html[data-morph-dragging] .np-morph {
 	clip-path: inset(0 calc(var(--np-item-cut, 0px) * var(--np-dismiss, 0)) 0 0);
 }
 
+/* Mobile header controls ride the sheet with its background and fade together.
+   Cancelling the page slide here made them appear pinned during dismissal. */
+@media (max-width: 767.98px) {
+	.np-overlay[data-player-motion]
+		[data-np-chrome]
+		[data-np-secondary]:not([data-np-room]) {
+		transform: none;
+		opacity: calc(1 - var(--np-dismiss, 0));
+	}
+}
+
 /* Lyrics toggle: the freshly mounted layout snaps to its measured geometry
    (the FLIP animation in lyrics-motion.ts glides it there instead). */
 div[data-np-page][data-np-lyrics-morph] .np-morph {
@@ -388,8 +403,12 @@ div[data-np-page][data-np-lyrics-morph] .np-morph {
 
 /* The fullscreen elements temporarily own these pixels. Keep the footer's
    layout and touch target intact, but never paint duplicate controls. */
-html[data-player-morphing] [data-player-morph-target] {
+html[data-player-morphing] [data-player-morph-target],
+html[data-player-morphing] [data-player-morph-target] * {
 	visibility: hidden;
+	/* transition-all delays visibility:hidden until its animation ends.
+	   Apply this to children too: buttons inherit their wrapper's visibility. */
+	transition: none;
 }
 
 html[data-player-morphing] [data-mini-player] [data-player-morph-extra] {

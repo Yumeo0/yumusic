@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { CoverImage } from "@/components/song/cover-image";
 import { usePlayer } from "@/contexts/player-context";
 import {
 	clearRecentSearches,
@@ -443,6 +444,8 @@ export function SearchBar({ query, onSearch }: SearchBarProps) {
 											const item = row.item;
 											const title = recommendationTitle(item);
 											const thumbnail = recommendationThumbnail(item);
+											const Artwork =
+												item.kind === "artist" ? "img" : CoverImage;
 											return (
 												<div
 													className={optionClass(row.index, "h-12")}
@@ -456,7 +459,7 @@ export function SearchBar({ query, onSearch }: SearchBarProps) {
 													{...optionProps(row)}
 												>
 													{thumbnail ? (
-														<img
+														<Artwork
 															alt=""
 															className={cn(
 																"size-9 shrink-0 border border-foreground/8 object-cover",

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { getPinnedPlaylists, reconcilePinnedPlaylists } from "./pinned";
+import {
+	getPinnedPlaylists,
+	reconcilePinnedPlaylists,
+	togglePinnedPlaylist,
+} from "./pinned";
 
 const storage = new Map<string, string>();
 /** Change events emitted by the store; counts actual storage writes. */
@@ -43,6 +47,51 @@ const LIVE_COVER =
 	"https://yt3.googleusercontent.com/live-token=w544-h544-l90-rj";
 
 beforeEach(installBrowserStubs);
+
+describe("playlist identity", () => {
+	const id = "PLBVxMRxBgGxYU6rP6w29diBkSXBSZ3hqa";
+	test("pinning a shared-link id toggles its existing library pin", () => {
+		seedPinned([{ id: `VL${id}`, title: "Playlist", thumbnail: LIVE_COVER }]);
+		togglePinnedPlaylist({ id, title: "Playlist", thumbnail: LIVE_COVER });
+		expect(getPinnedPlaylists()).toEqual([]);
+		togglePinnedPlaylist({
+			id: `VL${id}`,
+			title: "Playlist",
+			thumbnail: LIVE_COVER,
+		});
+		expect(getPinnedPlaylists()).toEqual([
+			{ id, title: "Playlist", thumbnail: LIVE_COVER },
+		]);
+	});
+
+	test("merges persisted aliases in place while keeping distinct albums and pins", () => {
+		seedPinned([
+			{ id: `VL${id}`, title: "Old", thumbnail: LIVE_COVER },
+			{ id: "MPRalbum", title: "Album", thumbnail: null },
+			{ id, title: "New", thumbnail: null },
+			{ id: "PLother", title: "Other", thumbnail: null },
+		]);
+		const pinned = getPinnedPlaylists();
+		expect(pinned).toEqual([
+			{ id, title: "New", thumbnail: LIVE_COVER },
+			{ id: "MPRalbum", title: "Album", thumbnail: null },
+			{ id: "PLother", title: "Other", thumbnail: null },
+		]);
+		expect(JSON.parse(storage.get("yumusic:pinned") ?? "[]")).toEqual(pinned);
+		expect(dispatched).toBe(0);
+	});
+
+	test("metadata refresh matches a browse id to a shared-link pin", () => {
+		seedPinned([{ id, title: "Old", thumbnail: DEAD_COVER }]);
+		reconcilePinnedPlaylists([
+			{ id: `VL${id}`, title: "New", thumbnail: LIVE_COVER },
+		]);
+		expect(getPinnedPlaylists()).toEqual([
+			{ id, title: "New", thumbnail: LIVE_COVER },
+		]);
+		expect(dispatched).toBe(1);
+	});
+});
 
 describe("reconcilePinnedPlaylists", () => {
 	test("heals a stale title and thumbnail from fresh data", () => {

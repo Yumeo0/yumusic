@@ -3,10 +3,17 @@ import {
 	DEFAULT_VOLUME,
 	linearToVolume,
 	MAX_VOLUME,
+	volumeForDevice,
 	volumeToLinear,
 } from "./volume";
 
 describe("player volume", () => {
+	test("phones use full app output even when a quiet or muted volume was saved", () => {
+		for (const saved of [0, 0.001, DEFAULT_VOLUME, 0.5, MAX_VOLUME]) {
+			expect(volumeForDevice(saved, true)).toBe(1);
+			expect(volumeForDevice(saved, false)).toBe(saved);
+		}
+	});
 	test("reaches full media output while retaining a quiet default", () => {
 		expect(linearToVolume(0)).toBe(0);
 		expect(linearToVolume(1)).toBe(1);

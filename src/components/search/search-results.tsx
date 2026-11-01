@@ -1,20 +1,25 @@
 import { AudioLines, ChevronRight, Loader2, Shuffle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type Types, type YTMusic, YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
+import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { ArtistContextMenu } from "@/components/song/artist-menu";
+import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
+import { channelSearchEntries } from "@/lib/youtube/channel-data";
 import {
 	artistListOf,
 	isVideoId,
@@ -30,7 +35,7 @@ interface SearchResultsPageProps {
 	query: string;
 }
 
-type SearchTab = "all" | "music" | "channel" | "video";
+type SearchTab = "all" | "music" | "channel" | "video" | "playlist" | "album";
 
 /** One rendered search result. Rows the app cannot open (podcasts, profiles) are dropped. */
 type PlayableEntry = { kind: "playable"; song: Song };
@@ -68,8 +73,10 @@ const TABS: Array<{
 }> = [
 	{ id: "all", label: "All" },
 	{ id: "music", label: "Music", type: "song" },
-	{ id: "channel", label: "Channel", type: "artist" },
+	{ id: "channel", label: "Channel" },
 	{ id: "video", label: "Video", type: "video" },
+	{ id: "playlist", label: "Playlists", type: "playlist" },
+	{ id: "album", label: "Albums", type: "album" },
 ];
 
 type SearchSection =
@@ -309,7 +316,8 @@ function toEntries(search: YTMusic.Search, tab: SearchTab): SearchEntry[] {
 			if (!item.is(YTNodes.MusicResponsiveListItem)) continue;
 			const videoId = videoIdOf(item);
 			if (videoId) {
-				if (tab === "channel") continue;
+				if (tab === "channel" || tab === "playlist" || tab === "album")
+					continue;
 				if (tab === "music" && item.item_type !== "song") continue;
 				if (tab === "video" && item.item_type !== "video") continue;
 				add({ kind: "playable", song: toSong(item, fallback) });
@@ -333,8 +341,7 @@ function toEntries(search: YTMusic.Search, tab: SearchTab): SearchEntry[] {
 				continue;
 			}
 
-			// Albums and playlists only surface on the All tab.
-			if (tab !== "all") continue;
+			if (tab !== "all" && tab !== item.item_type) continue;
 			if (item.item_type === "album" || item.item_type === "playlist") {
 				if (!item.id) continue;
 				add({
@@ -414,6 +421,32 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 		(async () => {
 			try {
 				const youtube = await getYoutubeClient();
+				if (tab === "channel") {
+					const [web, music] = await Promise.allSettled([
+						youtube.search(query, { type: "channel" }),
+						youtube.music.search(query, { type: "artist" }),
+					]);
+					if (web.status === "rejected" && music.status === "rejected")
+						throw web.reason;
+					const entries: SearchEntry[] =
+						web.status === "fulfilled"
+							? channelSearchEntries(web.value.channels)
+							: [];
+					if (music.status === "fulfilled")
+						for (const entry of toEntries(music.value, "channel")) {
+							if (
+								!entries.some(
+									(existing) => entryKey(existing) === entryKey(entry),
+								)
+							)
+								entries.push(entry);
+						}
+					if (!cancelled) {
+						cache.current.set(tab, entries);
+						setView({ status: "ready", entries });
+					}
+					return;
+				}
 				const search = await youtube.music.search(
 					query,
 					filter ? { type: filter } : {},
@@ -470,7 +503,7 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 						</span>
 					)}
 				</h2>
-				<div className="flex items-center gap-1">
+				<div className="flex flex-wrap items-center gap-1">
 					{TABS.map((entry) => (
 						<button
 							aria-pressed={tab === entry.id}
@@ -596,6 +629,7 @@ function TopResultCard({
 			? formatArtistName(entry.name)
 			: entry.title;
 	const thumbnail = isPlayable ? entry.song.thumbnail : entry.thumbnail;
+	const Artwork = isArtist ? "img" : CoverImage;
 	const isCurrent = isPlayable && playingId === entry.song.id;
 
 	const runMix = async () => {
@@ -617,7 +651,7 @@ function TopResultCard({
 					type="button"
 				>
 					{thumbnail ? (
-						<img
+						<Artwork
 							alt={title}
 							className={cn(
 								"size-18 shrink-0 rounded-xl border border-foreground/10 object-cover sm:size-22",
@@ -723,7 +757,8 @@ function TopResultCard({
 		</div>
 	);
 
-	if (entry.kind !== "playable") return card;
+	if (entry.kind !== "playable")
+		return <SearchEntityMenu entry={entry}>{card}</SearchEntityMenu>;
 	return (
 		<SongContextMenu song={entry.song}>
 			<SwipeToQueue onQueue={() => onQueue(entry.song)}>{card}</SwipeToQueue>
@@ -760,7 +795,7 @@ function PlayableRow({
 					type="button"
 				>
 					{song.thumbnail ? (
-						<img
+						<CoverImage
 							alt={song.title}
 							className="size-10 rounded-md border border-foreground/10 object-cover"
 							loading="lazy"
@@ -810,31 +845,33 @@ function ArtistRow({
 	onClick: () => void;
 }) {
 	return (
-		<button
-			className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
-			onClick={onClick}
-			type="button"
-		>
-			{entry.thumbnail ? (
-				<img
-					alt={entry.name}
-					className="size-10 rounded-full border border-foreground/10 object-cover"
-					loading="lazy"
-					src={proxiedImageUrl(entry.thumbnail)}
-				/>
-			) : (
-				<div className="size-10 rounded-full bg-muted" />
-			)}
-			<div className="min-w-0">
-				<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
-					{formatArtistName(entry.name)}
-				</h3>
-				<p className="truncate text-xs text-muted-foreground">
-					{entry.subtitle}
-				</p>
-			</div>
-			<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
-		</button>
+		<SearchEntityMenu entry={entry}>
+			<button
+				className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
+				onClick={onClick}
+				type="button"
+			>
+				{entry.thumbnail ? (
+					<img
+						alt={entry.name}
+						className="size-10 rounded-full border border-foreground/10 object-cover"
+						loading="lazy"
+						src={proxiedImageUrl(entry.thumbnail)}
+					/>
+				) : (
+					<div className="size-10 rounded-full bg-muted" />
+				)}
+				<div className="min-w-0">
+					<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+						{formatArtistName(entry.name)}
+					</h3>
+					<p className="truncate text-xs text-muted-foreground">
+						{entry.subtitle}
+					</p>
+				</div>
+				<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
+			</button>
+		</SearchEntityMenu>
 	);
 }
 
@@ -846,31 +883,65 @@ function CollectionRow({
 	onClick: () => void;
 }) {
 	return (
-		<button
-			className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
-			onClick={onClick}
-			type="button"
+		<SearchEntityMenu entry={entry}>
+			<button
+				className="group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5"
+				onClick={onClick}
+				type="button"
+			>
+				{entry.thumbnail ? (
+					<CoverImage
+						alt={entry.title}
+						className="size-10 rounded-md border border-foreground/10 object-cover"
+						loading="lazy"
+						src={proxiedImageUrl(entry.thumbnail)}
+					/>
+				) : (
+					<div className="size-10 rounded-md bg-muted" />
+				)}
+				<div className="min-w-0">
+					<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
+						{entry.title}
+					</h3>
+					<p className="truncate text-xs text-muted-foreground">
+						{entry.subtitle}
+					</p>
+				</div>
+				<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
+			</button>
+		</SearchEntityMenu>
+	);
+}
+
+function SearchEntityMenu({
+	entry,
+	children,
+}: {
+	entry: ArtistEntry | CollectionEntry;
+	children: ReactNode;
+}) {
+	const { isPinned, togglePinned } = usePinnedPlaylists();
+	if (entry.kind === "artist")
+		return (
+			<ArtistContextMenu artist={{ id: entry.id, name: entry.name }}>
+				{children}
+			</ArtistContextMenu>
+		);
+	return (
+		<PlaylistContextMenu
+			allowDelete={false}
+			isPinned={isPinned(entry.id)}
+			onTogglePinned={() =>
+				togglePinned({
+					id: entry.id,
+					title: entry.title,
+					thumbnail: entry.thumbnail,
+				})
+			}
+			playlist={entry}
 		>
-			{entry.thumbnail ? (
-				<img
-					alt={entry.title}
-					className="size-10 rounded-md border border-foreground/10 object-cover"
-					loading="lazy"
-					src={proxiedImageUrl(entry.thumbnail)}
-				/>
-			) : (
-				<div className="size-10 rounded-md bg-muted" />
-			)}
-			<div className="min-w-0">
-				<h3 className="truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary">
-					{entry.title}
-				</h3>
-				<p className="truncate text-xs text-muted-foreground">
-					{entry.subtitle}
-				</p>
-			</div>
-			<ChevronRight className="size-4 text-muted-foreground/50 transition-colors duration-150 group-hover:text-foreground" />
-		</button>
+			{children}
+		</PlaylistContextMenu>
 	);
 }
 

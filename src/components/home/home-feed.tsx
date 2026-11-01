@@ -17,6 +17,7 @@ import { useNavigate } from "react-router-dom";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -116,6 +117,7 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 				: item.title;
 	const subtitle = item.kind === "song" ? item.song.artist : item.subtitle;
 	const thumbnail = item.kind === "song" ? item.song.thumbnail : item.thumbnail;
+	const Artwork = item.kind === "song" ? CoverImage : "img";
 
 	return (
 		<button
@@ -133,7 +135,7 @@ function FeedCard({ item, onClick }: { item: FeedItem; onClick: () => void }) {
 				)}
 			>
 				{thumbnail && (
-					<img
+					<Artwork
 						alt={title}
 						className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
 						loading="lazy"
@@ -242,6 +244,7 @@ function FeedRow({
 				? formatArtistName(item.name)
 				: item.title;
 	const thumbnail = item.kind === "song" ? item.song.thumbnail : item.thumbnail;
+	const Artwork = item.kind === "song" ? CoverImage : "img";
 
 	return (
 		<button
@@ -254,7 +257,7 @@ function FeedRow({
 		>
 			<span className="relative shrink-0">
 				{thumbnail ? (
-					<img
+					<Artwork
 						alt={title}
 						className={cn(
 							"size-10 border border-foreground/10 object-cover",

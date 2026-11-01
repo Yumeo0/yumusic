@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import type { Peer } from "peerjs";
 import { type RoomPlayback, wireSong } from "../listen-together/protocol";
 import { type DeviceAdapter, DeviceHub, type PlaybackDevice } from "./hub";
-import { parseDeviceRequest } from "./protocol";
+import { deviceStatus, parseDeviceRequest } from "./protocol";
 
 // Use the installed PeerJS codec: BinaryPack turns undefined fields into null.
 const requirePeer = createRequire(import.meta.resolve("peerjs"));
@@ -327,6 +327,25 @@ test("malformed transfer payloads are rejected and unknown fields stripped", () 
 	});
 	expect(parsed?.type).toBe("transfer");
 	expect(JSON.stringify(parsed)).not.toContain("secret");
+});
+
+test("device artwork is bounded to supported image hosts and older devices need no artwork field", () => {
+	expect(
+		deviceStatus({
+			thumbnail: "https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg",
+		}).thumbnail,
+	).toContain("ytimg.com");
+	expect(
+		deviceStatus({
+			thumbnail: "https://untrusted.example/private",
+			upload: "yes",
+		}),
+	).toMatchObject({ thumbnail: "", upload: false });
+	expect(deviceStatus({ playing: true, title: "Track" })).toMatchObject({
+		playing: true,
+		title: "Track",
+		thumbnail: "",
+	});
 });
 
 test("mobile Play here pulls a paused PC track with optional fields through the real PeerJS codec", async () => {

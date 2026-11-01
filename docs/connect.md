@@ -1,7 +1,10 @@
 # Connect to a device
 
 Enable sync on each device with the same YouTube Google account. Open the device
-icon in the desktop player or fullscreen player, or Settings → Your devices.
+icon in the desktop or fullscreen player to open the shared
+**Volume & devices** panel. On mobile it is named **Devices**; volume follows
+the phone's hardware controls, with app output fixed at 100%. On desktop the
+anchored panel includes a volume slider and mute control alongside the device list.
 Devices show their local name, current song and playback state. Names stay local.
 The picker can pause, resume, skip and return to the previous song on any listed
 device. Choose Transfer or Play here to move the current session, including from

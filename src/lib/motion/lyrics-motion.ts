@@ -57,6 +57,8 @@ function measure(element: HTMLElement, text?: boolean): DOMRect {
 
 /** The cover's rounded element: the box itself or its first rounded child. */
 function roundedElement(cover: HTMLElement): HTMLElement | null {
+	const artwork = cover.querySelector<HTMLElement>("[data-np-cover-art]");
+	if (artwork) return artwork;
 	for (const element of [cover, ...cover.querySelectorAll<HTMLElement>("*")]) {
 		if (Number.parseFloat(getComputedStyle(element).borderTopLeftRadius) > 0)
 			return element;

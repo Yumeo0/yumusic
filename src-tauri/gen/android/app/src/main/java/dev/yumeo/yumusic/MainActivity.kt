@@ -1,5 +1,6 @@
 package dev.yumeo.yumusic
 
+import android.content.Intent
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
@@ -41,6 +42,28 @@ class MainActivity : TauriActivity() {
   fun updateAudioMetadata(data: String) = AudioBridge.metadata(data)
 
   @Keep
+  fun takePendingLinks(): String = IncomingLinks.takePending()
+
+  private fun receiveLink(intent: Intent) {
+    if (!IncomingLinks.accept(intent)) return
+    // A configuration recreation must not replay an already queued intent.
+    intent.data = null
+    intent.removeExtra(Intent.EXTRA_TEXT)
+    appWebView?.let { view ->
+      view.post {
+        if (appWebView === view)
+          view.evaluateJavascript("window.dispatchEvent(new Event('yumusic-open-links'))", null)
+      }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    receiveLink(intent)
+  }
+
+  @Keep
   fun trustedRootCertificates(): Array<ByteArray> {
     val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
     factory.init(null as KeyStore?)
@@ -51,6 +74,7 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    receiveLink(intent)
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
       override fun handleOnBackPressed() {
         val view = appWebView

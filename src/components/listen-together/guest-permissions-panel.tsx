@@ -28,7 +28,7 @@ export function GuestPermissionsPanel() {
 			) as GuestPermissions,
 		);
 	return (
-		<section className="mb-5 rounded-2xl border border-foreground/10 p-5">
+		<section>
 			<div className="flex flex-wrap items-center justify-between gap-3">
 				<h2 className="text-sm font-medium">Guest controls</h2>
 				{room.role !== "guest" && (
@@ -52,7 +52,7 @@ export function GuestPermissionsPanel() {
 					</div>
 				)}
 			</div>
-			<div className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
+			<div className="mt-4 grid gap-x-6 gap-y-3 @min-[36rem]:grid-cols-2">
 				{(Object.keys(permissionLabels) as PermissionCategory[]).map((key) => (
 					<label
 						className="flex items-center justify-between gap-3 text-xs"

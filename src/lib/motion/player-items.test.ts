@@ -1,7 +1,158 @@
 import { expect, test } from "bun:test";
-import { clipTextRect, projectPlayerItem, textRect } from "./player-items";
+import {
+	clipTextRect,
+	prepareArtworkMorph,
+	prepareTitleMorph,
+	projectPlayerItem,
+	scaledLengthAtProgress,
+	textRect,
+} from "./player-items";
 
-test("artist toggles measure inline glyphs rather than the block row in both directions", () => {
+test("fixed text label lengths retain their painted size while their parent scales", () => {
+	for (const [size, radius] of [
+		[320, 16],
+		[64, 16],
+	]) {
+		const targetScale = 44 / size;
+		for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+			const local = scaledLengthAtProgress(radius, 10, targetScale, progress);
+			const scale = 1 + (targetScale - 1) * progress;
+			expect(local * scale).toBeCloseTo(radius + (10 - radius) * progress);
+		}
+	}
+});
+
+test("unscaled lengths interpolate directly", () => {
+	expect(scaledLengthAtProgress(16, 10, 1, 0)).toBe(16);
+	expect(scaledLengthAtProgress(16, 10, 1, 0.5)).toBe(13);
+	expect(scaledLengthAtProgress(16, 10, 1, 1)).toBe(10);
+});
+
+function withMotionElements(
+	run: (
+		make: (
+			width: number,
+			height: number,
+			computed?: Record<string, string>,
+			line?: HTMLElement,
+		) => HTMLElement,
+	) => void,
+) {
+	const previous = Object.getOwnPropertyDescriptor(
+		globalThis,
+		"getComputedStyle",
+	);
+	const styles = new Map<Element, Record<string, string>>();
+	Object.defineProperty(globalThis, "getComputedStyle", {
+		configurable: true,
+		value: (element: Element) => styles.get(element) ?? {},
+	});
+	const make = (
+		width: number,
+		height: number,
+		computed = {},
+		line?: HTMLElement,
+	) => {
+		const element = {
+			style: {
+				width: "",
+				height: "",
+				position: "",
+				left: "",
+				top: "",
+				borderRadius: "",
+				borderWidth: "",
+				fontWeight: "",
+				letterSpacing: "",
+			},
+			getBoundingClientRect: () => ({ x: 0, y: 0, width, height }),
+			querySelector: () => line ?? null,
+			querySelectorAll: () => [],
+		} as unknown as HTMLElement;
+		styles.set(element, computed);
+		return element;
+	};
+	try {
+		run(make);
+	} finally {
+		if (previous)
+			Object.defineProperty(globalThis, "getComputedStyle", previous);
+		else Reflect.deleteProperty(globalThis, "getComputedStyle");
+	}
+}
+
+test("artwork reaches the exact thumbnail box without scaling its border or moving the layout", () => {
+	withMotionElements((make) => {
+		for (const size of [320, 64]) {
+			const frame = make(size, size);
+			const artwork = make(size, size, {
+				borderTopWidth: "1px",
+				borderTopLeftRadius: "16px",
+			});
+			const thumbnail = make(44, 44, {
+				borderTopWidth: "1px",
+				borderTopLeftRadius: "10px",
+			});
+			const motion = prepareArtworkMorph(frame, artwork, thumbnail, true);
+			motion.apply(1);
+			expect(frame.style.width).toBe(`${size}px`);
+			expect(artwork.style).toMatchObject({
+				width: "44px",
+				height: "44px",
+				borderWidth: "1px",
+				borderRadius: "10px",
+			});
+			expect(
+				Number.parseFloat(artwork.style.width) -
+					2 * Number.parseFloat(artwork.style.borderWidth),
+			).toBe(42);
+			motion.release();
+			expect(frame.style.width).toBe("");
+			expect(artwork.style).toMatchObject({
+				width: "",
+				height: "",
+				position: "",
+				borderWidth: "",
+				borderRadius: "",
+			});
+		}
+	});
+});
+
+test("title tracking matches the footer while its layout stays fixed and text can expand", () => {
+	withMotionElements((make) => {
+		const line = make(344, 36);
+		const title = make(
+			344,
+			36,
+			{ fontWeight: "700", letterSpacing: "-0.75px" },
+			line,
+		);
+		const mini = make(168, 17.5, {
+			fontWeight: "600",
+			letterSpacing: "normal",
+		});
+		const motion = prepareTitleMorph(title, mini, 14 / 30);
+		motion.apply(1);
+		expect(title.style).toMatchObject({
+			width: "344px",
+			height: "36px",
+			fontWeight: "600",
+			letterSpacing: "0px",
+		});
+		expect(Number.parseFloat(line.style.width) * (14 / 30)).toBeCloseTo(168);
+		motion.release();
+		expect(title.style).toMatchObject({
+			width: "",
+			height: "",
+			fontWeight: "",
+			letterSpacing: "",
+		});
+		expect(line.style.width).toBe("");
+	});
+});
+
+test("artist and title transitions measure inline glyphs rather than block line boxes", () => {
 	const previousDocument = Object.getOwnPropertyDescriptor(
 		globalThis,
 		"document",
@@ -62,6 +213,16 @@ test("artist toggles measure inline glyphs rather than the block row in both dir
 		const compact = textRect(
 			layout(new Rect(104, 660, 240, 24), new Rect(104, 664, 60, 18)),
 		);
+		const title = textRect(
+			layout(new Rect(24, 350, 352, 36), new Rect(100, 353, 200, 30)),
+		);
+		const miniTitle = textRect(
+			layout(new Rect(72, 730, 160, 17.5), new Rect(72, 731, 100, 16)),
+		);
+		expect(title.y).toBe(353);
+		expect(title.height).toBe(30);
+		expect(miniTitle.y).toBe(731);
+		expect(miniTitle.height).toBe(16);
 		expect(centered.x).toBe(170);
 		expect(centered.width).toBe(60);
 		for (const [from, to] of [

@@ -279,14 +279,24 @@ export async function getUserProfile() {
 	const client = await getYoutubeClient();
 	return readSessionProfile({
 		session: client.session,
-		account: { getInfo: async () => {
-            // The default WEB menu retains the owning Google account header.
-            // The full channel-switcher page omits that identity information.
-            const response = await client.actions.execute("/account/accounts_list", { client: "WEB" });
-            const email = selectedGoogleEmail(response.data);
-            const parsed = Parser.parseResponse(response.data);
-            return (parsed.actions_memo?.getType(YTNodes.AccountItem) ?? []).map(item => ({ ...item, google_email: item.is_selected ? email : undefined }));
-		} },
+		account: {
+			getInfo: async () => {
+				// The default WEB menu retains the owning Google account header.
+				// The full channel-switcher page omits that identity information.
+				const response = await client.actions.execute(
+					"/account/accounts_list",
+					{ client: "WEB" },
+				);
+				const email = selectedGoogleEmail(response.data);
+				const parsed = Parser.parseResponse(response.data);
+				return (parsed.actions_memo?.getType(YTNodes.AccountItem) ?? []).map(
+					(item) => ({
+						...item,
+						google_email: item.is_selected ? email : undefined,
+					}),
+				);
+			},
+		},
 	});
 }
 
@@ -389,6 +399,17 @@ export interface LibraryPlaylist {
 }
 
 let libraryPlaylistsCache: LibraryPlaylist[] | null = null;
+
+export function patchLibraryPlaylist(
+	id: string,
+	patch: { title: string; thumbnail: string | null },
+) {
+	const raw = editablePlaylistId(id);
+	if (libraryPlaylistsCache)
+		libraryPlaylistsCache = libraryPlaylistsCache.map((item) =>
+			editablePlaylistId(item.id) === raw ? { ...item, ...patch } : item,
+		);
+}
 
 /**
  * The user's playlists from the library — shared by the playlists page and
@@ -1287,8 +1308,9 @@ function toSongVersion(entry: YTNodes.PlaylistPanelVideo): SongVersion {
 async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 	try {
 		const client = await getYoutubeClient();
-		const info = await client.music.getInfo(videoId);
-		const queue = await info.getUpNext(false);
+		// Queue metadata needs no player response or playable stream. Fetch it
+		// directly so artist links still resolve when playback info is blocked.
+		const queue = await client.music.getUpNext(videoId, false);
 		const videos: YTNodes.PlaylistPanelVideo[] = [];
 		const wrappers: YTNodes.PlaylistPanelVideoWrapper[] = [];
 		for (const item of queue.contents) {
@@ -1300,8 +1322,8 @@ async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 			}
 		}
 		const current =
-			videos.find((video) => video.selected) ??
-			videos.find((video) => video.video_id === videoId);
+			videos.find((video) => video.video_id === videoId) ??
+			videos.find((video) => video.selected);
 		if (!current) return null;
 		const versionEntry = songVersionEntryFromQueue(wrappers, videoId);
 		const oembed = await getOembedMetadata(videoId, (input, init) =>

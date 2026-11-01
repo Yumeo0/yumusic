@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ListMusic, Shuffle, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
-import { RoomButton } from "@/components/listen-together/room-button";
+import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -162,7 +162,6 @@ export function QueuePanel() {
 					)}
 				</div>
 				<div className="flex items-center gap-1">
-					<RoomButton />
 					<button
 						aria-label="Shuffle queue"
 						className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
@@ -268,7 +267,7 @@ export function QueuePanel() {
 											)}
 										</span>
 										{song.thumbnail ? (
-											<img
+											<CoverImage
 												alt=""
 												className="size-10 rounded-md border border-foreground/10 object-cover"
 												loading="lazy"

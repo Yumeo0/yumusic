@@ -1,4 +1,8 @@
-import { parseMessage, type RoomPlayback } from "../listen-together/protocol";
+import {
+	parseMessage,
+	type RoomPlayback,
+	wireSong,
+} from "../listen-together/protocol";
 
 export type DeviceCommand = "pause" | "resume" | "next" | "previous";
 export type DeviceRequest =
@@ -40,6 +44,8 @@ export function parseDeviceRequest(input: unknown): DeviceRequest | null {
 }
 
 export interface DeviceStatus {
+	thumbnail?: string;
+	upload?: boolean;
 	playing: boolean;
 	title: string;
 	artist: string;
@@ -51,6 +57,13 @@ export function deviceStatus(input: unknown): DeviceStatus {
 		unknown
 	>;
 	return {
+		thumbnail: wireSong({
+			id: "",
+			title: "",
+			artist: "",
+			thumbnail: typeof s.thumbnail === "string" ? s.thumbnail : "",
+		}).thumbnail,
+		upload: s.upload === true,
 		playing: s.playing === true,
 		room: s.room === true,
 		title: typeof s.title === "string" ? s.title.slice(0, 500) : "",

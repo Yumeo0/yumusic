@@ -1,6 +1,7 @@
 mod discord;
 mod downloads;
 mod http_client;
+mod incoming_links;
 mod login_session;
 mod media_controls;
 mod native_audio;
@@ -393,6 +394,7 @@ pub fn run() {
 			Ok(())
 		})
 		.invoke_handler(tauri::generate_handler![
+			incoming_links::take_pending_links,
 			sync_oauth::begin_sync_oauth,
 			sync_oauth::cancel_sync_oauth,
 			native_audio::native_audio_command,

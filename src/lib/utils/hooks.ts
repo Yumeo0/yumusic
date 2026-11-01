@@ -1,9 +1,10 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { expectedPosition } from "../listen-together/protocol";
 import { listenRoom } from "../listen-together/room";
 import { DEFAULT_AMBIENT_COLOR, dominantAccentColor } from "./ambient-color";
 import { LruCache } from "./lru-cache";
-import { proxiedImageUrl } from "./tauri";
+import { IS_MOBILE, proxiedImageUrl } from "./tauri";
 
 /**
  * Tracks a CSS media query. Starts from the current match so the first paint
@@ -24,6 +25,12 @@ export function useMediaQuery(query: string): boolean {
 	}, [query]);
 
 	return matches;
+}
+
+/** Phones/tablets use hardware volume, including touch browser development. */
+export function useSystemVolume(): boolean {
+	const touchBrowser = useMediaQuery("(pointer: coarse)");
+	return IS_MOBILE || (!isTauri() && touchBrowser);
 }
 
 /**

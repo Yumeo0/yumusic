@@ -1,14 +1,17 @@
 import {
 	ChevronUp,
 	ListMusic,
+	Music2,
 	Pause,
 	Play,
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
 import { type RefObject, useRef } from "react";
+import { RoomButton } from "@/components/listen-together/room-button";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
+import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -20,15 +23,16 @@ import {
 	toggleQueue,
 	useQueueOpen,
 } from "@/lib/player/player-ui";
-import { useMediaTime } from "@/lib/utils/hooks";
+import { useMediaTime, useSystemVolume } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
+import { AlbumLink } from "../song/album-link";
 import { ArtistLinks } from "../song/artist-link";
 import { DeviceButton } from "./device-picker";
-import { VolumeControl } from "./volume-control";
 import { ProgressBar } from "./waveform";
 
 export function Player() {
+	const systemVolume = useSystemVolume();
 	const {
 		currentSong,
 		currentAlbum,
@@ -48,6 +52,7 @@ export function Player() {
 	// touches on the main row count; the progress strip above is seeking.
 	const swipeRowRef = useRef<HTMLDivElement>(null);
 	const swipeHandlers = useNowPlayingSwipe(true, (event) => {
+		if (!currentSong) return false;
 		const touch = event.touches[0];
 		const rowTop = swipeRowRef.current?.getBoundingClientRect().top;
 		return (
@@ -55,13 +60,11 @@ export function Player() {
 		);
 	});
 
-	if (!currentSong) return null;
-
 	return (
 		<footer
 			className="fixed inset-x-0 bottom-0 z-46 max-md:bottom-[calc(3.75rem+var(--safe-area-bottom))] max-md:pb-1.5 cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			data-mini-player
-			onClick={toggleNowPlaying}
+			onClick={currentSong ? toggleNowPlaying : undefined}
 			{...swipeHandlers}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
@@ -69,7 +72,7 @@ export function Player() {
 				<div data-mini-progress>
 					<MiniProgress
 						knownDuration={knownDuration}
-						songId={currentSong.id}
+						songId={currentSong?.id ?? ""}
 						videoElementRef={videoElementRef}
 					/>
 				</div>
@@ -85,78 +88,113 @@ export function Player() {
 				className="group grid h-17 touch-none grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
 				ref={swipeRowRef}
 			>
-				<SongContextMenu song={currentSong}>
-					<button
-						className="flex min-w-0 items-center gap-3 text-left"
-						onClick={(e) => {
-							e.stopPropagation();
-							toggleNowPlaying();
-						}}
-						title="Open Now Playing"
-						type="button"
-					>
-						<div className="relative shrink-0" data-mini-thumb>
-							{currentSong.thumbnail ? (
-								<img
-									alt={currentSong.title}
-									className="size-11 rounded-md border border-foreground/10 object-cover"
-									key={currentSong.id}
-									src={proxiedImageUrl(currentSong.thumbnail, 96)}
-								/>
-							) : (
-								<div className="size-11 rounded-md bg-muted" />
-							)}
-							<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[.player-ctl:hover]:opacity-0">
-								<ChevronUp className="size-4 text-white" />
-							</span>
-						</div>
-						<div className="min-w-0" data-mini-title>
-							<h3
-								className="animate-track-in flex items-center gap-1.5 text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
-								key={`t-${currentSong.id}`}
-							>
-								<span className="min-w-0 truncate" data-mini-title-line>
-									<SongTitle
-										artist={currentSong.artist}
-										keepTitle={currentSong.upload}
-										title={currentSong.title}
-									/>
-								</span>
-								<DownloadedBadge data-mini-download songId={currentSong.id} />
-							</h3>
-							<p
-								className="animate-track-in truncate text-xs text-muted-foreground"
-								key={`a-${currentSong.id}`}
-								style={{ animationDelay: "60ms" }}
-							>
-								<span data-mini-artist>
-									<ArtistLinks song={currentSong} />
-								</span>
-								{currentAlbum && (
-									<span title={`Album or single: ${currentAlbum.name}`}>
-										<span
-											aria-hidden
-											className="mx-1 inline-block"
-											data-player-morph-extra
-										>
-											{" "}
-											·{" "}
-										</span>
-										<span data-mini-album>{currentAlbum.name}</span>
+				<div className="flex min-w-0 items-center gap-3">
+					{currentSong ? (
+						<SongContextMenu song={currentSong}>
+							<div className="flex min-w-0 flex-1 items-center gap-3 text-left">
+								<button
+									aria-label="Open Now Playing"
+									className="relative shrink-0"
+									data-mini-thumb
+									onClick={(event) => {
+										event.stopPropagation();
+										toggleNowPlaying();
+									}}
+									type="button"
+								>
+									{currentSong.thumbnail ? (
+										<CoverImage
+											alt={currentSong.title}
+											className="size-11 rounded-md border border-foreground/10 object-cover"
+											data-mini-cover-art
+											key={currentSong.id}
+											src={proxiedImageUrl(currentSong.thumbnail, 96)}
+										/>
+									) : (
+										<div
+											className="size-11 rounded-md bg-muted"
+											data-mini-cover-art
+										/>
+									)}
+									<span className="absolute inset-0 grid place-items-center rounded-md bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-has-[.player-ctl:hover]:opacity-0">
+										<ChevronUp className="size-4 text-white" />
 									</span>
-								)}
-							</p>
+								</button>
+								<div className="min-w-0" data-mini-title>
+									<h3
+										className="animate-track-in flex items-center gap-1.5 text-sm font-semibold leading-tight transition-colors group-hover:text-primary group-has-[.player-ctl:hover]:text-foreground"
+										key={`t-${currentSong.id}`}
+									>
+										<span className="min-w-0 truncate" data-mini-title-line>
+											<span data-motion-text>
+												<SongTitle
+													artist={currentSong.artist}
+													keepTitle={currentSong.upload}
+													title={currentSong.title}
+												/>
+											</span>
+										</span>
+										<DownloadedBadge
+											data-mini-download
+											songId={currentSong.id}
+										/>
+									</h3>
+									<p
+										className="animate-track-in truncate text-xs text-muted-foreground"
+										key={`a-${currentSong.id}`}
+										style={{ animationDelay: "60ms" }}
+									>
+										<span data-mini-artist>
+											<ArtistLinks song={currentSong} />
+										</span>
+										{currentAlbum && (
+											<span title={`Album or single: ${currentAlbum.name}`}>
+												<span
+													aria-hidden
+													className="mx-1 inline-block"
+													data-player-morph-extra
+												>
+													{" "}
+													·{" "}
+												</span>
+												<span data-mini-album>
+													<AlbumLink album={currentAlbum} />
+												</span>
+											</span>
+										)}
+									</p>
+								</div>
+							</div>
+						</SongContextMenu>
+					) : (
+						<div className="flex min-w-0 items-center gap-3">
+							<div className="grid size-11 shrink-0 place-items-center rounded-md border border-border bg-muted">
+								<Music2 aria-hidden className="size-5 text-muted-foreground" />
+							</div>
+							<div className="min-w-0">
+								<p className="truncate text-sm font-medium">Nothing playing</p>
+								<p className="truncate text-xs text-muted-foreground">
+									Choose a song to get started
+								</p>
+							</div>
 						</div>
-					</button>
-				</SongContextMenu>
+					)}
+				</div>
 
 				{/* Transport */}
 				<div className="flex items-center gap-1 sm:gap-2" data-mini-controls>
+					<div
+						className="player-ctl shrink-0"
+						data-mini-room
+						onClick={(e) => e.stopPropagation()}
+					>
+						<RoomButton />
+					</div>
 					<button
 						aria-label="Previous"
 						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						data-mini-prev
-						disabled={!hasPrevious}
+						disabled={!currentSong || !hasPrevious}
 						onClick={(e) => {
 							e.stopPropagation();
 							previous();
@@ -168,9 +206,10 @@ export function Player() {
 					<button
 						aria-label={isPlaying ? "Pause" : "Play"}
 						className={cn(
-							"player-ctl grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90",
+							"player-ctl grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90 disabled:opacity-40",
 						)}
 						data-mini-play
+						disabled={!currentSong}
 						onClick={(e) => {
 							e.stopPropagation();
 							toggle();
@@ -187,7 +226,7 @@ export function Player() {
 						aria-label="Next"
 						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						data-mini-next
-						disabled={!hasNext}
+						disabled={!currentSong || !hasNext}
 						onClick={(e) => {
 							e.stopPropagation();
 							next();
@@ -196,20 +235,20 @@ export function Player() {
 					>
 						<SkipForward className="size-4.5 fill-current" />
 					</button>
+					{!systemVolume && (
+						<div
+							className="max-md:hidden"
+							data-mini-repeat
+							onClick={(e) => e.stopPropagation()}
+						>
+							<RepeatButton />
+						</div>
+					)}
 				</div>
 
-				{/* Timecodes + queue + volume (desktop only — phones use the
+				{/* Ratings, audio devices, queue and timecodes (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
-					<DeviceButton />
-					<div data-mini-repeat>
-						<RepeatButton />
-					</div>
-					<MiniTime
-						knownDuration={knownDuration}
-						songId={currentSong.id}
-						videoElementRef={videoElementRef}
-					/>
 					{/* Rating clicks must not open the fullscreen. Hidden on
 					    narrower windows, where the title needs the room. */}
 					<div
@@ -217,8 +256,12 @@ export function Player() {
 						data-mini-ratings
 						onClick={(e) => e.stopPropagation()}
 					>
-						<RatingButtons songId={currentSong.id} />
+						<RatingButtons collapse songId={currentSong?.id ?? ""} />
 					</div>
+					<div data-mini-audio>
+						<DeviceButton />
+					</div>
+
 					<button
 						aria-label="Toggle queue"
 						className={cn(
@@ -237,14 +280,12 @@ export function Player() {
 					>
 						<ListMusic className="size-4.5" />
 					</button>
-					{/* Volume interactions must not open the fullscreen */}
-					<div
-						className="player-ctl"
-						data-mini-volume
-						onClick={(e) => e.stopPropagation()}
-					>
-						<VolumeControl vertical />
-					</div>
+
+					<MiniTime
+						knownDuration={knownDuration}
+						songId={currentSong?.id ?? ""}
+						videoElementRef={videoElementRef}
+					/>
 				</div>
 			</div>
 		</footer>
@@ -282,9 +323,10 @@ function MiniProgress({
 	};
 	return (
 		<ProgressBar
-			onSeek={roomRole === "guest" ? undefined : handleSeek}
-			onSeekCommit={handleSeek}
-			progress={duration > 0 ? currentTime / duration : 0}
+			disabled={!songId}
+			onSeek={roomRole === "guest" || !songId ? undefined : handleSeek}
+			onSeekCommit={songId ? handleSeek : undefined}
+			progress={songId && duration > 0 ? currentTime / duration : 0}
 		/>
 	);
 }
@@ -306,7 +348,7 @@ function MiniTime({
 	return (
 		<span className="font-mono text-xs text-muted-foreground tabular-nums">
 			<span className="text-foreground/80" data-mini-elapsed>
-				{formatTime(currentTime)}
+				{formatTime(songId ? currentTime : 0)}
 			</span>
 			<span
 				className="mx-1 inline-block text-foreground/25"
@@ -314,7 +356,7 @@ function MiniTime({
 			>
 				/
 			</span>
-			<span data-mini-duration>{formatDuration(duration)}</span>
+			<span data-mini-duration>{formatDuration(songId ? duration : 0)}</span>
 		</span>
 	);
 }

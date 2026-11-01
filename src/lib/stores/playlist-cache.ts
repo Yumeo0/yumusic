@@ -132,10 +132,69 @@ export function pruneStaleCacheVersions() {
  * its first fetch already carries the song.
  */
 export function addSongToCachedPlaylist(id: string, song: Song) {
-	const key = PLAYLIST_CACHE_PREFIX + id;
-	const cached = readCache<PlaylistView>(key);
-	if (!cached) return;
-	writeCache(key, { ...cached.data, songs: [song, ...cached.data.songs] });
+	for (const key of playlistKeys(id)) {
+		const cached = readCache<PlaylistView>(key);
+		if (cached)
+			writeCache(key, { ...cached.data, songs: [song, ...cached.data.songs] });
+	}
+	emitPlaylistChange({ id, type: "add", song });
+}
+
+const rawPlaylistId = (id: string) => (id.startsWith("VL") ? id.slice(2) : id);
+const playlistKeys = (id: string) => [
+	PLAYLIST_CACHE_PREFIX + rawPlaylistId(id),
+	`${PLAYLIST_CACHE_PREFIX}VL${rawPlaylistId(id)}`,
+];
+const PLAYLIST_CHANGED_EVENT = "yumusic:playlist-changed";
+export type PlaylistChange = { id: string } & (
+	| { type: "add"; song: Song }
+	| { type: "metadata"; patch: Pick<PlaylistView, "title" | "thumbnail"> }
+);
+const revisions = new Map<string, number>();
+export const playlistRevision = (id: string) =>
+	revisions.get(rawPlaylistId(id)) ?? 0;
+function emitPlaylistChange(change: PlaylistChange) {
+	revisions.set(rawPlaylistId(change.id), playlistRevision(change.id) + 1);
+	window.dispatchEvent(
+		new CustomEvent(PLAYLIST_CHANGED_EVENT, { detail: change }),
+	);
+}
+export function subscribeToPlaylistChanges(
+	id: string,
+	listener: (change: PlaylistChange) => void,
+) {
+	const receive = (event: Event) => {
+		const change = (event as CustomEvent<PlaylistChange>).detail;
+		if (rawPlaylistId(change.id) === rawPlaylistId(id)) listener(change);
+	};
+	window.addEventListener(PLAYLIST_CHANGED_EVENT, receive);
+	return () => window.removeEventListener(PLAYLIST_CHANGED_EVENT, receive);
+}
+
+/** Apply the confirmed edit directly; an immediate browse can still be stale. */
+export function patchCachedPlaylistMetadata(
+	id: string,
+	patch: Pick<PlaylistView, "title" | "thumbnail">,
+) {
+	for (const key of playlistKeys(id)) {
+		const cached = readCache<PlaylistView>(key);
+		if (cached) writeCache(key, { ...cached.data, ...patch });
+	}
+	const library =
+		readCache<Array<{ id: string; title: string; thumbnail?: string | null }>>(
+			LIBRARY_CACHE_KEY,
+		);
+	if (library)
+		writeCache(
+			LIBRARY_CACHE_KEY,
+			library.data.map((item) =>
+				rawPlaylistId(item.id) === rawPlaylistId(id)
+					? { ...item, ...patch }
+					: item,
+			),
+		);
+	emitPlaylistChange({ id, type: "metadata", patch });
+	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
 }
 
 /** Drops a deleted playlist from the library list and its track cache. */

@@ -52,7 +52,14 @@ export async function getSongPreview(
 		: meta?.artists && meta.artists.length > 0
 			? meta.artists
 			: author
-				? [{ name: author }]
+				? [
+						{
+							name: author,
+							id: basic?.channel_id?.startsWith("UC")
+								? basic.channel_id
+								: undefined,
+						},
+					]
 				: [];
 	const song: Song = {
 		id: version?.id ?? videoId,

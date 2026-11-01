@@ -78,6 +78,7 @@ export function PlaylistContextMenu({
 	songs,
 	highlight = true,
 	className = "contents",
+	allowDelete = true,
 	children,
 }: {
 	playlist: PlaylistRef;
@@ -89,6 +90,7 @@ export function PlaylistContextMenu({
 	highlight?: boolean;
 	className?: string;
 	children: ReactNode;
+	allowDelete?: boolean;
 }) {
 	const { addToQueue, play } = usePlayer();
 	const downloads = useDownloads();
@@ -210,15 +212,19 @@ export function PlaylistContextMenu({
 							<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
 							<MenuItem
 								icon={Share2}
-								label="Share playlist"
+								label={
+									isAlbumId(playlist.id) ? "Share album" : "Share playlist"
+								}
 								onClick={() =>
 									void shareLink({
 										title: playlist.title,
-										url: `https://music.youtube.com/playlist?list=${rawId}`,
+										url: isAlbumId(playlist.id)
+											? `https://music.youtube.com/browse/${playlist.id}`
+											: `https://music.youtube.com/playlist?list=${rawId}`,
 									})
 								}
 							/>
-							{!isAlbumId(playlist.id) && (
+							{allowDelete && !isAlbumId(playlist.id) && (
 								<>
 									<ContextMenu.Separator className="my-1 h-px bg-foreground/8" />
 									<MenuItem

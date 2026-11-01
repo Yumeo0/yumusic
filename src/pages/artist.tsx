@@ -6,6 +6,7 @@ import {
 	Music2,
 	Play,
 	RefreshCw,
+	Share2,
 	Shuffle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -20,6 +21,7 @@ import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import { shareLink } from "@/lib/services/share";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
@@ -27,6 +29,11 @@ import { LruCache } from "@/lib/utils/lru-cache";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
+import {
+	channelCardShelves,
+	channelProfileThumbnail,
+	channelVideos,
+} from "@/lib/youtube/channel-data";
 import { songRatingEntry } from "@/lib/youtube/playlist-data";
 import {
 	artistListOf,
@@ -60,6 +67,7 @@ interface ArtistShelf {
 
 interface ArtistView {
 	name: string;
+	shareUrl: string;
 	description: string | null;
 	thumbnail: string | null;
 	songsTitle: string;
@@ -126,7 +134,32 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	}
 
 	const client = await getYoutubeClient();
-	const artist = await client.music.getArtist(id);
+	const fetchChannel = async (): Promise<ArtistView> => {
+		const channel = await client.getChannel(id);
+		const metadata = channel.metadata;
+		const name = metadata.title || "Channel";
+		const uploads = channel.has_videos ? await channel.getVideos() : channel;
+		const view: ArtistView = {
+			name,
+			shareUrl: `https://www.youtube.com/channel/${id}`,
+			description: metadata.description || null,
+			thumbnail:
+				hiResThumb(biggestThumb(metadata.avatar ?? metadata.thumbnail)?.url) ||
+				null,
+			songsTitle: "Videos",
+			songs: channelVideos(uploads.videos, name, id),
+			shelves: [],
+			mix: null,
+		};
+		artistCache.set(id, { timestamp: Date.now(), data: view });
+		return view;
+	};
+	let artist: Awaited<ReturnType<typeof client.music.getArtist>>;
+	try {
+		artist = await client.music.getArtist(id);
+	} catch {
+		return fetchChannel();
+	}
 	const header = artist.header;
 	const mix = artistMixSource(header);
 
@@ -139,12 +172,14 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 		thumbnail = hiResThumb(biggestThumb(header.thumbnail?.contents)?.url);
 	} else if (header instanceof YTNodes.MusicVisualHeader) {
 		name = header.title?.text || name;
-		thumbnail = hiResThumb(biggestThumb(header.thumbnail)?.url);
+		thumbnail = channelProfileThumbnail(header);
 	} else if (header instanceof YTNodes.MusicHeader) {
 		name = header.title?.text || name;
 	}
 
-	const shelves: ArtistShelf[] = [];
+	const shelves: ArtistShelf[] = channelCardShelves(
+		artist.page.contents_memo?.getType(YTNodes.MusicCardShelf) ?? [],
+	);
 	const ratings: Array<{ id: string; rating: SongRating }> = [];
 	let songs: Song[] = [];
 	let songsTitle = "Songs";
@@ -215,6 +250,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 
 	const view: ArtistView = {
 		name,
+		shareUrl: `https://music.youtube.com/channel/${id}`,
 		description,
 		thumbnail,
 		songsTitle,
@@ -222,6 +258,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 		shelves,
 		mix,
 	};
+	if (!songs.length && !shelves.length) return fetchChannel();
 	artistCache.set(id, { timestamp: Date.now(), data: view });
 	return view;
 }
@@ -311,14 +348,30 @@ export default function ArtistPage() {
 		<div className="mx-auto w-full max-w-5xl px-6 pt-10 pb-8 sm:px-10">
 			<div className="flex items-center justify-between">
 				<BackButton onClick={onBack} />
-				<button
-					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
-					onClick={() => fetchArtist(true)}
-					title="Refresh artist"
-					type="button"
-				>
-					<RefreshCw className="size-4" />
-				</button>
+				<div className="flex items-center gap-1">
+					<button
+						aria-label="Share artist or channel"
+						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
+						onClick={() =>
+							void shareLink({
+								title: artist.name,
+								url: artist.shareUrl,
+							})
+						}
+						title="Share artist or channel"
+						type="button"
+					>
+						<Share2 className="size-4" />
+					</button>
+					<button
+						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
+						onClick={() => fetchArtist(true)}
+						title="Refresh artist"
+						type="button"
+					>
+						<RefreshCw className="size-4" />
+					</button>
+				</div>
 			</div>
 
 			{/* Header */}

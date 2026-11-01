@@ -23,10 +23,10 @@ import { LyricsPanel } from "@/components/lyrics/lyrics";
 import { DeviceButton } from "@/components/player/device-picker";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
-import { VolumeControl } from "@/components/player/volume-control";
 import { ProgressBar } from "@/components/player/waveform";
 import { AlbumLink } from "@/components/song/album-link";
 import { ArtistLinks } from "@/components/song/artist-link";
+import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
@@ -43,12 +43,7 @@ import {
 import { setQueueRevealTarget } from "@/lib/player/player-ui";
 import { useMediaTime } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import {
-	cn,
-	coverViewBox,
-	formatDuration,
-	formatTime,
-} from "@/lib/utils/utils";
+import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
 
 interface NowPlayingPageProps {
 	onClose: () => void;
@@ -203,10 +198,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 			ref={pageRef}
 			{...touchHandlers}
 		>
-			{/* Page background + blurred cover. The dismiss gesture slides the
-			    whole page away like a sheet (no fading anywhere), so the layer
-			    clips its own scaled-up artwork once the page's overflow is
-			    released mid-drag. Re-fades on track change. */}
+			{/* The backdrop fades as the page moves, softening its large travel
+			    while artwork and paired controls stay visible. */}
 			<div
 				aria-hidden
 				className="absolute inset-0 overflow-hidden bg-background"
@@ -217,7 +210,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						className="animate-in fade-in absolute inset-0 duration-700"
 						key={`bg-${currentSong.id}`}
 					>
-						<img
+						<CoverImage
 							alt=""
 							className="size-full scale-125 object-cover opacity-30 blur-3xl"
 							src={proxiedImageUrl(currentSong.thumbnail, 1024)}
@@ -242,10 +235,9 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				<div className="md:hidden" data-np-ratings>
 					<RatingButtons songId={currentSong.id} />
 				</div>
-				<div data-np-secondary>
+				<div data-np-room data-np-secondary>
 					<RoomButton />
 				</div>
-				<DeviceButton />
 				<button
 					aria-label="Toggle queue"
 					className={cn(
@@ -437,38 +429,26 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									}}
 								>
 									<div
-										className="np-morph relative size-full overflow-hidden bg-card transition-[border-radius] duration-300 ease-out"
+										className="np-morph relative size-full overflow-hidden border border-foreground/10 bg-card transition-[border-radius,border-width] duration-300 ease-out"
+										data-np-cover-art
 										style={{
-											borderRadius:
-												"calc((16px * (1 - var(--queue-reveal, 0))) * (1 - var(--np-dismiss, 0)) + 6px * var(--np-dismiss, 0))",
+											borderRadius: "calc(16px * (1 - var(--queue-reveal, 0)))",
+											borderWidth: "calc(1px * (1 - var(--queue-reveal, 0)))",
 										}}
 									>
 										{currentSong.thumbnail ? (
-											<img
+											<CoverImage
 												alt={currentSong.title}
 												className="animate-track-in absolute inset-0 size-full object-cover"
 												draggable={false}
 												key={`hero-${currentSong.id}`}
 												src={proxiedImageUrl(currentSong.thumbnail, 1024)}
-												style={{
-													objectViewBox: coverViewBox(currentSong.thumbnail),
-												}}
 											/>
 										) : (
 											<div className="absolute inset-0 grid place-items-center">
 												<Music2 className="size-14 text-muted-foreground" />
 											</div>
 										)}
-										{/* Hairline edge of the floating square, faded out
-									    once the cover reaches the screen edges. */}
-										<div
-											aria-hidden
-											className="np-morph pointer-events-none absolute inset-0 ring-1 ring-foreground/10 ring-inset"
-											style={{
-												borderRadius: "inherit",
-												opacity: "calc(1 - var(--queue-reveal, 0))",
-											}}
-										/>
 										<div
 											className="np-morph pointer-events-none absolute inset-x-0 bottom-0 h-1/2 max-h-72 bg-gradient-to-t from-background via-background/75 to-transparent transition-[opacity] duration-300 ease-out"
 											style={{ opacity: "var(--queue-reveal, 0)" }}
@@ -548,14 +528,18 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									style={morphStyle("--np-cover")}
 								>
 									{currentSong.thumbnail ? (
-										<img
+										<CoverImage
 											alt=""
 											className="size-16 shrink-0 rounded-xl border border-foreground/10 object-cover"
+											data-np-cover-art
 											draggable={false}
 											src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 										/>
 									) : (
-										<div className="grid size-16 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card">
+										<div
+											className="grid size-16 shrink-0 place-items-center rounded-xl border border-foreground/10 bg-card"
+											data-np-cover-art
+										>
 											<Music2 className="size-8 text-muted-foreground" />
 										</div>
 									)}
@@ -585,15 +569,19 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									}}
 								/>
 								{currentSong.thumbnail ? (
-									<img
+									<CoverImage
 										alt={currentSong.title}
 										className="animate-track-in relative aspect-square w-[min(40vh,320px)] rounded-2xl border border-foreground/10 object-cover shadow-[0_24px_70px_-20px_oklch(0_0_0/0.7)]"
+										data-np-cover-art
 										draggable={false}
 										key={`art-${currentSong.id}`}
 										src={proxiedImageUrl(currentSong.thumbnail, 1024)}
 									/>
 								) : (
-									<div className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card">
+									<div
+										className="relative grid aspect-square w-[min(40vh,320px)] place-items-center rounded-2xl border border-foreground/10 bg-card"
+										data-np-cover-art
+									>
 										<Music2 className="size-14 text-muted-foreground" />
 									</div>
 								)}
@@ -739,11 +727,13 @@ function TrackHeading({
 					style={morphStyle("--np-title", true)}
 				>
 					<span className="animate-track-in block truncate">
-						<SongTitle
-							artist={song.artist}
-							keepTitle={song.upload}
-							title={song.title}
-						/>
+						<span data-motion-text>
+							<SongTitle
+								artist={song.artist}
+								keepTitle={song.upload}
+								title={song.title}
+							/>
+						</span>
 					</span>
 				</span>
 				<DownloadedBadge data-np-download data-np-secondary songId={song.id} />
@@ -868,14 +858,13 @@ function TransportRow({
 				</button>
 			</div>
 
-			{/* The volume popover opens above its icon so the repeat button and
-			    centered transport stay fixed. Touch devices use hardware volume. */}
+			{/* One audio control matches the mini player on every device. */}
 			<div className="flex min-w-0 flex-1 items-center justify-end">
 				<div data-np-repeat data-np-secondary>
 					<RepeatButton className="size-11" />
 				</div>
-				<div data-np-secondary data-np-volume>
-					<VolumeControl className="pointer-coarse:hidden" vertical />
+				<div data-np-audio data-np-secondary>
+					<DeviceButton />
 				</div>
 			</div>
 		</div>
@@ -997,7 +986,7 @@ function QueueRow({
 				type="button"
 			>
 				{song.thumbnail ? (
-					<img
+					<CoverImage
 						alt={song.title}
 						className="size-9 shrink-0 rounded-md object-cover"
 						loading="lazy"
