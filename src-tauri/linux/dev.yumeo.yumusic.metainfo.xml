@@ -106,6 +106,9 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="0.9.0" date="2026-11-01">
+      <url type="details">https://git.yumeo.dev/Yumeo/YuMusic/releases/tag/v0.9.0</url>
+    </release>
     <release version="0.8.0" date="2026-11-01">
       <url type="details">https://git.yumeo.dev/Yumeo/YuMusic/releases/tag/v0.8.0</url>
     </release>

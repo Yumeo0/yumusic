@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [0.9.0] - 2026-11-01
+
+### Features
+
 - Added dedicated Playlists and Albums search filters, plus context menus for artist, channel, playlist, and album search results.
 - Pasted YouTube links can now open channels, playlists, and albums, alongside the existing song preview.
 - Android can receive YouTube Music links from other apps and the share sheet, including when YuMusic is not running.
