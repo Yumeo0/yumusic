@@ -14,6 +14,39 @@ export type Database = {
 	};
 	public: {
 		Tables: {
+			playback_devices: {
+				Row: {
+					connection_token: string;
+					id: string;
+					kind: string;
+					last_seen: string;
+					name: string;
+					peer_id: string;
+					state: Json;
+					user_id: string;
+				};
+				Insert: {
+					connection_token: string;
+					id: string;
+					kind: string;
+					last_seen?: string;
+					name: string;
+					peer_id: string;
+					state: Json;
+					user_id: string;
+				};
+				Update: {
+					connection_token?: string;
+					id?: string;
+					kind?: string;
+					last_seen?: string;
+					name?: string;
+					peer_id?: string;
+					state?: Json;
+					user_id?: string;
+				};
+				Relationships: [];
+			};
 			room_devices: {
 				Row: {
 					created_at: string;
@@ -67,6 +100,32 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
+			publish_playback_device: {
+				Args: {
+					device_id: string;
+					device_kind: string;
+					device_name: string;
+					device_peer: string;
+					device_state: Json;
+					device_token: string;
+				};
+				Returns: {
+					connection_token: string;
+					id: string;
+					kind: string;
+					last_seen: string;
+					name: string;
+					peer_id: string;
+					state: Json;
+					user_id: string;
+				}[];
+				SetofOptions: {
+					from: "*";
+					to: "playback_devices";
+					isOneToOne: false;
+					isSetofReturn: true;
+				};
+			};
 			write_sync_record: {
 				Args: {
 					expected_revision: number;

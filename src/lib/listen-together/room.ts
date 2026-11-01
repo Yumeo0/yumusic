@@ -28,6 +28,7 @@ import {
 	type TrustedPerson,
 	validPolicy,
 } from "./join-settings";
+import { peerOptions } from "./peer-options";
 import { type RoomProfile, validProfile } from "./profile";
 import {
 	type Participant,
@@ -40,6 +41,7 @@ import {
 import { attributeAction } from "./queue-attribution";
 
 export interface RoomState {
+	guestAudio: "listen" | "remote";
 	selfId: string | null;
 	verifyingTrust: string[];
 	role: "host" | "guest" | null;
@@ -63,6 +65,7 @@ export interface RoomState {
 	trustedPeople: TrustedPerson[];
 }
 const initial = (): RoomState => ({
+	guestAudio: "listen",
 	selfId: null,
 	verifyingTrust: [],
 	role: null,
@@ -154,6 +157,10 @@ export class ListenRoom {
 	private localStatus: Participant["status"] = "paused";
 
 	getSnapshot = () => this.state;
+	setGuestAudio(mode: "listen" | "remote") {
+		if (mode === "listen" || mode === "remote")
+			this.update({ guestAudio: mode });
+	}
 	subscribe = (listener: () => void) => {
 		this.listeners.add(listener);
 		return () => {
@@ -213,28 +220,7 @@ export class ListenRoom {
 				const { default: PeerClass } = await import("peerjs");
 				makePeer = (options) => new PeerClass(options);
 			}
-			const options: PeerOptions = { debug: 0 };
-			const server = import.meta.env.VITE_LISTEN_PEER_SERVER;
-			if (server) {
-				const url = new URL(server);
-				if (url.protocol !== "https:")
-					throw new Error("The room server must use HTTPS.");
-				Object.assign(options, {
-					host: url.hostname,
-					port: Number(url.port || 443),
-					path: url.pathname,
-					secure: true,
-				});
-			}
-			// Optional endpoint supplies short-lived TURN credentials; no secret in the bundle.
-			if (import.meta.env.VITE_LISTEN_ICE_URL) {
-				const response = await fetch(import.meta.env.VITE_LISTEN_ICE_URL, {
-					signal: AbortSignal.timeout(10000),
-				});
-				if (!response.ok)
-					throw new Error("Could not load room connection settings.");
-				options.config = { iceServers: await response.json() };
-			}
+			const options = await peerOptions();
 			if (generation !== this.generation) return;
 			if (!this.createPeer && typeof RTCPeerConnection === "undefined")
 				throw new Error(
@@ -1325,6 +1311,7 @@ export class ListenRoom {
 		this.localStatus = "paused";
 		this.update({
 			...initial(),
+			guestAudio: this.state.guestAudio,
 			permissions:
 				this.state.role === "host"
 					? this.state.permissions
@@ -1349,6 +1336,13 @@ export const useRoomRole = () =>
 	useSyncExternalStore(
 		listenRoom.subscribe,
 		() => listenRoom.getSnapshot().role,
+	);
+
+export const useRoomPlaying = () =>
+	useSyncExternalStore(listenRoom.subscribe, () =>
+		listenRoom.getSnapshot().role === "guest"
+			? (listenRoom.getSnapshot().playback?.playing ?? false)
+			: null,
 	);
 
 export const useRoomRepeat = () =>

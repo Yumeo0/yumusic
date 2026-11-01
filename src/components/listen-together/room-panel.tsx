@@ -158,6 +158,47 @@ export function RoomPanel({ embedded = false }: { embedded?: boolean }) {
 				</div>
 			)}
 
+			{room.role !== "host" && (
+				<fieldset className="mb-5 flex flex-col gap-3 rounded-xl border border-foreground/10 p-4">
+					<legend className="px-1 text-sm font-medium">
+						Audio on this device
+					</legend>
+					{(
+						[
+							[
+								"listen",
+								"Listen here",
+								"Play the room's music on this device.",
+							],
+							[
+								"remote",
+								"Remote control",
+								"Control the shared queue and playback without playing audio here.",
+							],
+						] as const
+					).map(([mode, title, description]) => (
+						<label
+							className="flex cursor-pointer items-start gap-3 text-sm"
+							key={mode}
+						>
+							<input
+								checked={room.guestAudio === mode}
+								className="mt-1 accent-primary"
+								name="guest-audio"
+								onChange={() => listenRoom.setGuestAudio(mode)}
+								type="radio"
+								value={mode}
+							/>
+							<span>
+								<span className="font-medium">{title}</span>
+								<span className="mt-0.5 block text-xs text-muted-foreground">
+									{description}
+								</span>
+							</span>
+						</label>
+					))}
+				</fieldset>
+			)}
 			{!active ? (
 				<div className="space-y-3">
 					<button

@@ -8,6 +8,7 @@ import {
 import { expectedPosition, wireSong } from "@/lib/listen-together/protocol";
 import { listenRoom } from "@/lib/listen-together/room";
 import { showToast } from "@/lib/stores/toast";
+import { formatTime } from "@/lib/utils/utils";
 
 /** Reads media clocks outside React; frequent room ticks never rerender the app. */
 export function RoomPlaybackBridge() {
@@ -124,6 +125,7 @@ export function RoomPlaybackBridge() {
 		let playPending = false;
 		let appliedQueue: unknown = null;
 		let appliedAutoplay: unknown = null;
+		let audioMode = "listen";
 		const tick = () => {
 			const { player: p, controls: c } = live.current;
 			const room = listenRoom.getSnapshot();
@@ -149,6 +151,9 @@ export function RoomPlaybackBridge() {
 				const actualSong = p.currentSong
 					? {
 							...p.currentSong,
+							duration:
+								p.currentSong.duration ||
+								(p.duration > 0 ? formatTime(p.duration) : undefined),
 							addedBy:
 								p.queue[p.currentIndex]?.id === p.currentSong.id
 									? p.queue[p.currentIndex].addedBy
@@ -201,6 +206,34 @@ export function RoomPlaybackBridge() {
 				return;
 			}
 			const state = room.playback;
+			if (audioMode !== room.guestAudio) {
+				audioMode = room.guestAudio;
+				requested = prepared = aligned = failed = "";
+				buffering.clear();
+			}
+			if (room.guestAudio === "remote") {
+				const key = `remote:${state?.instance ?? "empty"}`;
+				if (requested !== key) {
+					requested = key;
+					p.previewRoomTrack(
+						state?.song ?? null,
+						state?.queue ?? [],
+						state?.index ?? -1,
+					);
+				}
+				media?.pause();
+				p.setRoomPlaying(false);
+				listenRoom.setStatus("paused");
+				if (state && appliedQueue !== state.queue) {
+					p.applyRoomQueue(state.queue, state.index);
+					appliedQueue = state.queue;
+				}
+				if (state && appliedAutoplay !== state.autoplayQueue) {
+					p.applyRoomAutoplay(state.autoplayQueue);
+					appliedAutoplay = state.autoplayQueue;
+				}
+				return;
+			}
 			if (state && appliedAutoplay !== state.autoplayQueue) {
 				p.applyRoomAutoplay(state.autoplayQueue);
 				appliedAutoplay = state.autoplayQueue;
@@ -232,7 +265,8 @@ export function RoomPlaybackBridge() {
 					.then(() => {
 						if (
 							requested === instance &&
-							listenRoom.getSnapshot().role === "guest"
+							listenRoom.getSnapshot().role === "guest" &&
+							listenRoom.getSnapshot().guestAudio === "listen"
 						)
 							prepared = instance;
 					})
@@ -310,6 +344,7 @@ export function RoomPlaybackBridge() {
 						const current = listenRoom.getSnapshot();
 						if (
 							current.role === "guest" &&
+							current.guestAudio === "listen" &&
 							current.playback?.instance === state.instance
 						)
 							p.setRoomPlaying(true);

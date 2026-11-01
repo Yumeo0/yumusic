@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { expectedPosition } from "../listen-together/protocol";
+import { listenRoom } from "../listen-together/room";
 import { DEFAULT_AMBIENT_COLOR, dominantAccentColor } from "./ambient-color";
 import { LruCache } from "./lru-cache";
 import { proxiedImageUrl } from "./tauri";
@@ -54,12 +56,30 @@ export function useMediaTime(
 	// biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is an intentional re-attach trigger, not a read value
 	useEffect(() => {
 		const videoEl = videoElementRef?.current;
-		if (!videoEl) return;
+		const roomTime = () => {
+			const room = listenRoom.getSnapshot();
+			if (
+				room.role !== "guest" ||
+				room.guestAudio !== "remote" ||
+				!room.playback
+			)
+				return false;
+			setCurrentTime(
+				expectedPosition(
+					room.playback,
+					performance.now() + (room.clockOffset ?? 0),
+				),
+			);
+			return true;
+		};
+		const roomTimer = window.setInterval(roomTime, 250);
+		if (!videoEl) return () => window.clearInterval(roomTimer);
 
 		const handleLoadedMetadata = () => {
 			if (Number.isFinite(videoEl.duration)) setMediaDuration(videoEl.duration);
 		};
 		const handleTimeUpdate = () => {
+			if (roomTime()) return;
 			setCurrentTime(videoEl.currentTime);
 			if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
 				setMediaDuration(videoEl.duration);
@@ -74,6 +94,7 @@ export function useMediaTime(
 		videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
 		videoEl.addEventListener("timeupdate", handleTimeUpdate);
 		return () => {
+			window.clearInterval(roomTimer);
 			videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
 			videoEl.removeEventListener("timeupdate", handleTimeUpdate);
 		};

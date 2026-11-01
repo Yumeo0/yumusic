@@ -24,6 +24,7 @@ import { useMediaTime } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
 import { ArtistLinks } from "../song/artist-link";
+import { DeviceButton } from "./device-picker";
 import { VolumeControl } from "./volume-control";
 import { ProgressBar } from "./waveform";
 
@@ -200,6 +201,7 @@ export function Player() {
 				{/* Timecodes + queue + volume (desktop only — phones use the
 			    now-playing screen, where volume follows the hardware keys) */}
 				<div className="flex items-center justify-end gap-3 max-md:hidden">
+					<DeviceButton />
 					<div data-mini-repeat>
 						<RepeatButton />
 					</div>

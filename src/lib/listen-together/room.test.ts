@@ -168,6 +168,25 @@ const state: Omit<RoomPlayback, "revision" | "sentAt"> = {
 };
 
 describe("PeerJS room lifecycle", () => {
+	test("guest audio choice survives joining and reconnecting without changing host permissions", async () => {
+		const network = new Network();
+		const host = create(network);
+		const guest = create(network);
+		await host.connect(profile("Host"));
+		await until(host, (s) => s.status === "hosting");
+		guest.setGuestAudio("remote");
+		await guest.connect(profile("Remote"), host.getSnapshot().invite);
+		await until(host, (s) => s.pending.length === 1);
+		host.approve(guest.getSnapshot().selfId as string, true);
+		await until(guest, (s) => s.status === "connected");
+		expect(guest.getSnapshot().guestAudio).toBe("remote");
+		expect(guest.requestAction({ type: "pause" })).toBe("denied");
+		guest.setGuestAudio("listen");
+		expect(guest.getSnapshot().guestAudio).toBe("listen");
+		expect(guest.requestAction({ type: "pause" })).toBe("denied");
+		guest.leave();
+		expect(guest.getSnapshot().guestAudio).toBe("listen");
+	});
 	test("trusting an account admits a second device and forgetting it revokes both", async () => {
 		const network = new Network();
 		const first = await generateRoomIdentity();

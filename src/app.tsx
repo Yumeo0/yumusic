@@ -27,6 +27,8 @@ import { UserMenu } from "./components/app/user-menu";
 import { DownloadQueueButton } from "./components/downloads/download-queue";
 import { RoomPlaybackBridge } from "./components/listen-together/playback-bridge";
 import { RoomActivity } from "./components/listen-together/room-activity";
+import { DeviceBridge } from "./components/player/device-bridge";
+import { DeviceActivity } from "./components/player/device-picker";
 import { Player } from "./components/player/player";
 import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
@@ -71,7 +73,10 @@ import { useSettings } from "./lib/stores/settings";
 import { showToast } from "./lib/stores/toast";
 import { signInWithGoogle } from "./lib/sync/oauth";
 import { signOutOfSync } from "./lib/sync/sync";
-import { getYouTubeSyncAccount, setYouTubeSyncAccount } from "./lib/sync/youtube-account";
+import {
+	getYouTubeSyncAccount,
+	setYouTubeSyncAccount,
+} from "./lib/sync/youtube-account";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
@@ -636,7 +641,8 @@ function Layout() {
 			try {
 				const cookie = await window.electron.getCookie();
 				if (!cookie) {
-					if (!disposed && revision === authRevision.current) setYouTubeSyncAccount({ status: "signed-out" });
+					if (!disposed && revision === authRevision.current)
+						setYouTubeSyncAccount({ status: "signed-out" });
 					return;
 				}
 				await getYoutubeClient(cookie);
@@ -656,7 +662,13 @@ function Layout() {
 				// saved session or shared browser cookies.
 				if (profile || !signedIn) setUserProfile(profile);
 				setIsLoggedIn(signedIn);
-				setYouTubeSyncAccount(!signedIn ? { status: "signed-out" } : profile?.email ? { status: "ready", email: profile.email } : { status: "unavailable" });
+				setYouTubeSyncAccount(
+					!signedIn
+						? { status: "signed-out" }
+						: profile?.email
+							? { status: "ready", email: profile.email }
+							: { status: "unavailable" },
+				);
 			} catch (error) {
 				// Offline, rate-limited and server failures do not invalidate cookies.
 				console.error("Failed to check Google session:", error);
@@ -692,10 +704,17 @@ function Layout() {
 			const profile = await getUserProfile();
 			setIsLoggedIn(true);
 			setUserProfile(profile);
-			setYouTubeSyncAccount(profile?.email ? { status: "ready", email: profile.email } : { status: "unavailable" });
+			setYouTubeSyncAccount(
+				profile?.email
+					? { status: "ready", email: profile.email }
+					: { status: "unavailable" },
+			);
 			if (profile?.email) {
-				try { await signInWithGoogle(); }
-				catch { /* YouTube stays signed in if optional sync consent is cancelled. */ }
+				try {
+					await signInWithGoogle();
+				} catch {
+					/* YouTube stays signed in if optional sync consent is cancelled. */
+				}
 			}
 			// The native login command already verified the session with YouTube.
 			// Refetch all mounted views with the validated session.
@@ -782,6 +801,8 @@ function AppShell({
 		<>
 			<AmbientSync />
 			<CloudSync />
+			<DeviceBridge />
+			<DeviceActivity />
 			<DiscordPresenceSync />
 			<ListenBrainzSync />
 			<MediaSessionSync />

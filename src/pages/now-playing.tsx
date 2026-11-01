@@ -20,6 +20,7 @@ import {
 } from "react";
 import { RoomButton } from "@/components/listen-together/room-button";
 import { LyricsPanel } from "@/components/lyrics/lyrics";
+import { DeviceButton } from "@/components/player/device-picker";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
 import { VolumeControl } from "@/components/player/volume-control";
@@ -244,6 +245,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				<div data-np-secondary>
 					<RoomButton />
 				</div>
+				<DeviceButton />
 				<button
 					aria-label="Toggle queue"
 					className={cn(

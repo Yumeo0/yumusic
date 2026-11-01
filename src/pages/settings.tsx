@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { type CSSProperties, type DragEvent, useEffect, useState } from "react";
 import { UpdatesSection } from "@/components/app/updates";
+import { DevicePanel } from "@/components/player/device-picker";
 import { StorageManagerDialog } from "@/components/settings/storage-manager-dialog";
 import { SyncSection } from "@/components/settings/sync-section";
 import { Input } from "@/components/ui/input";
@@ -204,6 +205,15 @@ export default function SettingsPage({
 			</section>
 
 			<SyncSection />
+			<section
+				aria-labelledby="devices-heading"
+				className="mt-8 flex flex-col gap-4"
+			>
+				<h2 className="text-lg font-semibold" id="devices-heading">
+					Your devices
+				</h2>
+				<DevicePanel />
+			</section>
 
 			{/* Home feed */}
 			<section className="mt-8">

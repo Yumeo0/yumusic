@@ -23,6 +23,7 @@ import {
 import {
 	listenRoom,
 	useRoomAutoplay,
+	useRoomPlaying,
 	useRoomRepeat,
 	useRoomRole,
 	useRoomUsername,
@@ -136,6 +137,7 @@ interface PlayerContextType {
 	duration: number;
 	seek: (seconds: number) => void;
 	prepareRoomTrack: (song: Song, queue: Song[], index: number) => Promise<void>;
+	previewRoomTrack: (song: Song | null, queue: Song[], index: number) => void;
 	setRoomPlaying: (playing: boolean) => void;
 	applyRoomQueue: (songs: Song[], index: number) => void;
 	applyRoomAutoplay: (songs: Song[]) => void;
@@ -361,6 +363,7 @@ function attributeLocal(song: Song): Song {
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const roomRole = useRoomRole();
+	const roomPlaying = useRoomPlaying();
 	const roomUsername = useRoomUsername();
 	const [settings, updateSettings] = useSettings();
 	const roomAutoplay = useRoomAutoplay();
@@ -1634,8 +1637,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const pause = useCallback(() => setIsPlaying(false), []);
-	const resume = useCallback(() => setIsPlaying(true), []);
-	const toggle = useCallback(() => setIsPlaying((playing) => !playing), []);
+	const resume = useCallback(() => {
+		// Remote-only guests keep track metadata without a loaded stream.
+		// Once they leave the room, Play should start that track locally.
+		if (currentSong && !videoInfo && !videoElementRef.current?.readyState) {
+			void playSong(currentSong);
+			return;
+		}
+		setIsPlaying(true);
+	}, [currentSong, videoInfo, playSong]);
+	const toggle = useCallback(() => {
+		if (isPlaying) pause();
+		else resume();
+	}, [isPlaying, pause, resume]);
 
 	const hasNext =
 		nextQueueIndex(currentIndex, queue.length, repeatMode) !== null ||
@@ -1670,6 +1684,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			await playSong(song, true);
 		},
 		[playSong],
+	);
+	const previewRoomTrack = useCallback(
+		(song: Song | null, songs: Song[], index: number) => {
+			loadRequestRef.current++;
+			abortCrossfade();
+			teardownDeck(decksRef.current[activeDeckRef.current]);
+			setIsPlaying(false);
+			setVideoInfo(null);
+			setInnertube(null);
+			setCurrentSong(song);
+			setQueueState(songs);
+			setCurrentIndex(index);
+		},
+		[abortCrossfade, teardownDeck],
 	);
 	const getPlaybackGeneration = useCallback(() => loadRequestRef.current, []);
 	const applyRoomQueue = useCallback((songs: Song[], index: number) => {
@@ -1787,6 +1815,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			duration,
 			seek,
 			prepareRoomTrack,
+			previewRoomTrack,
 			setRoomPlaying: setIsPlaying,
 			applyRoomQueue,
 			applyRoomAutoplay,
@@ -1819,6 +1848,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			duration,
 			seek,
 			prepareRoomTrack,
+			previewRoomTrack,
 			getPlaybackGeneration,
 			applyRoomQueue,
 			applyRoomAutoplay,
@@ -1827,14 +1857,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	const controlsValue = useMemo<PlayerControlsContextType>(
 		() => ({
-			isPlaying,
+			isPlaying: roomPlaying ?? isPlaying,
 			pause: localControl(pause, () => ({ type: "pause" })),
 			resume: localControl(resume, () => ({ type: "resume" })),
 			toggle: localControl(toggle, () => ({
-				type: isPlaying ? "pause" : "resume",
+				type: (roomPlaying ?? isPlaying) ? "pause" : "resume",
 			})),
 		}),
-		[isPlaying, pause, resume, toggle],
+		[isPlaying, roomPlaying, pause, resume, toggle],
 	);
 
 	const volumeValue = useMemo<PlayerVolumeContextType>(
