@@ -15,7 +15,7 @@ runner's configuration. Forgejo does not accept `--privileged` through workflow
 
 `bun scripts/flatpak-sources.ts --release` regenerates pinned dependency downloads
 and writes `flatpak-release.json` using the checked-out release commit, without
-the older development patch described below. It requires `RELEASE_TAG` to match
+the development patch described below. It requires `RELEASE_TAG` to match
 both HEAD and the package version. CI downloads sources first, then builds with
 `--disable-download --sandbox`; application build commands have no network access.
 
@@ -50,11 +50,9 @@ resolves its dependency sources online:
 - `cargo-sources.json`: every registry crate in `Cargo.lock`, pinned by its
   lockfile checksum, with vendor checksums and offline Cargo configuration.
   Generation rejects unhandled Git registries instead of omitting them.
-- `application.patch`: the current packaging prerequisites applied to the pinned
-  public source commit. This explicitly includes existing uncommitted upstream
-  work; it prevents accidentally testing the older public source. Regenerate
-  after application changes. Replace the patch and base commit with a released
-  source revision once those changes have been published.
+- `application.patch`: application changes relative to the pinned source commit
+  for local development builds. Regenerate after application changes. Release
+  builds use the published tag's source revision without this patch.
 - `source-locks.json`: input/output hashes and the application base revision.
   `bun run check:flatpak-sources` rejects stale dependency inputs or application
   snapshots without network access. `bun scripts/flatpak-sources.ts --snapshot`
@@ -129,13 +127,12 @@ Music/lyrics content varies with the service; the rating does not claim a
 parental content filter. A maintainer must review the questionnaire and third
 party service behavior before submission.
 
-The ID `dev.yumeo.yumusic` consistently matches desktop, icon, native media
-controls, Cargo/Tauri configuration and AppStream. Its domain is `yumeo.dev`.
-HTTPS reachability is testable; ownership is not established by a working URL or
-by an SSH Git remote. A maintainer must demonstrate control, preferably link the
-app from that domain, and complete Flathub's verification token process at
-`https://yumeo.dev/.well-known/org.flathub.VerifiedApps.txt` when prompted by
-Flathub. Do not invent a verification token.
+The application ID `dev.yumeo.yumusic` matches desktop files, icons, native media
+controls, Cargo/Tauri configuration, and AppStream. Forks using a different ID
+must update these consistently, including manifest filenames and build scripts.
+For a Flathub submission, choose an ID the publisher can verify and follow
+Flathub's domain or repository ownership verification process. A reachable URL
+or Git remote alone does not establish ownership.
 
 ## Runtime acceptance matrix
 
@@ -143,14 +140,14 @@ Record PASS/FAIL/BLOCKED separately for each architecture. Static analysis,
 unit tests, a host build, and a source download do not count as a Flatpak runtime
 pass. Test the installed release build with its normal permissions:
 
-| Area | Required evidence |
-| --- | --- |
-| Login | Google login window opens; sign in; library loads; restart preserves session; sign out removes access. |
-| Playback | Search, play/pause, seek, next/previous; audible output; resume after minimizing; supported stream codecs. |
-| Lyrics | Load plain and synchronized lyrics; follow playback; switch providers; optional romanization. |
-| Downloads | Download a permitted track; restart; play without network; remove it; files remain inside private app data. |
-| Media controls | Desktop identifies YuMusic; metadata/artwork update; media keys, seek, and desktop play/pause work. |
-| Portal links | An external HTTPS link opens in the host browser through OpenURI; no host spawning permission. |
-| Self-updates | Update UI is absent; no updater request or installation is possible in the sandbox. |
+| Area           | Required evidence                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------- |
+| Login          | Google login window opens; sign in; library loads; restart preserves session; sign out removes access.      |
+| Playback       | Search, play/pause, seek, next/previous; audible output; resume after minimizing; supported stream codecs.  |
+| Lyrics         | Load plain and synchronized lyrics; follow playback; switch providers; optional romanization.               |
+| Downloads      | Download a permitted track; restart; play without network; remove it; files remain inside private app data. |
+| Media controls | Desktop identifies YuMusic; metadata/artwork update; media keys, seek, and desktop play/pause work.         |
+| Portal links   | An external HTTPS link opens in the host browser through OpenURI; no host spawning permission.              |
+| Self-updates   | Update UI is absent; no updater request or installation is possible in the sandbox.                         |
 
-See `validation.md` for the evidence recorded in this environment.
+Record the application version, architecture, and results when validating a build.

@@ -4,6 +4,7 @@
 //   bun scripts/forgejo-release.ts publish   # once per platform build job
 //   bun scripts/forgejo-release.ts latest    # once after all platform jobs
 //   bun scripts/forgejo-release.ts publish-flatpak # standalone Flatpak bundle
+//   bun scripts/forgejo-release.ts publish-android # signed universal APK
 //
 // Required environment:
 //   FORGEJO_URL         base URL, e.g. https://git.yumeo.dev
@@ -267,6 +268,20 @@ async function publishFlatpak() {
 	console.log(`Published Flatpak: ${basename(path)}`);
 }
 
+/** Android APKs use Android signing and do not enter the desktop updater. */
+async function publishAndroid() {
+	const bundleDir = process.env.BUNDLE_DIR ?? "android-dist";
+	const path = `${bundleDir}/YuMusic_${version}_universal.apk`;
+	if (!(await file(path).exists()))
+		throw new Error(`Android APK not found: ${path}`);
+	const release = await ensureRelease(
+		tag,
+		() => process.env.RELEASE_NOTES ?? releaseNotes(),
+	);
+	await upload(release, path);
+	console.log(`Published Android APK: ${basename(path)}`);
+}
+
 function isNewerVersion(candidate: string, current: string): boolean {
 	const parse = (value: string) =>
 		value
@@ -349,8 +364,10 @@ if (command === "publish") {
 	await latest();
 } else if (command === "publish-flatpak") {
 	await publishFlatpak();
+} else if (command === "publish-android") {
+	await publishAndroid();
 } else {
 	throw new Error(
-		"Usage: bun scripts/forgejo-release.ts <publish|publish-flatpak|latest>",
+		"Usage: bun scripts/forgejo-release.ts <publish|publish-flatpak|publish-android|latest>",
 	);
 }

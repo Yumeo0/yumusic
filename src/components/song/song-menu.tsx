@@ -25,6 +25,7 @@ import {
 	removeDownloads,
 	useDownloads,
 } from "@/lib/downloads/downloads";
+import { preventSwipeContextMenu } from "@/lib/motion/swipe-context-menu";
 import { shareSong } from "@/lib/services/share";
 import { type Settings, useSettings } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
@@ -163,7 +164,7 @@ export function SongContextMenu({
 
 	return (
 		<>
-			<ContextMenu.Root>
+			<ContextMenu.Root onOpenChange={preventSwipeContextMenu}>
 				<ContextMenu.Trigger
 					className={cn("context-menu-highlight", className)}
 				>

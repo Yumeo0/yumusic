@@ -16,14 +16,22 @@ has loaded and work both on a fresh launch and in an already running app.
 
 Native regression checks:
 
+```sh
+cd src-tauri/gen/android
+./gradlew :app:testArm64DebugUnitTest -x :app:rustBuildArm64Debug --tests dev.yumeo.yumusic.IncomingLinksTest
+```
+
+On Windows, use `gradlew.bat`:
+
 ```powershell
 cd src-tauri/gen/android
 ./gradlew.bat :app:testArm64DebugUnitTest -x :app:rustBuildArm64Debug --tests dev.yumeo.yumusic.IncomingLinksTest
 ```
 
-Intent delivery on a device (use `dev.yumeo.yumusic` for a release build):
+Intent delivery on a device (use `dev.yumeo.yumusic` for a release build).
+Replace the example handle and playlist ID with a public profile and playlist:
 
 ```sh
-adb shell am start -W -a android.intent.action.VIEW -d 'https://music.youtube.com/@_yumeo_' dev.yumeo.yumusic.debug
-adb shell am start -W -a android.intent.action.VIEW -d 'https://music.youtube.com/playlist?list=PLBVxMRxBgGxYU6rP6w29diBkSXBSZ3hqa' dev.yumeo.yumusic.debug
+adb shell am start -W -a android.intent.action.VIEW -d 'https://music.youtube.com/@channel-handle' dev.yumeo.yumusic.debug
+adb shell am start -W -a android.intent.action.VIEW -d 'https://music.youtube.com/playlist?list=PLAYLIST_ID' dev.yumeo.yumusic.debug
 ```

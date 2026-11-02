@@ -17,6 +17,7 @@ import {
 	useDownloads,
 	usePlaylistDownloaded,
 } from "@/lib/downloads/downloads";
+import { preventSwipeContextMenu } from "@/lib/motion/swipe-context-menu";
 import { shareLink } from "@/lib/services/share";
 import {
 	readCachedPlaylistSongs,
@@ -150,7 +151,7 @@ export function PlaylistContextMenu({
 
 	return (
 		<>
-			<ContextMenu.Root>
+			<ContextMenu.Root onOpenChange={preventSwipeContextMenu}>
 				<ContextMenu.Trigger
 					className={cn(highlight && "context-menu-highlight", className)}
 				>

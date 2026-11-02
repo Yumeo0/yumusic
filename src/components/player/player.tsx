@@ -17,13 +17,19 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useRoomRole } from "@/lib/listen-together/room";
+import { useMiniPlayerTrackSwipe } from "@/lib/motion/mini-player-swipe";
 import { useNowPlayingSwipe } from "@/lib/motion/now-playing-motion";
+import { playerSwipeHandlers } from "@/lib/motion/player-swipe-handlers";
 import {
 	toggleNowPlaying,
 	toggleQueue,
 	useQueueOpen,
 } from "@/lib/player/player-ui";
-import { useMediaTime, useSystemVolume } from "@/lib/utils/hooks";
+import {
+	useMediaQuery,
+	useMediaTime,
+	useSystemVolume,
+} from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
 import { AlbumLink } from "../song/album-link";
@@ -33,6 +39,7 @@ import { ProgressBar } from "./waveform";
 
 export function Player() {
 	const systemVolume = useSystemVolume();
+	const compact = useMediaQuery("(max-width: 767.98px)");
 	const {
 		currentSong,
 		currentAlbum,
@@ -60,12 +67,21 @@ export function Player() {
 		);
 	});
 
+	const trackRef = useRef<HTMLDivElement>(null);
+	const trackSwipe = useMiniPlayerTrackSwipe({
+		trackRef,
+		enabled: !!currentSong,
+		hasNext,
+		hasPrevious,
+		next,
+		previous,
+	});
 	return (
 		<footer
 			className="fixed inset-x-0 bottom-0 z-46 max-md:bottom-[calc(3.75rem+var(--safe-area-bottom))] max-md:pb-1.5 cursor-default border-t border-foreground/8 bg-background/85 backdrop-blur-xl transition-colors duration-200 hover:bg-background/95"
 			data-mini-player
 			onClick={currentSong ? toggleNowPlaying : undefined}
-			{...swipeHandlers}
+			{...playerSwipeHandlers(swipeHandlers, trackSwipe)}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
 			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
@@ -85,10 +101,14 @@ export function Player() {
 			    feedback while one of them is hovered — matching the fact that
 			    clicking a control doesn't open the fullscreen. */}
 			<div
-				className="group grid h-17 touch-none grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-4 sm:px-5"
+				className="group grid h-17 touch-none grid-cols-[1fr_auto_1fr] max-md:grid-cols-[minmax(0,1fr)_auto_auto_auto] max-md:gap-1 items-center gap-4 px-4 sm:px-5"
 				ref={swipeRowRef}
 			>
-				<div className="flex min-w-0 items-center gap-3">
+				<div
+					className="flex min-w-0 items-center gap-3"
+					data-mini-track
+					ref={trackRef}
+				>
 					{currentSong ? (
 						<SongContextMenu song={currentSong}>
 							<div className="flex min-w-0 flex-1 items-center gap-3 text-left">
@@ -145,7 +165,7 @@ export function Player() {
 										style={{ animationDelay: "60ms" }}
 									>
 										<span data-mini-artist>
-											<ArtistLinks song={currentSong} />
+											<ArtistLinks interactive={!compact} song={currentSong} />
 										</span>
 										{currentAlbum && (
 											<span title={`Album or single: ${currentAlbum.name}`}>
@@ -158,7 +178,10 @@ export function Player() {
 													·{" "}
 												</span>
 												<span data-mini-album>
-													<AlbumLink album={currentAlbum} />
+													<AlbumLink
+														album={currentAlbum}
+														interactive={!compact}
+													/>
 												</span>
 											</span>
 										)}
@@ -182,9 +205,12 @@ export function Player() {
 				</div>
 
 				{/* Transport */}
-				<div className="flex items-center gap-1 sm:gap-2" data-mini-controls>
+				<div
+					className="flex items-center gap-1 sm:gap-2 max-md:contents"
+					data-mini-controls
+				>
 					<div
-						className="player-ctl shrink-0"
+						className="player-ctl shrink-0 max-md:col-start-2 max-md:row-start-1"
 						data-mini-room
 						onClick={(e) => e.stopPropagation()}
 					>
@@ -192,7 +218,7 @@ export function Player() {
 					</div>
 					<button
 						aria-label="Previous"
-						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						data-mini-prev
 						disabled={!currentSong || !hasPrevious}
 						onClick={(e) => {
@@ -206,7 +232,7 @@ export function Player() {
 					<button
 						aria-label={isPlaying ? "Pause" : "Play"}
 						className={cn(
-							"player-ctl grid size-11 place-items-center rounded-full bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90 disabled:opacity-40",
+							"player-ctl grid size-11 place-items-center rounded-full max-md:col-start-3 max-md:row-start-1 bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90 disabled:opacity-40",
 						)}
 						data-mini-play
 						disabled={!currentSong}
@@ -224,7 +250,7 @@ export function Player() {
 					</button>
 					<button
 						aria-label="Next"
-						className="player-ctl grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
 						data-mini-next
 						disabled={!currentSong || !hasNext}
 						onClick={(e) => {
@@ -246,9 +272,8 @@ export function Player() {
 					)}
 				</div>
 
-				{/* Ratings, audio devices, queue and timecodes (desktop only — phones use the
-			    now-playing screen, where volume follows the hardware keys) */}
-				<div className="flex items-center justify-end gap-3 max-md:hidden">
+				{/* The audio center stays available on mobile; extra utilities are desktop-only. */}
+				<div className="flex items-center justify-end gap-3 max-md:contents">
 					{/* Rating clicks must not open the fullscreen. Hidden on
 					    narrower windows, where the title needs the room. */}
 					<div
@@ -258,14 +283,17 @@ export function Player() {
 					>
 						<RatingButtons collapse songId={currentSong?.id ?? ""} />
 					</div>
-					<div data-mini-audio>
+					<div
+						className="max-md:col-start-4 max-md:row-start-1"
+						data-mini-audio
+					>
 						<DeviceButton />
 					</div>
 
 					<button
 						aria-label="Toggle queue"
 						className={cn(
-							"player-ctl grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-90",
+							"player-ctl grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-90 max-md:hidden",
 							isQueueOpen
 								? "bg-primary/12 text-primary"
 								: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -281,11 +309,13 @@ export function Player() {
 						<ListMusic className="size-4.5" />
 					</button>
 
-					<MiniTime
-						knownDuration={knownDuration}
-						songId={currentSong?.id ?? ""}
-						videoElementRef={videoElementRef}
-					/>
+					<div className="max-md:hidden">
+						<MiniTime
+							knownDuration={knownDuration}
+							songId={currentSong?.id ?? ""}
+							videoElementRef={videoElementRef}
+						/>
+					</div>
 				</div>
 			</div>
 		</footer>

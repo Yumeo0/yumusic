@@ -3,6 +3,7 @@ import { ArrowUpRight, AudioLines, Share2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePlayer } from "@/contexts/player-context";
+import { preventSwipeContextMenu } from "@/lib/motion/swipe-context-menu";
 import { shareLink } from "@/lib/services/share";
 import { showToast } from "@/lib/stores/toast";
 import { getArtistMixSongs } from "@/lib/youtube/youtube-client";
@@ -28,7 +29,7 @@ export function ArtistContextMenu({
 		}
 	};
 	return (
-		<ContextMenu.Root>
+		<ContextMenu.Root onOpenChange={preventSwipeContextMenu}>
 			<ContextMenu.Trigger className="context-menu-highlight contents">
 				{children}
 			</ContextMenu.Trigger>

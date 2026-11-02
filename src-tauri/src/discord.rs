@@ -1,22 +1,27 @@
+#[cfg(not(target_os = "android"))]
 use std::sync::Mutex;
+#[cfg(not(target_os = "android"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(not(target_os = "android"))]
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Discord IPC client plus the application id it is connected to.
+#[cfg(not(target_os = "android"))]
 struct DiscordState {
 	client: Option<DiscordIpcClient>,
 	app_id: String,
 }
 
+#[cfg(not(target_os = "android"))]
 static DISCORD: Mutex<Option<DiscordState>> = Mutex::new(None);
 
 /// Discord application id shipped with the app; the presence renders under
 /// this identity. Users can override it in settings with their own app.
 const DEFAULT_APP_ID: &str = "1544382362924613854";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackPresence {
 	pub title: String,
@@ -32,6 +37,7 @@ pub struct TrackPresence {
 }
 
 /// Discord caps presence fields (byte length); keep text within them.
+#[cfg(not(target_os = "android"))]
 fn clamp(text: &str, max: usize) -> String {
 	if text.len() <= max {
 		return text.to_owned();
@@ -43,6 +49,7 @@ fn clamp(text: &str, max: usize) -> String {
 	text[..end].to_owned()
 }
 
+#[cfg(not(target_os = "android"))]
 fn now_ms() -> i64 {
 	SystemTime::now()
 		.duration_since(UNIX_EPOCH)
@@ -51,6 +58,7 @@ fn now_ms() -> i64 {
 }
 
 /// Connects (or re-connects when the app id changed) and returns the client.
+#[cfg(not(target_os = "android"))]
 fn connect<'a>(
 	state: &'a mut DiscordState,
 	app_id: &str,
@@ -71,8 +79,8 @@ fn connect<'a>(
 
 /// Sets the listening activity for the current track. No-ops (after clearing)
 /// when no Discord application id is configured.
-#[tauri::command]
-pub fn set_discord_activity(track: TrackPresence) -> Result<(), String> {
+#[cfg(not(target_os = "android"))]
+fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
 	let state = guard.get_or_insert_with(|| DiscordState {
 		client: None,
@@ -140,8 +148,8 @@ pub fn set_discord_activity(track: TrackPresence) -> Result<(), String> {
 }
 
 /// Removes the presence; safe to call when never connected.
-#[tauri::command]
-pub fn clear_discord_activity() -> Result<(), String> {
+#[cfg(not(target_os = "android"))]
+fn clear_desktop_activity() -> Result<(), String> {
 	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
 	if let Some(state) = guard.as_mut() {
 		if let Some(client) = state.client.as_mut() {
@@ -153,12 +161,66 @@ pub fn clear_discord_activity() -> Result<(), String> {
 
 /// Teardown on app exit: drop presence and close the IPC connection.
 pub fn shutdown() {
-	if let Ok(mut guard) = DISCORD.lock() {
-		if let Some(state) = guard.as_mut() {
-			if let Some(mut client) = state.client.take() {
-				let _ = client.clear_activity();
-				let _ = client.close();
+	#[cfg(not(target_os = "android"))]
+	{
+		if let Ok(mut guard) = DISCORD.lock() {
+			if let Some(state) = guard.as_mut() {
+				if let Some(mut client) = state.client.take() {
+					let _ = client.clear_activity();
+					let _ = client.close();
+				}
 			}
 		}
 	}
+}
+
+#[tauri::command]
+pub async fn set_discord_activity(track: TrackPresence) -> Result<(), String> {
+	#[cfg(target_os = "android")]
+	{
+		let data = serde_json::to_string(
+			&serde_json::json!({ "applicationId": DEFAULT_APP_ID, "track": track }),
+		)
+		.map_err(|e| e.to_string())?;
+		android_presence(Some(data)).await
+	}
+	#[cfg(not(target_os = "android"))]
+	set_desktop_activity(track)
+}
+
+#[tauri::command]
+pub async fn clear_discord_activity() -> Result<(), String> {
+	#[cfg(target_os = "android")]
+	{
+		android_presence(None).await
+	}
+	#[cfg(not(target_os = "android"))]
+	clear_desktop_activity()
+}
+
+#[cfg(target_os = "android")]
+async fn android_presence(data: Option<String>) -> Result<(), String> {
+	use tauri_runtime_wry::wry::prelude::{dispatch, jni::objects::JValue};
+	let (tx, rx) = tokio::sync::oneshot::channel();
+	dispatch(move |env, activity, _| {
+		let result = (|| {
+			if let Some(data) = data {
+				let payload = env.new_string(data)?;
+				env.call_method(
+					activity,
+					"updateDiscordPresence",
+					"(Ljava/lang/String;)V",
+					&[JValue::Object(&payload)],
+				)?;
+			} else {
+				env.call_method(activity, "clearDiscordPresence", "()V", &[])?;
+			}
+			Ok::<(), tauri_runtime_wry::wry::prelude::jni::errors::Error>(())
+		})();
+		if result.is_err() {
+			let _ = env.exception_clear();
+		}
+		let _ = tx.send(result.map_err(|e| e.to_string()));
+	});
+	rx.await.map_err(|e| e.to_string())?
 }

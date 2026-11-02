@@ -22,7 +22,16 @@ MP4 and WebM use a time-based extractor seek map. Downloaded audio plays directl
 from its local file. Missing MP4/WebM seek indexes are rebuilt from fragment
 headers on the native loader thread and cached for the track's lifetime.
 
-Backgrounding the app or locking the screen keeps the playback service running.
+The service explicitly registers its media session at creation, before any
+external controller binds. This lets Media3 publish the notification and promote
+playback to a foreground service when JNI starts a track. Without registration,
+Android treats it as an idle background service and can stop it after screen lock.
+The playback bridge keeps the producer WebView resumed while music is active,
+including a short grace period for loading the next track, then lets it pause
+when playback stops. Backgrounding the app or locking the screen keeps foreground
+playback running.
+Volume changes do not emit synthetic playback-clock updates, and crossfade ticks
+share one pending animation frame to avoid IPC/animation feedback loops.
 Removing the app from recent tasks stops playback because its queue and SABR
 producer belong to the activity. Playback resumption after process death and
 Android Auto browsing are not implemented.
@@ -30,7 +39,15 @@ Android Auto browsing are not implemented.
 Rebuild and reinstall the Android app after changing Kotlin, the manifest or
 Rust commands; Vite hot reload alone cannot update the native service.
 
-Validation:
+Validation on Linux or macOS:
+
+```sh
+bun test src/lib/player/native-audio.test.ts
+cd src-tauri/gen/android
+./gradlew :app:testArm64DebugUnitTest -x :app:rustBuildArm64Debug
+```
+
+On Windows:
 
 ```powershell
 bun test src/lib/player/native-audio.test.ts

@@ -33,12 +33,17 @@ import { NativeAudioElement, nativeAudio } from "@/lib/player/native-audio";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
 import { mountSabrAudio } from "@/lib/player/sabr-audio";
 import { shuffleFrom } from "@/lib/player/shuffle";
+import { sleepTimer, useSleepTimer } from "@/lib/player/sleep-timer";
 import {
 	DEFAULT_VOLUME,
 	MAX_VOLUME,
 	volumeForDevice,
 } from "@/lib/player/volume";
-import { clampCrossfadeSeconds, useSettings } from "@/lib/stores/settings";
+import {
+	clampCrossfadeSeconds,
+	getSettings,
+	useSettings,
+} from "@/lib/stores/settings";
 import {
 	rememberSongVersion,
 	songVersionReplacement,
@@ -116,6 +121,9 @@ interface PlayerContextType {
 	/** Upcoming radio tracks shown below the queue's "Autoplay" separator. */
 	autoplayTracks: Song[];
 	autoplayEnabled: boolean;
+	/** The room host owns the shared autoplay setting. */
+	setAutoplayEnabled: (enabled: boolean) => void;
+	removeAutoplayAt: (index: number) => void;
 	/** Plays an autoplay track, promoting it and its predecessors to the queue. */
 	playAutoplayAt: (index: number, addedBy?: string) => void;
 	addToQueue: (songs: Song[], contributor?: string) => void;
@@ -369,6 +377,7 @@ function attributeLocal(song: Song): Song {
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
 	const systemVolume = useSystemVolume();
+	const activeSleepTimer = useSleepTimer();
 	const roomRole = useRoomRole();
 	const roomPlaying = useRoomPlaying();
 	const roomUsername = useRoomUsername();
@@ -376,6 +385,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const roomAutoplay = useRoomAutoplay();
 	const autoplayEnabled =
 		roomRole === "guest" ? roomAutoplay : settings.autoplay;
+	const setAutoplayEnabled = useCallback(
+		(enabled: boolean) => {
+			if (listenRoom.getSnapshot().role !== "guest")
+				updateSettings({ autoplay: enabled });
+		},
+		[updateSettings],
+	);
 	const sharedRepeat = useRoomRepeat();
 	const repeatMode = sharedRepeat ?? settings.repeatMode;
 	const setRepeatMode = useCallback(
@@ -801,6 +817,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			const advance = () => {
 				if (crossfadeRef.current !== state) return;
+				// Both native timeupdate and rAF can drive this ramp. Replace
+				// the pending frame instead of spawning another animation loop.
+				if (crossfadeRafRef.current !== null) {
+					cancelAnimationFrame(crossfadeRafRef.current);
+					crossfadeRafRef.current = null;
+				}
 				// Progress comes from the audio clock, not wall time, so the
 				// ramp stays aligned even if the app is throttled in the
 				// background between steps.
@@ -939,7 +961,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 */
 	const updateCrossfade = useCallback(() => {
 		const seconds =
-			settings.crossfade && !roomRole
+			settings.crossfade && !roomRole && !activeSleepTimer
 				? clampCrossfadeSeconds(settings.crossfadeSeconds)
 				: 0;
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
@@ -1018,6 +1040,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}
 	}, [
 		roomRole,
+		activeSleepTimer,
 		settings.crossfade,
 		settings.crossfadeSeconds,
 		settings.autoplay,
@@ -1441,11 +1464,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const next = useCallback(async () => {
-		const nextIndex = nextQueueIndex(currentIndex, queue.length, repeatMode);
+		const queueTimer = sleepTimer.getSnapshot()?.mode === "queue";
+		const nextIndex = nextQueueIndex(
+			currentIndex,
+			queue.length,
+			queueTimer ? "off" : repeatMode,
+		);
+		if (queueTimer && nextIndex === null) return;
 		if (nextIndex === null) {
 			// Queue finished: move into the autoplay section. Use the visible
 			// suggestions when present, otherwise fetch a mix now.
 			if (!currentSong || !settings.autoplay) return;
+			const request = loadRequestRef.current;
 			let upcoming = autoplayTracks;
 			if (upcoming.length === 0) {
 				if (autoplayLoadingRef.current) return;
@@ -1457,6 +1487,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				}
 				if (upcoming.length === 0) return;
 			}
+			// A queue toggle or track change can happen while radio is loading.
+			if (
+				!getSettings().autoplay ||
+				request !== loadRequestRef.current ||
+				sleepTimer.getSnapshot()?.mode === "queue"
+			)
+				return;
 			const [upNext, ...rest] = upcoming;
 			setAutoplayTracks(rest);
 			const extended = [...queue, upNext];
@@ -1494,18 +1531,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 */
 	const handleEnded = useCallback(
 		(deckIndex: number) => {
-			if (
-				deckIndex !== activeDeckRef.current ||
-				listenRoom.getSnapshot().role === "guest"
-			)
+			if (deckIndex !== activeDeckRef.current) return;
+			const queueTimer = sleepTimer.getSnapshot()?.mode === "queue";
+			if (sleepTimer.trackEnded(currentIndex, queue.length)) {
+				abortCrossfade();
+				decksRef.current[deckIndex]?.ref.current?.pause();
+				setIsPlaying(false);
+				if (listenRoom.getSnapshot().role === "guest")
+					listenRoom.setGuestAudio("remote");
+				showToast("Sleep timer finished");
 				return;
+			}
+			if (listenRoom.getSnapshot().role === "guest") return;
 			const nextIndex = nextQueueIndex(
 				currentIndex,
 				queue.length,
-				repeatMode,
+				queueTimer ? "off" : repeatMode,
 				true,
 			);
-			if (currentSong && (repeatMode === "one" || nextIndex === currentIndex)) {
+			if (
+				!queueTimer &&
+				currentSong &&
+				(repeatMode === "one" || nextIndex === currentIndex)
+			) {
 				listeningSession.reset();
 				void playSong(currentSong);
 				return;
@@ -1522,6 +1570,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			void next();
 		},
 		[
+			abortCrossfade,
 			commitCrossfade,
 			next,
 			currentIndex,
@@ -1725,6 +1774,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		setQueueState(songs);
 		setCurrentIndex(index);
 	}, []);
+	const removeAutoplayAt = useCallback((index: number) => {
+		if (listenRoom.getSnapshot().role !== "guest")
+			setAutoplayTracks((tracks) => tracks.filter((_, i) => i !== index));
+	}, []);
 	const applyRoomAutoplay = useCallback((songs: Song[]) => {
 		setAutoplayTracks(songs);
 	}, []);
@@ -1782,6 +1835,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			currentIndex,
 			autoplayTracks,
 			autoplayEnabled,
+			setAutoplayEnabled,
+			removeAutoplayAt,
 			playAutoplayAt: localControl(playAutoplayAt, (index) => ({
 				type: "autoplay",
 				index,
@@ -1853,6 +1908,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			currentIndex,
 			autoplayTracks,
 			autoplayEnabled,
+			setAutoplayEnabled,
+			removeAutoplayAt,
 			playAutoplayAt,
 			enqueue,
 			setQueue,

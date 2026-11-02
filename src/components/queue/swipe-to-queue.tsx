@@ -1,136 +1,177 @@
-import { ListPlus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ListEnd, ListStart, Trash2 } from "lucide-react";
+import {
+	type CSSProperties,
+	type ReactNode,
+	type TouchEvent,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { type Song, usePlayer } from "@/contexts/player-context";
+import { useSpringOffset } from "@/lib/motion/use-spring-offset";
+import {
+	NEXT_THRESHOLD,
+	type SwipeAction,
+	swipeDetent,
+	swipeDetentOffset,
+} from "@/lib/player/swipe-action";
+import { haptic } from "@/lib/utils/haptics";
 import { cn } from "@/lib/utils/utils";
 
 interface SwipeToQueueProps {
-	children: React.ReactNode;
-	/** Called when the row is released past the swipe threshold */
+	children: ReactNode;
+	song: Song;
 	onQueue: () => void;
+	onRemove?: () => void;
+	className?: string;
+	style?: CSSProperties;
 }
 
-const QUEUE_THRESHOLD = 80;
-const MAX_DRAG = 112;
-const DRAG_START_SLOP = 8;
-/** How long a completed swipe keeps suppressing the synthetic click. */
-const CLICK_SUPPRESS_MS = 350;
-
-/**
- * Spotify-style gesture wrapper for track rows: dragging the row to the
- * right past the threshold adds it to the queue, with a hint icon fading
- * in underneath and a brief highlight + haptic tick on success.
- * Touch-only — mouse users keep the plain row — and vertical scrolling
- * stays native via `touch-action: pan-y`.
- */
-export function SwipeToQueue({ children, onQueue }: SwipeToQueueProps) {
-	const [drag, setDrag] = useState(0);
-	const [queued, setQueued] = useState(false);
+/** Horizontal touch actions with two right-swipe detents; scrolling stays native. */
+export function SwipeToQueue({
+	children,
+	song,
+	onQueue,
+	onRemove,
+	className,
+	style,
+}: SwipeToQueueProps) {
+	const { playNext } = usePlayer();
+	const [drag, springTo] = useSpringOffset();
+	const row = useRef<HTMLDivElement>(null);
+	const detent = useRef<SwipeAction>(null);
+	const [action, setAction] = useState<SwipeAction>(null);
+	const [direction, setDirection] = useState(1);
 	const start = useRef<{ x: number; y: number } | null>(null);
 	const axis = useRef<"horizontal" | "vertical" | null>(null);
-	// A completed swipe must not also fire the row's tap-to-play. Browsers
-	// synthesize a click after touchend, so swallow clicks until it passed.
 	const suppressClick = useRef(false);
-	const suppressTimer = useRef<number | null>(null);
-
+	const suppressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	useEffect(
 		() => () => {
-			if (suppressTimer.current !== null) {
-				window.clearTimeout(suppressTimer.current);
-			}
+			if (suppressTimer.current) clearTimeout(suppressTimer.current);
 		},
 		[],
 	);
-
-	const handleTouchStart = (event: React.TouchEvent) => {
-		const touch = event.touches[0];
-		if (!touch) return;
-		start.current = { x: touch.clientX, y: touch.clientY };
+	const finish = (cancelled: boolean) => {
+		if (!start.current) return;
+		const selected = detent.current;
+		start.current = null;
 		axis.current = null;
-		suppressClick.current = false;
-		if (suppressTimer.current !== null) {
-			window.clearTimeout(suppressTimer.current);
-			suppressTimer.current = null;
+		springTo(0);
+		if (row.current && suppressClick.current)
+			row.current.dataset.swipeContextUntil = String(performance.now() + 700);
+		if (!cancelled && selected) {
+			haptic("confirm");
+			if (selected === "remove") onRemove?.();
+			else if (selected === "queue") onQueue();
+			else playNext(song);
 		}
+		if (suppressClick.current)
+			suppressTimer.current = setTimeout(() => {
+				suppressClick.current = false;
+			}, 350);
 	};
-
-	const handleTouchMove = (event: React.TouchEvent) => {
+	const move = (event: TouchEvent) => {
+		if (event.touches.length !== 1) {
+			finish(true);
+			return;
+		}
 		const touch = event.touches[0];
 		const origin = start.current;
 		if (!touch || !origin) return;
+		if (
+			event.target instanceof Element &&
+			event.target.closest(".context-menu-highlight[data-popup-open]")
+		) {
+			finish(true);
+			return;
+		}
 		const dx = touch.clientX - origin.x;
 		const dy = touch.clientY - origin.y;
 		if (!axis.current) {
-			if (Math.abs(dx) < DRAG_START_SLOP && Math.abs(dy) < DRAG_START_SLOP) {
-				return;
-			}
-			// Lock to one axis so vertical list scrolling is never hijacked.
+			if (Math.max(Math.abs(dx), Math.abs(dy)) < 8) return;
 			axis.current = Math.abs(dx) > Math.abs(dy) ? "horizontal" : "vertical";
 		}
-		if (axis.current === "horizontal") {
-			suppressClick.current = true;
-			setDrag(Math.max(0, Math.min(dx, MAX_DRAG)));
+		if (axis.current !== "horizontal") return;
+		suppressClick.current = true;
+		const next = Math.max(onRemove ? -180 : 0, Math.min(dx, 260));
+		const selected = swipeDetent(next, detent.current, !!onRemove);
+		if (selected !== detent.current) {
+			haptic("tick");
+			detent.current = selected;
+			setAction(selected);
 		}
+		if (row.current) row.current.dataset.swipeContextUntil = "Infinity";
+		setDirection(next < 0 ? -1 : 1);
+		springTo(swipeDetentOffset(next, selected));
 	};
-
-	const handleTouchEnd = () => {
-		start.current = null;
-		axis.current = null;
-		if (drag >= QUEUE_THRESHOLD) {
-			onQueue();
-			setQueued(true);
-			window.setTimeout(() => setQueued(false), 1200);
-			if (typeof navigator.vibrate === "function") {
-				navigator.vibrate(15);
-			}
-		}
-		if (suppressClick.current) {
-			// The click follows this handler in the same task; reset shortly
-			// after so the next intentional tap plays normally.
-			suppressTimer.current = window.setTimeout(() => {
-				suppressClick.current = false;
-				suppressTimer.current = null;
-			}, CLICK_SUPPRESS_MS);
-		}
-		setDrag(0);
-	};
-
-	const handleTouchCancel = () => {
-		start.current = null;
-		axis.current = null;
-		setDrag(0);
-	};
-
-	const handleClickCapture = (event: React.MouseEvent) => {
-		if (!suppressClick.current) return;
-		event.preventDefault();
-		event.stopPropagation();
-	};
-
+	const Icon =
+		direction < 0 ? Trash2 : action === "queue" ? ListEnd : ListStart;
+	const label =
+		direction < 0
+			? "Remove"
+			: action === "queue"
+				? "Add to queue"
+				: "Play next";
 	return (
-		<div className="cv-row relative overflow-hidden">
+		<div
+			className={cn("cv-row relative overflow-hidden rounded-lg", className)}
+			onContextMenuCapture={(event) => {
+				if (
+					Number(row.current?.dataset.swipeContextUntil) > performance.now()
+				) {
+					event.preventDefault();
+					event.stopPropagation();
+				}
+			}}
+			ref={row}
+			style={style}
+		>
 			<span
 				aria-hidden
-				className="absolute top-1/2 left-3.5 -translate-y-1/2 text-primary transition-opacity duration-100"
-				style={{ opacity: Math.min(drag / QUEUE_THRESHOLD, 1) }}
+				className={cn(
+					"absolute inset-y-0 flex items-center gap-2 text-xs font-medium",
+					direction < 0 ? "right-3 text-destructive" : "left-3 text-primary",
+				)}
+				style={{ opacity: Math.min(Math.abs(drag) / NEXT_THRESHOLD, 1) }}
 			>
-				<ListPlus className="size-5" />
+				<Icon className="size-5 shrink-0" />
+				{action && Math.abs(drag) > 48 && <span>{label}</span>}
 			</span>
 			<div
-				className={cn(
-					"relative touch-pan-y",
-					queued && "bg-primary/10 transition-colors duration-300",
-				)}
-				onClickCapture={handleClickCapture}
-				onTouchCancel={handleTouchCancel}
-				onTouchEnd={handleTouchEnd}
-				onTouchMove={handleTouchMove}
-				onTouchStart={handleTouchStart}
+				className={cn("relative touch-pan-y", drag !== 0 && "bg-background")}
+				data-swipe-dismiss-ignore
+				onClickCapture={(event) => {
+					if (suppressClick.current) {
+						event.preventDefault();
+						event.stopPropagation();
+					}
+				}}
+				onTouchCancelCapture={() => finish(true)}
+				onTouchEndCapture={(event) => {
+					// A removal unmounts this row: cancel the browser click too,
+					// so it cannot land on the next row under the same finger.
+					if (suppressClick.current) event.preventDefault();
+					finish(false);
+				}}
+				onTouchMoveCapture={move}
+				onTouchStartCapture={(event) => {
+					if (event.touches.length !== 1) {
+						finish(true);
+						return;
+					}
+					const touch = event.touches[0];
+					start.current = { x: touch.clientX, y: touch.clientY };
+					axis.current = null;
+					detent.current = null;
+					setAction(null);
+					if (row.current) row.current.dataset.swipeContextUntil = "0";
+					suppressClick.current = false;
+					if (suppressTimer.current) clearTimeout(suppressTimer.current);
+				}}
 				style={{
 					transform: `translateX(${drag}px)`,
-					// Only the row under the finger is promoted to its own
-					// compositor layer; setting `will-change` on every row in a
-					// long playlist forces hundreds of layers and tanks hover and
-					// scroll performance.
-					willChange: drag > 0 ? "transform" : undefined,
+					willChange: drag ? "transform" : undefined,
 				}}
 			>
 				{children}

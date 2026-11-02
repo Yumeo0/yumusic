@@ -3,6 +3,8 @@ package dev.yumeo.yumusic.audio
 import android.content.Context
 import android.content.Intent
 import android.webkit.WebView
+import android.os.Handler
+import android.os.Looper
 import androidx.media3.common.util.UnstableApi
 import java.lang.ref.WeakReference
 import org.json.JSONObject
@@ -14,8 +16,34 @@ object AudioBridge {
   private val pending = ArrayDeque<JSONObject>()
   private var metadata: JSONObject? = null
 
-  fun attach(webView: WebView) { view = WeakReference(webView) }
-  fun detach(webView: WebView?) { if (view.get() === webView) view.clear() }
+  private val main = Handler(Looper.getMainLooper())
+  private var paused = false
+  private var playbackRequested = false
+  private var playbackActive = false
+  private val suspendView = Runnable { playbackActive = false; applyLifecycle() }
+
+  private fun applyLifecycle() {
+    val target = view.get() ?: return
+    if (!paused || playbackActive) target.onResume() else target.onPause()
+  }
+  fun hostPaused() { paused = true; applyLifecycle() }
+  fun hostResumed() { paused = false; applyLifecycle() }
+  fun playback(active: Boolean) {
+    if (playbackRequested == active) return
+    playbackRequested = active
+    main.removeCallbacks(suspendView)
+    if (active) { playbackActive = true; applyLifecycle() }
+    // Leave time for the next track's asynchronous attestation/stream load.
+    else main.postDelayed(suspendView, 35000)
+  }
+  fun attach(webView: WebView) { view = WeakReference(webView); applyLifecycle() }
+  fun detach(webView: WebView?) {
+    if (view.get() === webView) {
+      view.clear()
+      main.removeCallbacks(suspendView)
+      playbackActive = playbackRequested
+    }
+  }
   fun emit(event: JSONObject) {
     val target = view.get() ?: return
     target.post {

@@ -384,14 +384,37 @@ html[data-morph-dragging] .np-morph {
 	clip-path: inset(0 calc(var(--np-item-cut, 0px) * var(--np-dismiss, 0)) 0 0);
 }
 
-/* Mobile header controls ride the sheet with its background and fade together.
-   Cancelling the page slide here made them appear pinned during dismissal. */
+/* Mobile keeps unmatched controls in place and fades them near the start. */
 @media (max-width: 767.98px) {
+	.np-overlay [data-np-backdrop] {
+		opacity: 1;
+	}
+	.np-overlay[data-player-motion] [data-np-secondary] {
+		opacity: clamp(
+			0,
+			calc(1 - var(--np-item-fade, 1) * var(--np-dismiss, 0) * 16),
+			1
+		);
+	}
+	.np-overlay[data-player-motion] [data-np-secondary][data-np-unpaired] {
+		transform: translateY(calc(-1 * var(--np-slide, 0px)));
+	}
+	/* Compact playback uses swipes, so these controls have no footer target. */
+	.np-overlay[data-player-motion] :is([data-np-prev], [data-np-next]) {
+		transform: translateY(calc(-1 * var(--np-slide, 0px)));
+		opacity: calc(
+			var(--np-control-opacity, 1) *
+			clamp(0, calc(1 - var(--np-dismiss, 0) * 16), 1)
+		);
+	}
+	.np-overlay[data-player-motion] :is([data-np-prev], [data-np-next]):disabled {
+		--np-control-opacity: 0.25;
+	}
 	.np-overlay[data-player-motion]
 		[data-np-chrome]
 		[data-np-secondary]:not([data-np-room]) {
-		transform: none;
-		opacity: calc(1 - var(--np-dismiss, 0));
+		transform: translateY(calc(-1 * var(--np-slide, 0px)));
+		opacity: clamp(0, calc(1 - var(--np-dismiss, 0) * 16), 1);
 	}
 }
 
@@ -414,4 +437,11 @@ html[data-player-morphing] [data-player-morph-target] * {
 html[data-player-morphing] [data-mini-player] [data-player-morph-extra] {
 	opacity: var(--player-reveal, 0);
 	transform: translateY(calc((1 - var(--player-reveal, 0)) * 16px));
+}
+
+@media (max-width: 767.98px) {
+	html[data-player-morphing] [data-mini-player] [data-player-morph-extra] {
+		opacity: clamp(0, calc(1 - (1 - var(--player-reveal, 0)) * 16), 1);
+		transform: none;
+	}
 }

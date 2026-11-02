@@ -1,14 +1,54 @@
 # Account sync
 
-YuMusic uses one hosted Supabase project for development and release builds:
-`cousozghjxwjwnnnlnjd`. Both connect to the same accounts and data. The project
-URL and publishable key in `src/lib/sync/client.ts` are public application
-identifiers. Never replace the publishable key with a secret or service-role key.
+Account sync uses Supabase Auth, Postgres, and the `room-identity` Edge Function.
+Users enable sync from Settings after signing into YouTube; no backend setup is
+needed when using an existing app distribution.
+
+## Backend setup for a custom build
+
+1. Create a Supabase project, or provide a compatible self-hosted Supabase stack.
+   Separate projects can isolate development from production; builds that should
+   share accounts and settings must use the same backend.
+2. In `src/lib/sync/client.ts`, set `SUPABASE_URL` to the backend's public URL
+   and `PUBLISHABLE_KEY` to its publishable API key. These are currently source
+   constants, not environment variables, so rebuild the app after changing them.
+   Never put a secret or service-role key in the app.
+3. Apply the migrations in `supabase/migrations/` in filename order and deploy
+   `supabase/functions/room-identity/` to that backend. Configure Google Auth as
+   described below. Auth providers and credentials are not configured by the
+   checked-in `supabase/config.toml`.
+
+For a hosted project, install the
+[Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started)
+and run the following from the repository root. Replace `PROJECT_REF` with the
+target project's reference. These commands use Supabase CLI 3.x. Check
+`supabase --version` and command help if using a different CLI version; the
+`--remote` database flag below explicitly selects the linked hosted database.
+
+```sh
+supabase login
+supabase link --project-ref PROJECT_REF
+supabase db push --remote --dry-run
+supabase db push --remote
+supabase functions deploy room-identity
+```
+
+Review the dry run before applying it. Deployment uses the function's checked-in
+`verify_jwt = false` setting: targeted fingerprint lookups are public, while the
+function validates Auth bearer tokens and ownership proofs for writes. The
+function needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in its server-side
+runtime; hosted Supabase supplies these. Keep that privileged key on the server.
+
+For self-hosting, deploy migrations, Auth, and the Edge Function runtime using
+the [Supabase self-hosting guide](https://supabase.com/docs/guides/self-hosting).
+Use the public gateway URL in the app and the Google callback configuration.
+The same RLS policies and function authentication checks are required.
 
 ## Google setup
 
 1. Create a Google OAuth **Web application** client. Its authorized redirect URI
-   is `https://cousozghjxwjwnnnlnjd.supabase.co/auth/v1/callback`.
+   is `https://PROJECT_REF.supabase.co/auth/v1/callback` for a hosted project.
+   Use the callback URL shown by the target backend's Google provider settings.
 2. Enable Google under Supabase Authentication → Sign In / Providers. Enter the
    Google client ID and secret in the dashboard, keeping nonce checks enabled.
    No Google client secret belongs in this repository or the app.
@@ -22,6 +62,13 @@ identifiers. Never replace the publishable key with a secret or service-role key
 5. Sign in to YouTube in YuMusic. Sync authorization then opens for that same
    Google account. Existing YouTube sessions can finish consent through
    Settings → Sync across devices → Enable sync.
+
+For browser builds, add each served origin to Google's **Authorized JavaScript
+origins** and the corresponding callback URL to Supabase's redirect allowlist.
+Use the actual scheme, host, and port; examples are `http://localhost:5173`
+and `http://127.0.0.1:5173`. Add a deployed web origin when hosting the frontend.
+The Supabase callback belongs under **Authorized redirect URIs**, not under
+JavaScript origins. See [Google provider setup](https://supabase.com/docs/guides/auth/social-login/auth-google).
 
 Native apps open the system browser. A one-use listener bound only to
 `127.0.0.1:43827` receives the authorization code at a random path. The app
@@ -72,9 +119,8 @@ Settings sync is optional: no preferences are uploaded before sync authorization
 for the current YouTube Google account.
 
 Rich presence uses `settings/discordRpc`. Default-off devices publish no initial
-value; disabling it after syncing creates a timestamped tombstone. An upgraded
-phone's default cannot overwrite the PC's enabled setting. Existing device-local
-preferences are preserved in sign-out backups during the upgrade.
+value; disabling it after syncing creates a timestamped tombstone. A new
+device's default cannot overwrite another device's enabled setting.
 
 Each account has a local journal with pending writes. Sign-out restores the
 device's pre-sync preference snapshot. Returning to an account restores its
@@ -118,12 +164,11 @@ local values only for keys that do not already exist in the cloud.
 
 ## Database changes and verification
 
-Migration files are under `supabase/migrations/`. The checked-in migrations have
-already been applied to the hosted project. Keep remote migration history in
-step with these files. The Supabase GitHub integration can deploy future
-migrations when its production deployment option is enabled; mirroring code alone
-does not run the app or implement sync. The checked-in config deliberately
-does not configure remote Auth providers or credentials.
+Migration files are under `supabase/migrations/`. Apply them to each backend used
+by a build and keep its migration history in step with these files. Deploy
+through the CLI or a configured CI integration. Mirroring a Git repository alone
+does not deploy database migrations or Edge Functions. Configure Auth providers
+and credentials separately on each backend.
 
 `supabase/tests/sync_security.sql` can be run in the Supabase SQL editor. It
 creates two temporary test accounts inside a transaction, verifies anonymous
@@ -182,14 +227,13 @@ ListenBrainz's enabled state and user token travel together in the private
 `settings/scrobbling` record. The token is accessible only through the account's
 RLS-protected sync records; it is never part of a room message or public device
 lookup. A fresh device with no scrobbling configured publishes no empty default
-record, so it cannot displace an existing PC configuration during first sync.
+record, so it cannot displace an existing device's configuration during first sync.
 Disabling scrobbling retains the token; disabling it and clearing the token removes
 the configuration with the same durable tombstone mechanism as other sync items.
 
-Earlier versions excluded scrobbling. Upgrade and restart both devices, run Sync
-now on the configured PC, then sync the other device. Conflict resolution uses
-actual edit times, so subsequent sync order does not determine which value wins. The upgrade preserves
-previously device-local scrobbling settings in existing sign-out backups.
+Enable sync on each device and use **Sync now** to request an immediate update.
+Conflict resolution uses actual edit times, so sync order does not determine
+which value wins.
 
 New sync fields are ignored by adapters that do not support them, including
 removing old queued echoes for unsupported keys from the local journal. They

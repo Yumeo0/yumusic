@@ -203,7 +203,7 @@ export function useNowPlayingSwipe(
 				event.touches.length !== 1 ||
 				!window.matchMedia(MOBILE_QUERY).matches ||
 				getNowPlayingOpen() === opening ||
-				getQueueOpen() ||
+				(!opening && getQueueOpen()) ||
 				(canStart && !canStart(event)) ||
 				(event.target instanceof Element &&
 					event.target.closest(

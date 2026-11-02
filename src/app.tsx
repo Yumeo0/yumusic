@@ -19,6 +19,7 @@ import {
 	useNavigate,
 } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { installMobileHaptics } from "@/lib/utils/haptics";
 import { CloudSync } from "./components/app/cloud-sync";
 import { Titlebar } from "./components/app/titlebar";
 import { Toaster } from "./components/app/toaster";
@@ -78,6 +79,8 @@ import {
 	getYouTubeSyncAccount,
 	setYouTubeSyncAccount,
 } from "./lib/sync/youtube-account";
+import { loadCoverCrop } from "./lib/utils/cover-crop";
+import { discordArtworkUrl } from "./lib/utils/discord-artwork";
 import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import {
@@ -122,6 +125,22 @@ function DiscordPresenceSync() {
 		artist,
 	);
 	const cover = currentSong?.thumbnail ?? "";
+	const [discordCover, setDiscordCover] = useState({ source: "", url: "" });
+	useEffect(() => {
+		let cancelled = false;
+		if (settings.discordRpc && cover) {
+			void loadCoverCrop(proxiedImageUrl(cover, 1024)).then((crop) => {
+				if (!cancelled)
+					setDiscordCover({
+						source: cover,
+						url: discordArtworkUrl(cover, crop),
+					});
+			});
+		}
+		return () => {
+			cancelled = true;
+		};
+	}, [cover, settings.discordRpc]);
 	const artistId =
 		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
 	const discordEnabled = settings.discordRpc;
@@ -173,33 +192,42 @@ function DiscordPresenceSync() {
 	useEffect(() => {
 		if (!discordEnabled || !songId) return;
 		const videoEl = videoElementRef?.current ?? null;
-		const elapsed = videoEl?.currentTime ?? 0;
-		invoke("set_discord_activity", {
-			track: {
-				title,
-				artist: formatArtistName(artist),
-				album: meta?.album?.name ?? null,
-				coverUrl: cover || null,
-				songUrl: `https://music.youtube.com/watch?v=${songId}`,
-				artistUrl: artistId
-					? `https://music.youtube.com/channel/${artistId}`
-					: null,
-				albumUrl: meta?.album?.id
-					? `https://music.youtube.com/playlist?list=${meta.album.id}`
-					: null,
-				playing: isPlaying,
-				elapsedSecs: elapsed,
-				durationSecs,
-			},
-		}).catch((error) => {
-			console.warn("[discord] presence update failed:", error);
-		});
+		const update = () =>
+			invoke("set_discord_activity", {
+				track: {
+					title,
+					artist: formatArtistName(artist),
+					album: meta?.album?.name ?? null,
+					coverUrl:
+						discordCover.source === cover ? discordCover.url || null : null,
+					songUrl: `https://music.youtube.com/watch?v=${songId}`,
+					artistUrl: artistId
+						? `https://music.youtube.com/channel/${artistId}`
+						: null,
+					albumUrl: meta?.album?.id
+						? `https://music.youtube.com/playlist?list=${meta.album.id}`
+						: null,
+					playing: isPlaying,
+					elapsedSecs: videoEl?.currentTime ?? 0,
+					durationSecs,
+				},
+			}).catch((error) => {
+				console.warn("[discord] presence update failed:", error);
+			});
+		void update();
+		videoEl?.addEventListener("seeked", update);
+		const retry = window.setInterval(update, 30_000);
+		return () => {
+			videoEl?.removeEventListener("seeked", update);
+			window.clearInterval(retry);
+		};
 	}, [
 		discordEnabled,
 		songId,
 		title,
 		artist,
 		cover,
+		discordCover,
 		artistId,
 		isPlaying,
 		durationSecs,
@@ -209,10 +237,10 @@ function DiscordPresenceSync() {
 
 	// Turning the feature off drops the presence immediately.
 	useEffect(() => {
-		if (!discordEnabled) {
+		if (!discordEnabled || !songId) {
 			invoke("clear_discord_activity").catch(() => undefined);
 		}
-	}, [discordEnabled]);
+	}, [discordEnabled, songId]);
 
 	return null;
 }
@@ -774,6 +802,7 @@ function AppShell({
 	handleLogin: () => void;
 	handleLogout: () => void;
 }) {
+	useEffect(installMobileHaptics, []);
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { pinned, unpin } = usePinnedPlaylists();

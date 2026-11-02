@@ -26,6 +26,9 @@ class PlaybackServiceTest {
       assertSame(service, PlaybackService.instance)
       val field = PlaybackService::class.java.getDeclaredField("session").apply { isAccessible = true }
       val session = field.get(service) as MediaSession
+      // JNI playback has no bound controller to register this session for us.
+      // An unregistered session never enters foreground and Android stops it.
+      assertEquals(listOf(session), service.sessions)
       service.metadata(JSONObject().put("canGoNext", true).put("canGoPrevious", false))
       assertTrue(session.player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM))
       assertFalse(session.player.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM))
@@ -36,6 +39,9 @@ class PlaybackServiceTest {
 	  file.writeBytes(javaClass.getResourceAsStream("/audio/fragmented.m4a")!!.readBytes())
 	  service.metadata(JSONObject().put("title", "Downloaded track").put("artist", "Artist"))
 	  service.command(JSONObject().put("op", "load").put("deck", 0).put("id", "local-track").put("path", file.absolutePath))
+      val sessionPlayer = session.player
+      service.command(JSONObject().put("op", "play").put("deck", 0).put("id", "local-track"))
+      assertSame("Repeated play must not rebuild the controller player", sessionPlayer, session.player)
 	  assertEquals("Downloaded track", session.player.mediaMetadata.title.toString())
 	  service.command(JSONObject().put("op", "stop").put("deck", 0).put("id", "old-track"))
 	  assertEquals("local-track", session.player.currentMediaItem!!.mediaId)

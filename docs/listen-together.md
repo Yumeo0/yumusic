@@ -69,12 +69,12 @@ The optional ICE endpoint returns an array of `RTCIceServer` objects, for exampl
 
 ```json
 [
-  { "urls": "stun:stun.example.com:3478" },
-  {
-    "urls": ["turn:turn.example.com:3478", "turns:turn.example.com:5349"],
-    "username": "temporary-username",
-    "credential": "temporary-credential"
-  }
+	{ "urls": "stun:stun.example.com:3478" },
+	{
+		"urls": ["turn:turn.example.com:3478", "turns:turn.example.com:5349"],
+		"username": "temporary-username",
+		"credential": "temporary-credential"
+	}
 ]
 ```
 
@@ -86,4 +86,4 @@ For local testing, keep the first instance running with `bun run tauri dev` and 
 
 `bun test src/lib/listen-together` covers profile persistence and account changes, message validation, timeline projection, host approval, shared state, stale revisions, profile edits, suggestions, decline/end-room cleanup and invalid connection inputs. Room lifecycle tests use an in-memory transport, not live WebRTC.
 
-Run `bun run build` for TypeScript and production bundling. Before releasing, test two packaged instances on separate networks, including a forced TURN relay, joining during playback, repeated tracks, buffering, seeks, reconnects, unavailable tracks, and Android background/foreground transitions. Real-device timing and platform WebRTC compatibility remain to be verified; playback currently catches up to the host after loading rather than using a room-wide ready/start barrier. Regenerate Flatpak dependency sources through the existing release workflow when packaging the new dependency.
+Run `bun run build` for TypeScript and production bundling. Before releasing, test two packaged instances on separate networks, including a forced TURN relay, joining during playback, repeated tracks, buffering, seeks, reconnects, unavailable tracks, and Android background/foreground transitions. Verify timing and WebRTC compatibility on each supported platform. Playback catches up to the host after loading rather than using a room-wide ready/start barrier. Regenerate Flatpak dependency sources when changing dependencies.

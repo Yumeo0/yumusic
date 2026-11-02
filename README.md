@@ -5,12 +5,23 @@ A Tauri app for YouTube Music.
 YuMusic is an independent project and is not affiliated with, endorsed by, or
 sponsored by Google or YouTube.
 
+## Getting started
+
+Install the package for your platform from the project's releases, then sign in
+to YouTube to access your library. Account sync is optional and uses the same
+Google account. See [account sync](docs/account-sync.md),
+[device playback](docs/connect.md), and [Listen together](docs/listen-together.md)
+for feature setup and usage.
+
+For building from source or running your own services, follow the
+[setup guide](docs/setup.md).
+
 ## Development
 
 Install Bun 1.4.4 or newer, Rust, and the native build prerequisites for your
 platform. Bun handles dependencies, JavaScript tooling, tests, and release scripts.
 
-On Arch Linux / CachyOS, install the WebKitGTK media runtime as well:
+On Arch Linux and derivatives, install the WebKitGTK media runtime as well:
 
 ```sh
 sudo pacman -S --needed webkit2gtk-4.1 gst-plugins-base gst-plugins-good gst-libav
@@ -29,8 +40,9 @@ bun run tauri dev
 For the frontend alone, run `bun run dev`.
 
 For Android, install the Android SDK and NDK and set `JAVA_HOME` to a JDK
-supported by the Gradle wrapper (Java 17–25; tested with Java 25). The project
+supported by the Gradle wrapper; Java 21 matches the release workflow. The project
 uses Gradle 9.1.0, Android Gradle Plugin 8.13.2, and Kotlin 2.3.21.
+Download the Discord Social SDK archive as described in [Android Discord presence](docs/android-discord.md).
 Run `bun run tauri android dev` to develop on a connected device.
 Android uses native Media3 audio playback with a foreground media service and
 equalizer session support. See [Android audio](docs/android-audio.md) for details.
@@ -60,6 +72,10 @@ Forgejo releases and the in-app updater use these same notes from the tagged
 version. Manually created tags need a matching changelog entry; the publishing
 workflow also accepts an explicit `RELEASE_NOTES` override.
 
-Releases also attach an x86_64 `.flatpak` bundle. See
+Releases also attach a signed universal Android `.apk`; see
+[Android release setup](docs/android-release.md) for the one-time SDK and signing
+secrets. They also attach an x86_64 `.flatpak` bundle. See
 [Flatpak packaging](flatpak/README.md#release-downloads) for installation and the
 Forgejo runner requirements.
+For a fork or another release host, update the destinations and signing
+configuration described in the [setup guide](docs/setup.md#release-hosting).

@@ -6,6 +6,7 @@ import type {
 	LyricsProviderId,
 } from "@/lib/lyrics/lyrics-providers";
 import { beginPressDragSelect } from "@/lib/motion/press-drag-select";
+import { haptic } from "@/lib/utils/haptics";
 import { cn } from "@/lib/utils/utils";
 
 export function LyricsSourceSelect({
@@ -96,8 +97,14 @@ export function LyricsSourceSelect({
 								)?.id ?? null
 							);
 						},
-						onHighlight: setHighlighted,
-						onSelect: onChange,
+						onHighlight: (next) => {
+							setHighlighted(next);
+							if (next) haptic("tick");
+						},
+						onSelect: (next) => {
+							haptic("confirm");
+							onChange(next);
+						},
 						onEnd: (dragged, cancelled) => {
 							stop.current = null;
 							setPressing(false);

@@ -761,7 +761,9 @@ function TopResultCard({
 		return <SearchEntityMenu entry={entry}>{card}</SearchEntityMenu>;
 	return (
 		<SongContextMenu song={entry.song}>
-			<SwipeToQueue onQueue={() => onQueue(entry.song)}>{card}</SwipeToQueue>
+			<SwipeToQueue onQueue={() => onQueue(entry.song)} song={entry.song}>
+				{card}
+			</SwipeToQueue>
 		</SongContextMenu>
 	);
 }
@@ -784,7 +786,7 @@ function PlayableRow({
 	const { song } = entry;
 	return (
 		<SongContextMenu song={song}>
-			<SwipeToQueue onQueue={onQueue}>
+			<SwipeToQueue onQueue={onQueue} song={song}>
 				<button
 					className={cn(
 						"group grid w-full grid-cols-[2.5rem_1fr_auto] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/5",

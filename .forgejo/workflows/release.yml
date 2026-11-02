@@ -1,12 +1,14 @@
 name: Build and Release
 
 # Tag a release with `git tag vX.Y.Z && git push origin vX.Y.Z` to build the
-# desktop bundles and a Flatpak, sign the Tauri updater bundles and publish to a
+# desktop bundles, an Android APK and a Flatpak, sign and publish them to a
 # Forgejo release. The rolling `latest` release carries the latest.json the
 # app polls for self-updates.
 #
 # Required repository secret:
 #   TAURI_SIGNING_PRIVATE_KEY  content of the private updater key
+# Android also requires the SDK download and signing secrets documented in
+# docs/android-release.md. Its APK is signed with a separate Android key.
 # Generate a keypair with `bun run tauri signer generate -w ~/.tauri/yumusic.key`
 # and put its public key into `plugins.updater.pubkey` in tauri.conf.json.
 # The key used here has no password. If you regenerate it with one, add a
@@ -156,6 +158,151 @@ jobs:
           export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
           export RELEASE_VERSION="${RELEASE_TAG#v}"
           bun scripts/forgejo-release.ts publish
+
+  android:
+    name: Build Android universal APK
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: 28.2.13676358
+      DISCORD_SOCIAL_SDK_ZIP: .cache/DiscordSocialSdk-1.10.19337.zip
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Validate Android release configuration
+        shell: bash
+        env:
+          DISCORD_SOCIAL_SDK_URL: ${{ secrets.DISCORD_SOCIAL_SDK_URL }}
+          DISCORD_SOCIAL_SDK_SHA256: ${{ secrets.DISCORD_SOCIAL_SDK_SHA256 }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for secret in DISCORD_SOCIAL_SDK_URL DISCORD_SOCIAL_SDK_SHA256 ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!secret}" ]; then
+              echo "Missing repository secret: $secret. See docs/android-release.md." >&2
+              exit 1
+            fi
+          done
+          [[ "$DISCORD_SOCIAL_SDK_URL" == https://* ]] || { echo 'The SDK download must use HTTPS.' >&2; exit 1; }
+          [[ "$DISCORD_SOCIAL_SDK_SHA256" =~ ^[a-fA-F0-9]{64}$ ]] || { echo 'Invalid SDK SHA-256.' >&2; exit 1; }
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl file unzip zip pkg-config libssl-dev
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android toolchains
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;$NDK_VERSION" "cmake;3.22.1"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
+      - name: Cache Android Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: android-cargo-registry-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: android-cargo-registry-
+
+      # Download on each release; the SDK must not enter public build caches.
+      - name: Download and verify Discord SDK
+        shell: bash
+        env:
+          DISCORD_SOCIAL_SDK_URL: ${{ secrets.DISCORD_SOCIAL_SDK_URL }}
+          DISCORD_SOCIAL_SDK_SHA256: ${{ secrets.DISCORD_SOCIAL_SDK_SHA256 }}
+        run: |
+          mkdir -p .cache
+          if ! curl --silent --fail --location --proto '=https' --proto-redir '=https' \
+            --output "$DISCORD_SOCIAL_SDK_ZIP" "$DISCORD_SOCIAL_SDK_URL"; then
+            echo 'Discord SDK download failed. Check DISCORD_SOCIAL_SDK_URL.' >&2
+            exit 1
+          fi
+          printf '%s  %s\n' "$DISCORD_SOCIAL_SDK_SHA256" "$DISCORD_SOCIAL_SDK_ZIP" | sha256sum --check --status
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          unset GITHUB_API_URL GITHUB_SERVER_URL GITHUB_GRAPHQL_URL
+          bun install --frozen-lockfile
+
+      - name: Stamp release version
+        shell: bash
+        run: |
+          export VERSION="${GITHUB_REF#refs/tags/v}"
+          bun -e "for (const path of ['package.json', 'src-tauri/tauri.conf.json']) {
+              const json = await Bun.file(path).json();
+              json.version = process.env.VERSION;
+              await Bun.write(path, JSON.stringify(json, null, 2) + '\n');
+            }"
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+
+      - name: Build universal APK
+        shell: bash
+        run: bun run tauri android build --ci --apk
+
+      - name: Sign and verify APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          umask 077
+          KEYSTORE="$RUNNER_TEMP/yumusic-release.jks"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          mkdir -p android-dist
+          APK="android-dist/YuMusic_${GITHUB_REF#refs/tags/v}_universal.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" sign --ks "$KEYSTORE" --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD \
+            --out "$APK" src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          "$APKSIGNER" verify --verbose "$APK"
+
+      - name: Publish Android release asset
+        shell: bash
+        env:
+          FORGEJO_URL: ${{ env.FORGEJO }}
+          FORGEJO_REPOSITORY: ${{ env.REPOSITORY }}
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE_DIR: android-dist
+        run: |
+          export RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          export RELEASE_VERSION="${RELEASE_TAG#v}"
+          bun scripts/forgejo-release.ts publish-android
+
+      - name: Remove private SDK download and import
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$DISCORD_SOCIAL_SDK_ZIP"
+          rm -rf "${GRADLE_USER_HOME:-$HOME/.gradle}/yumusic/discord-social-sdk/1.10.19337"
 
   flatpak:
     name: Build Flatpak x86_64

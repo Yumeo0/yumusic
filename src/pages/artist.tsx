@@ -467,7 +467,7 @@ export default function ArtistPage() {
 									key={`${song.id ?? "artist-song"}-${index}`}
 									song={song}
 								>
-									<SwipeToQueue onQueue={() => addToQueue([song])}>
+									<SwipeToQueue onQueue={() => addToQueue([song])} song={song}>
 										<SongRowHover songId={song.id}>
 											<div
 												className={cn(

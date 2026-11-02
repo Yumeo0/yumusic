@@ -735,7 +735,7 @@ export default function SettingsPage({
 							<p className="mt-0.5 text-xs text-muted-foreground">
 								Show the song you're listening to on your Discord profile, with
 								cover art and links to the song, album and artist. Discord must
-								be running for the presence to appear.
+								be installed and signed in on Android, or running on desktop.
 							</p>
 						</div>
 						<button

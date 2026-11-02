@@ -648,6 +648,7 @@ export function HomeFeed() {
 												{swipeEnabled ? (
 													<SwipeToQueue
 														onQueue={() => queueSong(song ?? item.song)}
+														song={song ?? item.song}
 													>
 														{row}
 													</SwipeToQueue>

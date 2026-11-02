@@ -1,6 +1,7 @@
 mod discord;
 mod downloads;
 mod http_client;
+mod haptics;
 mod incoming_links;
 mod login_session;
 mod media_controls;
@@ -395,6 +396,7 @@ pub fn run() {
 		})
 		.invoke_handler(tauri::generate_handler![
 			incoming_links::take_pending_links,
+			haptics::mobile_haptic,
 			sync_oauth::begin_sync_oauth,
 			sync_oauth::cancel_sync_oauth,
 			native_audio::native_audio_command,

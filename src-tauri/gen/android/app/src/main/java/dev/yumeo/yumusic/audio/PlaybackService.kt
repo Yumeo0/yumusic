@@ -52,7 +52,14 @@ class PlaybackService : MediaSessionService() {
           setHandleAudioBecomingNoisy(true)
           setWakeMode(C.WAKE_MODE_LOCAL)
           addListener(object : Player.Listener {
-            override fun onEvents(player: Player, events: Player.Events) = publish(index)
+            override fun onEvents(player: Player, events: Player.Events) {
+              // Volume ramps are not clock ticks. Echoing each volume command
+              // into JS timeupdate feeds the crossfade back into itself.
+              if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED,
+                  Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_IS_PLAYING_CHANGED,
+                  Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_TIMELINE_CHANGED,
+                  Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) publish(index)
+            }
             override fun onPlayerError(error: PlaybackException) {
               AudioBridge.emit(JSONObject().put("type", "error").put("deck", index).put("id", decks[index].id).put("message", error.message ?: "Native playback failed"))
             }
@@ -68,6 +75,10 @@ class PlaybackService : MediaSessionService() {
           if (controller.isTrusted || controller.packageName == packageName) super.onConnect(session, controller)
           else MediaSession.ConnectionResult.reject()
       }).build()
+    // Playback starts through JNI, without a MediaController binding. Register
+    // immediately so MediaSessionService manages the notification/foreground
+    // lifetime even when no external controller has connected yet.
+    addSession(session!!)
     effects(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION)
     instance = this
     AudioBridge.ready(this)
@@ -126,7 +137,7 @@ class PlaybackService : MediaSessionService() {
         }
       }
     }
-    publish(index)
+    if (op != "volume" && op != "rate") publish(index)
   }
 
   private fun activate(index: Int) {
@@ -136,8 +147,8 @@ class PlaybackService : MediaSessionService() {
       decks[active].player.setAudioAttributes(decks[active].player.audioAttributes, false)
       active = index
       decks[active].player.setAudioAttributes(decks[active].player.audioAttributes, true)
+      session?.setPlayer(SystemPlayer(decks[active].player))
     }
-    session?.setPlayer(SystemPlayer(decks[active].player))
   }
 
   fun append(index: Int, id: String, epoch: Int, bytes: ByteArray): Boolean {
@@ -172,6 +183,7 @@ class PlaybackService : MediaSessionService() {
     val deck = decks[index]
     if (deck.id.isEmpty()) return
     val player = deck.player
+    AudioBridge.playback(decks.any { it.id.isNotEmpty() && it.player.playWhenReady && it.player.playbackState != Player.STATE_IDLE })
     AudioBridge.emit(JSONObject().put("type", "state").put("deck", index).put("id", deck.id)
       .put("position", player.currentPosition / 1000.0)
       .put("duration", if (player.duration > 0) player.duration / 1000.0 else 0)
@@ -231,6 +243,7 @@ class PlaybackService : MediaSessionService() {
   }
 
   override fun onDestroy() {
+    AudioBridge.playback(false)
     instance = null
     main.removeCallbacksAndMessages(null)
     effects(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION)

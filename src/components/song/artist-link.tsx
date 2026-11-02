@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils/utils";
 import { artistSubtitle } from "@/lib/youtube/youtube.utils";
 
 interface ArtistLinkProps {
+	interactive?: boolean;
 	id?: string;
 	name: string;
 	className?: string;
@@ -22,11 +23,16 @@ interface ArtistLinkProps {
  * Anchor-based so it can live inside other buttons without invalid nesting
  * (navigation goes through the hash router).
  */
-export function ArtistLink({ id, name, className }: ArtistLinkProps) {
+export function ArtistLink({
+	id,
+	name,
+	className,
+	interactive = true,
+}: ArtistLinkProps) {
 	const navigate = useNavigate();
 	const displayName = formatArtistName(name);
 
-	if (!id) {
+	if (!id || !interactive) {
 		return <span className={className}>{displayName}</span>;
 	}
 
@@ -64,10 +70,12 @@ export function ArtistLinks({
 	song,
 	className,
 	showType = false,
+	interactive = true,
 }: {
 	song: Song;
 	className?: string;
 	showType?: boolean;
+	interactive?: boolean;
 }) {
 	const formatTitle = useFormatTitle();
 	const cleanCredit = (artist: { name: string; id?: string }) => ({
@@ -115,7 +123,12 @@ export function ArtistLinks({
 					// biome-ignore lint/suspicious/noArrayIndexKey: artists may repeat names
 					key={`${a.id ?? "na"}-${a.name}-${i}`}
 				>
-					<ArtistLink className={className} id={a.id} name={a.name} />
+					<ArtistLink
+						className={className}
+						id={a.id}
+						interactive={interactive}
+						name={a.name}
+					/>
 					{i < artists.length - 1 ? ", " : ""}
 				</span>
 			))}
@@ -129,7 +142,11 @@ export function ArtistLinks({
 							key={`${feat}-${index}`}
 						>
 							{index === 0 ? "" : index === extras.length - 1 ? " & " : ", "}
-							<ArtistLink id={creditId(feat)} name={feat} />
+							<ArtistLink
+								id={creditId(feat)}
+								interactive={interactive}
+								name={feat}
+							/>
 						</Fragment>
 					))}
 				</span>

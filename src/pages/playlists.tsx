@@ -948,7 +948,7 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 			onRemove={editable && onRemove ? () => onRemove(song, index) : undefined}
 			song={displaySong}
 		>
-			<SwipeToQueue onQueue={() => onQueue([displaySong])}>
+			<SwipeToQueue onQueue={() => onQueue([displaySong])} song={displaySong}>
 				<SongRowHover songId={displaySong.id}>
 					<div
 						className={cn(

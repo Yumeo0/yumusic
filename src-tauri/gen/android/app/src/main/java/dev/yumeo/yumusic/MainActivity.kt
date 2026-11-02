@@ -2,6 +2,8 @@ package dev.yumeo.yumusic
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Build
+import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
@@ -42,6 +44,24 @@ class MainActivity : TauriActivity() {
   fun updateAudioMetadata(data: String) = AudioBridge.metadata(data)
 
   @Keep
+  fun mobileHaptic(kind: Int) {
+    runOnUiThread {
+      val effect = when (kind) {
+        1 -> HapticFeedbackConstants.CLOCK_TICK
+        2 -> if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.KEYBOARD_TAP
+        else -> HapticFeedbackConstants.KEYBOARD_TAP
+      }
+      (appWebView ?: window.decorView).performHapticFeedback(effect)
+    }
+  }
+
+  @Keep
+  fun updateDiscordPresence(data: String) = DiscordPresence.update(this, data)
+
+  @Keep
+  fun clearDiscordPresence() = DiscordPresence.clear()
+
+  @Keep
   fun takePendingLinks(): String = IncomingLinks.takePending()
 
   private fun receiveLink(intent: Intent) {
@@ -55,6 +75,18 @@ class MainActivity : TauriActivity() {
           view.evaluateJavascript("window.dispatchEvent(new Event('yumusic-open-links'))", null)
       }
     }
+  }
+
+  override fun onPause() {
+    super.onPause()
+    // Wry pauses its WebView with the activity, but this view also owns the
+    // SABR producer and playback queue. Keep its task queue alive for audio.
+    AudioBridge.hostPaused()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    AudioBridge.hostResumed()
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -94,6 +126,7 @@ class MainActivity : TauriActivity() {
   }
 
   override fun onDestroy() {
+    DiscordPresence.shutdown()
     AudioBridge.detach(appWebView)
     poTokens.reset()
     super.onDestroy()

@@ -4,9 +4,22 @@
 
 ### Features
 
+- Added Discord Rich Presence on Android through the installed Discord app, using the existing Rich presence setting.
+- Added a fullscreen sleep timer that stops after the queue, a chosen duration while finishing the last song, or a chosen number of songs.
+
 ### Improvements
 
+- Mobile queue dragging follows the finger and springs between the existing closed, half-height, and fullscreen stages, with light haptic feedback as drag stages change, including returning to neutral. Gestures can also start on header buttons.
+- Mobile player transitions slide the background at a fixed size, grow the cover glow in place, and quickly fade controls without a miniplayer destination.
+- Releases now include a signed Android APK for direct installation.
+- Mobile song rows now spring between two right-swipe stages: play next and add to the end of the queue. Swipe queued songs or autoplay recommendations left to remove them, and toggle autoplay from the queue.
+- The mobile miniplayer supports left/right swipes for next/previous, opens fullscreen from artist and album text, and places the audio/device center beside the play button.
+- Added mobile haptic feedback for playback actions, sliders, and song swipe stages (including returning to neutral), using Android's system feedback preferences. Menu opening and vertical player gestures stay quiet, and context menus use a single native long-press vibration.
+
 ### Bug fixes
+
+- Fixed Android audio stopping after locking the phone and leaving the current track unable to seek.
+- Fixed heavy stutters during crossfades between songs.
 
 ## [0.9.0] - 2026-11-01
 

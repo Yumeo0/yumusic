@@ -25,5 +25,7 @@ in debug builds, on `127.0.0.1:9223` (or the next available port). Production
 and mobile builds do not enable it. The global Tauri API is enabled only for
 debug builds with the bridge feature.
 
-In Codex, start a new session after adding the `tauri` MCP server, connect its
-driver session, and use its webview tools against the running development app.
+Configure an MCP-compatible client with the Tauri MCP server using the
+[upstream setup instructions](https://github.com/hypothesi/mcp-server-tauri).
+Connect its driver session and use its webview tools against the running
+development app. Restart the client session if it does not discover the server.

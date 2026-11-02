@@ -23,6 +23,7 @@ import { LyricsPanel } from "@/components/lyrics/lyrics";
 import { DeviceButton } from "@/components/player/device-picker";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
+import { SleepTimerButton } from "@/components/player/sleep-timer";
 import { ProgressBar } from "@/components/player/waveform";
 import { AlbumLink } from "@/components/song/album-link";
 import { ArtistLinks } from "@/components/song/artist-link";
@@ -198,8 +199,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 			ref={pageRef}
 			{...touchHandlers}
 		>
-			{/* The backdrop fades as the page moves, softening its large travel
-			    while artwork and paired controls stay visible. */}
+			{/* The background and its artwork slide together at their resting size. */}
 			<div
 				aria-hidden
 				className="absolute inset-0 overflow-hidden bg-background"
@@ -208,6 +208,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				{currentSong.thumbnail && (
 					<div
 						className="animate-in fade-in absolute inset-0 duration-700"
+						data-np-backdrop-art
 						key={`bg-${currentSong.id}`}
 					>
 						<CoverImage
@@ -254,6 +255,9 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 				>
 					<ListMusic className="size-5" />
 				</button>
+				<div data-np-secondary>
+					<SleepTimerButton />
+				</div>
 				<button
 					aria-label="Close Now Playing"
 					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
@@ -386,11 +390,9 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							ref={attachStage}
 							style={morphVars}
 						>
-							{/* Closed cover's glow + shadow, pinned to the closed
-							    geometry, faded out as the cover expands (queue)
-							    and shrunk to nothing as the player minimizes: a
-							    blur this large repainting on every resized frame
-							    is what makes the drag stutter. */}
+							{/* Scale the glow at its fullscreen destination, cancelling
+							    the sheet's travel so it never trails the moving cover.
+							    Transform scaling also avoids repainting the blur. */}
 							<div
 								aria-hidden
 								className="np-morph pointer-events-none absolute transition-[opacity,transform] duration-300 ease-out"
@@ -401,7 +403,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 									left: "calc((100% - var(--np-cover-size)) / 2)",
 									opacity: "calc(1 - var(--queue-reveal, 0))",
 									top: "var(--np-cover-top)",
-									transform: "scale(max(0, 1 - var(--np-dismiss, 0) * 2.5))",
+									transform:
+										"translateY(calc(-1 * var(--np-slide, 0px))) scale(max(0, 1 - var(--np-dismiss, 0) * 2.5))",
 									width: "var(--np-cover-size)",
 								}}
 							>

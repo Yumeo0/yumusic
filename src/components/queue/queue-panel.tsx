@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ListMusic, Shuffle, X } from "lucide-react";
+import { ListMusic, ListVideo, Shuffle, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
 import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
@@ -10,6 +10,7 @@ import {
 	usePlayerControls,
 	useQueueSheetRef,
 } from "@/contexts/player-context";
+import { useRoomRole } from "@/lib/listen-together/room";
 import { useQueueSheetGesture } from "@/lib/motion/queue-drag";
 import {
 	setQueueOpen,
@@ -21,6 +22,7 @@ import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { EqualizerBars } from "../player/waveform";
 import { ArtistLinks } from "../song/artist-link";
+import { SwipeToQueue } from "./swipe-to-queue";
 
 /**
  * Queue drawer. Desktop: slides in from the right. Mobile: a bottom sheet
@@ -36,11 +38,17 @@ export function QueuePanel() {
 		currentIndex,
 		autoplayTracks,
 		autoplayEnabled,
+		setAutoplayEnabled,
+		removeAutoplayAt,
 		play,
 		playAutoplayAt,
 		shuffleQueue,
+		addToQueue,
+		removeFromQueueAt,
 	} = usePlayer();
 	const { isPlaying } = usePlayerControls();
+	const guest = useRoomRole() === "guest";
+	const radioTracks = autoplayEnabled ? autoplayTracks : [];
 	// Video entries already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
 	const sheetRef = useQueueSheetRef();
@@ -60,9 +68,9 @@ export function QueuePanel() {
 	// so the queue visibly continues instead of ending at the last item.
 	const separatorIndex = queue.length;
 	const showSeparator =
-		autoplayEnabled && (queue.length > 0 || autoplayTracks.length > 0);
+		autoplayEnabled && (queue.length > 0 || radioTracks.length > 0);
 	const autoplayOffset = showSeparator ? 1 : 0;
-	const rowCount = queue.length + autoplayTracks.length + autoplayOffset;
+	const rowCount = queue.length + radioTracks.length + autoplayOffset;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const rowVirtualizer = useVirtualizer({
 		count: rowCount,
@@ -133,25 +141,29 @@ export function QueuePanel() {
 				fullscreen ? "bottom-0" : "bottom-22.5",
 				open ? "translate-x-0" : "pointer-events-none translate-x-full",
 				"max-md:translate-x-0",
-				// The top safe-area inset only matters once the sheet reaches
-				// the top of the screen; otherwise a hairline of padding keeps
-				// the handle off the edge without reading as dead space.
+				// Add the system safe-area inset only at the top of the screen.
 				queueState === "full"
 					? "max-md:translate-y-0 max-md:pt-(--safe-area-top)"
 					: queueState === "half"
-						? "max-md:translate-y-1/2 max-md:pt-4"
-						: "max-md:translate-y-full max-md:pt-4",
+						? "max-md:translate-y-1/2"
+						: "max-md:translate-y-full",
 			)}
 			ref={sheetRef}
 		>
 			<div
-				className="relative flex items-center justify-between border-b border-foreground/8 px-4 py-3.5 max-md:pt-2 max-md:pb-3 max-md:touch-none"
-				{...sheetGesture}
+				className="relative flex items-center justify-between border-b border-foreground/8 px-4 py-3.5 max-md:flex-wrap max-md:pt-0 max-md:pb-3 max-md:touch-none"
+				onClickCapture={sheetGesture.onClickCapture}
+				onTouchCancel={sheetGesture.onTouchCancel}
+				onTouchEnd={sheetGesture.onTouchEnd}
+				onTouchMove={sheetGesture.onTouchMove}
+				onTouchStartCapture={sheetGesture.onTouchStart}
 			>
-				<span
+				<div
 					aria-hidden
-					className="pointer-events-none absolute top-1 left-1/2 h-1 w-8 -translate-x-1/2 rounded-full bg-foreground/15 md:hidden"
-				/>
+					className="pointer-events-none flex w-full justify-center py-2 md:hidden"
+				>
+					<span className="h-1 w-8 rounded-full bg-foreground/15" />
+				</div>
 				<div className="flex items-center gap-2.5">
 					<ListMusic className="size-4 text-muted-foreground" />
 					<span className="text-sm font-semibold">Queue</span>
@@ -162,6 +174,30 @@ export function QueuePanel() {
 					)}
 				</div>
 				<div className="flex items-center gap-1">
+					<button
+						aria-label="Autoplay"
+						aria-pressed={autoplayEnabled}
+						className={cn(
+							"flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors hover:bg-foreground/8 disabled:opacity-50",
+							autoplayEnabled
+								? "text-primary bg-primary/10"
+								: "text-muted-foreground",
+						)}
+						disabled={guest}
+						onClick={() => setAutoplayEnabled(!autoplayEnabled)}
+						title={
+							guest
+								? "The room host controls autoplay"
+								: `Autoplay ${autoplayEnabled ? "on" : "off"}`
+						}
+						type="button"
+					>
+						<ListVideo className="size-4" />
+						Autoplay
+						<span className="text-[10px] opacity-75">
+							{autoplayEnabled ? "On" : "Off"}
+						</span>
+					</button>
 					<button
 						aria-label="Shuffle queue"
 						className="grid size-8 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
@@ -189,7 +225,7 @@ export function QueuePanel() {
 				onWheel={stopScroll}
 				ref={scrollRef}
 			>
-				{queue.length === 0 && autoplayTracks.length === 0 ? (
+				{queue.length === 0 && radioTracks.length === 0 ? (
 					<p className="p-4 text-sm text-muted-foreground/70">
 						Queue is empty — play something to fill it up.
 					</p>
@@ -221,7 +257,7 @@ export function QueuePanel() {
 							const i = isAutoplayRow
 								? virtualRow.index - separatorIndex - autoplayOffset
 								: virtualRow.index;
-							const source = isAutoplayRow ? autoplayTracks[i] : queue[i];
+							const source = isAutoplayRow ? radioTracks[i] : queue[i];
 							// Show and play the album track when the video was
 							// resolved to one while playing.
 							const version = versions.get(source.id);
@@ -230,87 +266,102 @@ export function QueuePanel() {
 								: source;
 							const isCurrent = !isAutoplayRow && i === currentIndex;
 							return (
-								<SongContextMenu
+								<div
+									className="absolute inset-x-0"
+									data-index={virtualRow.index}
 									key={`${isAutoplayRow ? "auto" : "queue"}-${source.id}-${i}`}
-									queueIndex={isAutoplayRow ? undefined : i}
-									song={song}
+									ref={rowVirtualizer.measureElement}
+									style={{ transform: `translateY(${virtualRow.start}px)` }}
 								>
-									<button
-										className={cn(
-											"group absolute inset-x-0 grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
-											isCurrent ? "bg-primary/9" : "hover:bg-foreground/5",
-										)}
-										data-index={virtualRow.index}
-										onClick={() => {
-											if (isAutoplayRow) {
-												playAutoplayAt(i);
-											} else {
-												play(song);
-											}
-										}}
-										ref={rowVirtualizer.measureElement}
-										style={{
-											transform: `translateY(${virtualRow.start}px)`,
-										}}
-										type="button"
+									<SwipeToQueue
+										onQueue={() => addToQueue([song])}
+										onRemove={
+											isAutoplayRow
+												? guest
+													? undefined
+													: () => removeAutoplayAt(i)
+												: () => removeFromQueueAt(i)
+										}
+										song={song}
 									>
-										<span className="relative grid place-items-center">
-											{isCurrent ? (
-												<EqualizerBars
-													className="size-3.5 text-primary"
-													playing={isPlaying}
-												/>
-											) : (
-												<span className="font-mono text-[10px] text-muted-foreground/50 transition-opacity duration-150 group-hover:opacity-0">
-													{isAutoplayRow ? queue.length + i + 1 : i + 1}
-												</span>
-											)}
-										</span>
-										{song.thumbnail ? (
-											<CoverImage
-												alt=""
-												className="size-10 rounded-md border border-foreground/10 object-cover"
-												loading="lazy"
-												src={proxiedImageUrl(song.thumbnail, 96)}
-											/>
-										) : (
-											<div className="size-10 rounded-md bg-muted" />
-										)}
-										<div className="min-w-0">
-											<p
+										<SongContextMenu
+											key={`${isAutoplayRow ? "auto" : "queue"}-${source.id}-${i}`}
+											queueIndex={isAutoplayRow ? undefined : i}
+											song={song}
+										>
+											<button
 												className={cn(
-													"truncate text-sm font-medium",
-													isCurrent && "text-primary",
+													"group w-full grid grid-cols-[1.5rem_2.5rem_1fr_auto] items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors duration-150",
+													isCurrent ? "bg-primary/9" : "hover:bg-foreground/5",
 												)}
+												onClick={() => {
+													if (isAutoplayRow) {
+														playAutoplayAt(i);
+													} else {
+														play(song);
+													}
+												}}
+												type="button"
 											>
-												<SongTitle
-													artist={song.artist}
-													keepTitle={song.upload}
-													title={song.title}
-												/>
-											</p>
-											<p className="truncate text-xs text-muted-foreground">
-												<ArtistLinks song={song} />
-											</p>
-											{song.addedBy && (
-												<p
-													className="truncate text-[10px] text-muted-foreground/70"
-													title={`Added by ${song.addedBy}`}
-												>
-													Added by {song.addedBy}
-												</p>
-											)}
-										</div>
-										<div className="flex items-center gap-2 pr-1">
-											<DownloadedBadge songId={song.id} />
-											{song.duration && (
-												<span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
-													{song.duration}
+												<span className="relative grid place-items-center">
+													{isCurrent ? (
+														<EqualizerBars
+															className="size-3.5 text-primary"
+															playing={isPlaying}
+														/>
+													) : (
+														<span className="font-mono text-[10px] text-muted-foreground/50 transition-opacity duration-150 group-hover:opacity-0">
+															{isAutoplayRow ? queue.length + i + 1 : i + 1}
+														</span>
+													)}
 												</span>
-											)}
-										</div>
-									</button>
-								</SongContextMenu>
+												{song.thumbnail ? (
+													<CoverImage
+														alt=""
+														className="size-10 rounded-md border border-foreground/10 object-cover"
+														loading="lazy"
+														src={proxiedImageUrl(song.thumbnail, 96)}
+													/>
+												) : (
+													<div className="size-10 rounded-md bg-muted" />
+												)}
+												<div className="min-w-0">
+													<p
+														className={cn(
+															"truncate text-sm font-medium",
+															isCurrent && "text-primary",
+														)}
+													>
+														<SongTitle
+															artist={song.artist}
+															keepTitle={song.upload}
+															title={song.title}
+														/>
+													</p>
+													<p className="truncate text-xs text-muted-foreground">
+														<ArtistLinks song={song} />
+													</p>
+													{song.addedBy && (
+														<p
+															className="truncate text-[10px] text-muted-foreground/70"
+															title={`Added by ${song.addedBy}`}
+														>
+															Added by {song.addedBy}
+														</p>
+													)}
+												</div>
+												<div className="flex items-center gap-2 pr-1">
+													<DownloadedBadge songId={song.id} />
+													{song.duration && (
+														<span className="font-mono text-[10px] text-muted-foreground/60 tabular-nums">
+															{song.duration}
+														</span>
+													)}
+												</div>
+											</button>
+										</SongContextMenu>
+									</SwipeToQueue>
+								</div>
 							);
 						})}
 					</div>
