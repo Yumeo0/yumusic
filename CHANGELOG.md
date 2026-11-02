@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [0.10.0] - 2026-11-02
+
+### Features
+
 - Added Discord Rich Presence on Android through the installed Discord app, using the existing Rich presence setting.
 - Added a fullscreen sleep timer that stops after the queue, a chosen duration while finishing the last song, or a chosen number of songs.
 
