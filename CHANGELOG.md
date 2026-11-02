@@ -8,6 +8,10 @@
 
 ### Bug fixes
 
+## [0.10.1] - 2026-11-02
+
+### Bug fixes
+
 - Fixed Android release packaging so signed APKs can be built and attached to releases.
 
 ## [0.10.0] - 2026-11-02
