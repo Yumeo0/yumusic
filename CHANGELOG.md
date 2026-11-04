@@ -8,6 +8,10 @@
 
 ### Bug fixes
 
+## [0.10.2] - 2026-11-04
+
+### Bug fixes
+
 - Fixed the next song waiting until the phone is unlocked to start playing on Android.
 
 ## [0.10.1] - 2026-11-02
