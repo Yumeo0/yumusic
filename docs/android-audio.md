@@ -30,6 +30,11 @@ The playback bridge keeps the producer WebView resumed while music is active,
 including a short grace period for loading the next track, then lets it pause
 when playback stops. Backgrounding the app or locking the screen keeps foreground
 playback running.
+The producer also holds a partial CPU wake lock during playback and the 35-second
+handoff grace period: ExoPlayer's own wake lock ends at `STATE_ENDED`, before the
+next track's attestation and stream setup can finish. Ended decks do not extend
+this grace period. The producer lock is released after the grace period or when
+the activity detaches.
 Volume changes do not emit synthetic playback-clock updates, and crossfade ticks
 share one pending animation frame to avoid IPC/animation feedback loops.
 Removing the app from recent tasks stops playback because its queue and SABR

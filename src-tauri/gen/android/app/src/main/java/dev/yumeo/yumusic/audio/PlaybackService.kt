@@ -180,10 +180,13 @@ class PlaybackService : MediaSessionService() {
 
   private fun publish(index: Int) {
     if (!::decks.isInitialized) return
+    AudioBridge.playback(decks.any {
+      it.id.isNotEmpty() && it.player.playWhenReady &&
+        (it.player.playbackState == Player.STATE_READY || it.player.playbackState == Player.STATE_BUFFERING)
+    })
     val deck = decks[index]
     if (deck.id.isEmpty()) return
     val player = deck.player
-    AudioBridge.playback(decks.any { it.id.isNotEmpty() && it.player.playWhenReady && it.player.playbackState != Player.STATE_IDLE })
     AudioBridge.emit(JSONObject().put("type", "state").put("deck", index).put("id", deck.id)
       .put("position", player.currentPosition / 1000.0)
       .put("duration", if (player.duration > 0) player.duration / 1000.0 else 0)

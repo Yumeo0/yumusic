@@ -5,6 +5,7 @@ import android.content.Intent
 import android.webkit.WebView
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import androidx.media3.common.util.UnstableApi
 import java.lang.ref.WeakReference
 import org.json.JSONObject
@@ -20,7 +21,23 @@ object AudioBridge {
   private var paused = false
   private var playbackRequested = false
   private var playbackActive = false
-  private val suspendView = Runnable { playbackActive = false; applyLifecycle() }
+  private var wakeLock: PowerManager.WakeLock? = null
+  private const val HANDOFF_GRACE_MS = 35000L
+  private val suspendView = Runnable {
+    playbackActive = false
+    releaseWakeLock()
+    applyLifecycle()
+  }
+
+  private fun releaseWakeLock() {
+    wakeLock?.let { if (it.isHeld) it.release() }
+  }
+
+  private fun keepAwake() {
+    // ExoPlayer releases its own lock at STATE_ENDED, before JS has loaded
+    // the next stream. Cover playback plus the bounded handoff grace period.
+    wakeLock?.let { if (!it.isHeld) it.acquire() }
+  }
 
   private fun applyLifecycle() {
     val target = view.get() ?: return
@@ -32,15 +49,24 @@ object AudioBridge {
     if (playbackRequested == active) return
     playbackRequested = active
     main.removeCallbacks(suspendView)
-    if (active) { playbackActive = true; applyLifecycle() }
+    if (active) { playbackActive = true; keepAwake(); applyLifecycle() }
     // Leave time for the next track's asynchronous attestation/stream load.
-    else main.postDelayed(suspendView, 35000)
+    else main.postDelayed(suspendView, HANDOFF_GRACE_MS)
   }
-  fun attach(webView: WebView) { view = WeakReference(webView); applyLifecycle() }
+  fun attach(webView: WebView) {
+    releaseWakeLock()
+    wakeLock = (webView.context.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
+      .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YuMusic:AudioProducer").apply { setReferenceCounted(false) }
+    view = WeakReference(webView)
+    if (playbackActive) keepAwake()
+    applyLifecycle()
+  }
   fun detach(webView: WebView?) {
     if (view.get() === webView) {
       view.clear()
       main.removeCallbacks(suspendView)
+      releaseWakeLock()
+      wakeLock = null
       playbackActive = playbackRequested
     }
   }
