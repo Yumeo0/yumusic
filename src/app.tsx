@@ -89,6 +89,7 @@ import {
 	scrobbleTitle,
 } from "./lib/utils/title";
 import { cn } from "./lib/utils/utils";
+import { restoreSession } from "./lib/youtube/restore-session";
 import {
 	getTrackMeta,
 	getUserProfile,
@@ -662,9 +663,11 @@ function Layout() {
 	useEffect(() => {
 		let disposed = false;
 		let checking = false;
+		let retryTimer: number | undefined;
 		const checkLogin = async () => {
 			if (checking || authBusy.current || document.visibilityState === "hidden")
 				return;
+			window.clearTimeout(retryTimer);
 			checking = true;
 			const revision = authRevision.current;
 			try {
@@ -674,18 +677,13 @@ function Layout() {
 						setYouTubeSyncAccount({ status: "signed-out" });
 					return;
 				}
-				await getYoutubeClient(cookie);
-				let profile = await getUserProfile();
-				let signedIn = !!profile;
-				if (!profile) {
-					const verifiedCookie = await window.electron.validateSession();
-					signedIn = !!verifiedCookie;
-					if (verifiedCookie) {
-						// Rebuild a client whose cached signed-in flag may be stale.
-						await getYoutubeClient(verifiedCookie, true);
-						profile = await getUserProfile();
-					}
-				}
+				const { signedIn, profile } = await restoreSession(cookie, {
+					loadProfile: async (sessionCookie, refresh) => {
+						await getYoutubeClient(sessionCookie, refresh);
+						return getUserProfile();
+					},
+					validateSession: () => window.electron.validateSession(),
+				});
 				if (disposed || revision !== authRevision.current) return;
 				// Profile metadata is optional. A missing name must never erase the
 				// saved session or shared browser cookies.
@@ -701,6 +699,8 @@ function Layout() {
 			} catch (error) {
 				// Offline, rate-limited and server failures do not invalidate cookies.
 				console.error("Failed to check Google session:", error);
+				if (!disposed && revision === authRevision.current)
+					retryTimer = window.setTimeout(checkLogin, 15_000);
 			} finally {
 				checking = false;
 			}
@@ -711,6 +711,7 @@ function Layout() {
 		const timer = window.setInterval(checkLogin, 5 * 60 * 1000);
 		return () => {
 			disposed = true;
+			window.clearTimeout(retryTimer);
 			window.removeEventListener("focus", checkLogin);
 			document.removeEventListener("visibilitychange", checkLogin);
 			window.clearInterval(timer);
