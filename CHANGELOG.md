@@ -6,6 +6,12 @@
 
 ### Improvements
 
+### Bug fixes
+
+## [0.10.3] - 2026-11-07
+
+### Improvements
+
 - Updated the app logo.
 
 ### Bug fixes
