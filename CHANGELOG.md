@@ -6,7 +6,11 @@
 
 ### Improvements
 
+- Updated the app logo.
+
 ### Bug fixes
+
+- Discord Rich Presence now hides after 15 minutes of paused or stopped playback and returns when playback resumes.
 
 ## [0.10.2] - 2026-11-04
 

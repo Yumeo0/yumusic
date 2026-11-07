@@ -107,7 +107,8 @@ import SettingsPage from "./pages/settings";
 /**
  * Mirrors the current song into Discord rich presence while enabled:
  * cover art + album tooltip (linked), clickable song title and artist,
- * plus playback timestamps that freeze while paused.
+ * plus playback timestamps that freeze while paused. Paused presence expires
+ * after 15 minutes and returns when playback resumes.
  */
 function DiscordPresenceSync() {
 	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
@@ -145,6 +146,16 @@ function DiscordPresenceSync() {
 	const artistId =
 		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
 	const discordEnabled = settings.discordRpc;
+	const [discordIdle, setDiscordIdle] = useState(false);
+
+	// Metadata refreshes, seeks and the presence retry must not restart this
+	// countdown. Only resuming playback or toggling the feature resets it.
+	useEffect(() => {
+		setDiscordIdle(false);
+		if (!discordEnabled || isPlaying) return;
+		const timeout = window.setTimeout(() => setDiscordIdle(true), 15 * 60_000);
+		return () => window.clearTimeout(timeout);
+	}, [discordEnabled, isPlaying]);
 
 	// Track the element's duration reactively: when a song starts, the
 	// presence update fires before MSE metadata is parsed (duration NaN),
@@ -191,7 +202,7 @@ function DiscordPresenceSync() {
 	const durationSecs = knownDuration > 0 ? knownDuration : mediaDuration;
 
 	useEffect(() => {
-		if (!discordEnabled || !songId) return;
+		if (!discordEnabled || discordIdle || !songId) return;
 		const videoEl = videoElementRef?.current ?? null;
 		const update = () =>
 			invoke("set_discord_activity", {
@@ -224,6 +235,7 @@ function DiscordPresenceSync() {
 		};
 	}, [
 		discordEnabled,
+		discordIdle,
 		songId,
 		title,
 		artist,
@@ -236,12 +248,12 @@ function DiscordPresenceSync() {
 		videoElementRef,
 	]);
 
-	// Turning the feature off drops the presence immediately.
+	// Clear expired paused presence as well as disabled or empty playback.
 	useEffect(() => {
-		if (!discordEnabled || !songId) {
+		if (!discordEnabled || discordIdle || !songId) {
 			invoke("clear_discord_activity").catch(() => undefined);
 		}
-	}, [discordEnabled, songId]);
+	}, [discordEnabled, discordIdle, songId]);
 
 	return null;
 }

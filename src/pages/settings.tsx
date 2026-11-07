@@ -736,6 +736,7 @@ export default function SettingsPage({
 								Show the song you're listening to on your Discord profile, with
 								cover art and links to the song, album and artist. Discord must
 								be installed and signed in on Android, or running on desktop.
+								Presence is hidden after 15 minutes of paused playback.
 							</p>
 						</div>
 						<button
