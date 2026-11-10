@@ -9,6 +9,7 @@
 ### Bug fixes
 
 - Fixed recurring desktop sign-outs when saved YouTube cookies expire by automatically renewing the existing Google session.
+- Fixed Android waiting for the screen to unlock before starting the next track by keeping playback and YouTube token WebViews active during background audio work.
 
 ## [0.10.3] - 2026-11-07
 

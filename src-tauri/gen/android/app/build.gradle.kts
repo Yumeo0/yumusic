@@ -163,16 +163,25 @@ rust {
 // once the task graph is ready, before each rust build task executes, and
 // immediately before each Kotlin compile task runs (this last hook is the
 // one that actually guarantees the fixed source reaches the compiler).
+// Also give the producer our audio-aware WebView base: onResume alone does not
+// prevent Chromium from suspending a hidden window between native tracks.
 // Keep in sync if the generated class changes upstream.
 val webviewKt = file("src/main/java/dev/yumeo/yumusic/generated/RustWebView.kt")
 fun patchRustWebView() {
     if (!webviewKt.exists()) return
     val buggy = "return cookieManager.getCookie(url)"
     val fixed = "return cookieManager.getCookie(url) ?: \"\""
-    val text = webviewKt.readText()
-    if (fixed in text || buggy !in text) return
-    webviewKt.writeText(text.replace(buggy, fixed))
-    println("[patch-android] null-safe RustWebView.getCookies applied")
+    val original = webviewKt.readText()
+    val base = ": WebView(context)"
+    val audioBase = ": dev.yumeo.yumusic.audio.BackgroundAudioWebView(context)"
+    check(base in original || audioBase in original) {
+        "RustWebView's generated superclass changed; update the background-audio patch"
+    }
+    val cookiesPatched = if (fixed in original) original else original.replace(buggy, fixed)
+    val patched = cookiesPatched.replace(base, audioBase)
+    if (patched == original) return
+    webviewKt.writeText(patched)
+    println("[patch-android] null-safe cookies and background-audio WebView applied")
 }
 
 gradle.taskGraph.whenReady { patchRustWebView() }

@@ -14,13 +14,14 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import dev.yumeo.yumusic.audio.BackgroundAudioWebView
 import org.json.JSONObject
 
 /** A separate view runs YouTube's ready minter without navigating the music UI. */
 class PoTokenWebView(private val activity: Activity) {
   private val handler = Handler(Looper.getMainLooper())
   private val results = mutableMapOf<String, String>()
-  private var webView: WebView? = null
+  private var webView: BackgroundAudioWebView? = null
   private var consent: Dialog? = null
   private var requestId: String? = null
   private var binding = ""
@@ -35,6 +36,9 @@ class PoTokenWebView(private val activity: Activity) {
     binding = contentBinding
     script = bridgeScript
     if (webView == null) webView = createWebView()
+    // A new track can need attestation while the activity's window is hidden.
+    webView?.setAudioActive(true)
+    webView?.onResume()
     val loop = object : Runnable {
       override fun run() {
         val view = webView ?: return
@@ -76,13 +80,15 @@ class PoTokenWebView(private val activity: Activity) {
     tick = null
     timeout = null
     requestId = null
+    webView?.setAudioActive(false)
+    webView?.onPause()
     result.put("cookie", CookieManager.getInstance().getCookie("https://www.youtube.com/") ?: "")
     results[id] = result.toString()
   }
 
   @SuppressLint("SetJavaScriptEnabled")
-  private fun createWebView(): WebView {
-    val view = WebView(activity)
+  private fun createWebView(): BackgroundAudioWebView {
+    val view = BackgroundAudioWebView(activity)
     view.settings.javaScriptEnabled = true
     view.settings.domStorageEnabled = true
     view.settings.mediaPlaybackRequiresUserGesture = true

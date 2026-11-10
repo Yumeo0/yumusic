@@ -35,6 +35,14 @@ handoff grace period: ExoPlayer's own wake lock ends at `STATE_ENDED`, before th
 next track's attestation and stream setup can finish. Ended decks do not extend
 this grace period. The producer lock is released after the grace period or when
 the activity detaches.
+Keeping a WebView resumed does not override Chromium's hidden-window suspension.
+The producer uses `BackgroundAudioWebView` to report a visible window to its
+renderer while playback or the handoff grace period is active. The separate
+YouTube token WebView does the same only while minting a token, including when
+reused for another track. The Android window stays hidden and the screen stays
+off; normal renderer visibility returns when audio work ends. The Gradle
+template patch reapplies this base class to the generated `RustWebView` before
+Kotlin compilation.
 Volume changes do not emit synthetic playback-clock updates, and crossfade ticks
 share one pending animation frame to avoid IPC/animation feedback loops.
 Removing the app from recent tasks stops playback because its queue and SABR

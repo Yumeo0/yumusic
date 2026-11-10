@@ -41,6 +41,7 @@ object AudioBridge {
 
   private fun applyLifecycle() {
     val target = view.get() ?: return
+    (target as? BackgroundAudioWebView)?.setAudioActive(playbackActive)
     if (!paused || playbackActive) target.onResume() else target.onPause()
   }
   fun hostPaused() { paused = true; applyLifecycle() }
@@ -54,6 +55,7 @@ object AudioBridge {
     else main.postDelayed(suspendView, HANDOFF_GRACE_MS)
   }
   fun attach(webView: WebView) {
+    (view.get() as? BackgroundAudioWebView)?.setAudioActive(false)
     releaseWakeLock()
     wakeLock = (webView.context.applicationContext.getSystemService(Context.POWER_SERVICE) as PowerManager)
       .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YuMusic:AudioProducer").apply { setReferenceCounted(false) }
@@ -63,6 +65,7 @@ object AudioBridge {
   }
   fun detach(webView: WebView?) {
     if (view.get() === webView) {
+      (webView as? BackgroundAudioWebView)?.setAudioActive(false)
       view.clear()
       main.removeCallbacks(suspendView)
       releaseWakeLock()
