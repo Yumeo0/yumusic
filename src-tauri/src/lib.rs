@@ -1,21 +1,29 @@
 mod discord;
 mod downloads;
-mod http_client;
 mod haptics;
+mod http_client;
 mod incoming_links;
 mod login_session;
 mod media_controls;
 mod native_audio;
 mod po_token;
 mod proxy;
+#[cfg(desktop)]
+mod session_refresh;
 mod sync_oauth;
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+
+static AUTH_REVISION: AtomicU64 = AtomicU64::new(0);
+// Keep the final recovery check/write atomic with logout and new logins.
+static AUTH_MUTATION: Mutex<()> = Mutex::new(());
 
 fn cookie_path(app: &AppHandle) -> Result<PathBuf, String> {
 	let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -91,10 +99,16 @@ fn get_cookie(app: AppHandle) -> Result<Option<String>, String> {
 
 #[tauri::command]
 async fn logout(app: AppHandle) -> Result<bool, String> {
-	po_token::reset(&app);
-	let path = cookie_path(&app)?;
-	if path.exists() {
-		fs::remove_file(&path).map_err(|e| e.to_string())?;
+	{
+		let _mutation = AUTH_MUTATION.lock().map_err(|e| e.to_string())?;
+		AUTH_REVISION.fetch_add(1, Ordering::SeqCst);
+		#[cfg(desktop)]
+		session_refresh::cancel(&app);
+		po_token::reset(&app);
+		let path = cookie_path(&app)?;
+		if path.exists() {
+			fs::remove_file(&path).map_err(|e| e.to_string())?;
+		}
 	}
 	#[cfg(target_os = "android")]
 	{
@@ -124,7 +138,9 @@ async fn logout(app: AppHandle) -> Result<bool, String> {
 	{
 		// The login webview shares the main window's cookie store. Removing only
 		// cookie.json lets the next login immediately capture the same stale session.
-		let window = app.get_webview_window("main").ok_or("Main window not found")?;
+		let window = app
+			.get_webview_window("main")
+			.ok_or("Main window not found")?;
 		for origin in [
 			"https://google.com/",
 			"https://accounts.google.com/",
@@ -161,38 +177,63 @@ async fn session_verifier() -> Result<reqwest::Client, String> {
 /// here: the shared browser store may still recover the session later.
 #[tauri::command]
 async fn validate_session(app: AppHandle) -> Result<Option<String>, String> {
+	// Multiple callers must not create competing recovery windows.
+	static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+	let _lock = LOCK.lock().await;
+	let revision = AUTH_REVISION.load(Ordering::SeqCst);
 	let Some(saved) = read_cookie(&app)? else {
 		return Ok(None);
 	};
 	let verifier = session_verifier().await?;
-	if login_session::verify_login(&verifier, &saved).await? {
-		return Ok(Some(saved));
-	}
-	// A browser view may have rotated the cookies since cookie.json was saved.
-	if let Some(window) = app.get_webview_window("main") {
-		let current = collect_login_cookies(&window)?;
-		if current != saved
-			&& login_session::has_login_cookies(&current)
-			&& login_session::verify_login(&verifier, &current).await?
-		{
-			// Do not resurrect a session if the user signed out during verification.
-			if read_cookie(&app)?.as_deref() == Some(saved.as_str()) {
-				write_cookie(&app, &current)?;
-				return Ok(Some(current));
+	let recovered = login_session::recover_login(
+		&saved,
+		|cookie| {
+			let verifier = &verifier;
+			async move { login_session::verify_login(verifier, &cookie).await }
+		},
+		|| {
+			app.get_webview_window("main")
+				.map(|window| collect_login_cookies(&window))
+				.unwrap_or_else(|| Ok(String::new()))
+		},
+		|| async {
+			#[cfg(desktop)]
+			{
+				session_refresh::refresh(&app, &verifier, revision).await
 			}
+			#[cfg(not(desktop))]
+			{
+				Ok(None)
+			}
+		},
+	)
+	.await?;
+	// Logout or interactive login invalidates in-flight recovery, even when a
+	// new login happens to export the same cookie header.
+	let _mutation = AUTH_MUTATION.lock().map_err(|e| e.to_string())?;
+	if AUTH_REVISION.load(Ordering::SeqCst) != revision
+		|| read_cookie(&app)?.as_deref() != Some(saved.as_str())
+	{
+		return Err("Session recovery cancelled".into());
+	}
+	if let Some(cookie) = &recovered {
+		if cookie != &saved {
+			write_cookie(&app, cookie)?;
 		}
 	}
-	Ok(None)
+	Ok(recovered)
 }
 
 #[tauri::command]
 async fn login(app: AppHandle) -> Result<Option<String>, String> {
-	po_token::reset(&app);
-	let mut login_url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
-		.map_err(|e| e.to_string())?;
-	login_url
-		.query_pairs_mut()
-		.append_pair("continue", "https://music.youtube.com/");
+	{
+		let _mutation = AUTH_MUTATION.lock().map_err(|e| e.to_string())?;
+		AUTH_REVISION.fetch_add(1, Ordering::SeqCst);
+		#[cfg(desktop)]
+		session_refresh::cancel(&app);
+		po_token::reset(&app);
+	}
+	let login_url = login_session::google_login_url()?;
 	let verifier = session_verifier().await?;
 
 	let mut builder = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(login_url))
@@ -383,8 +424,7 @@ pub fn run() {
 			#[cfg(desktop)]
 			{
 				#[cfg(target_os = "windows")]
-				let hwnd = app
-					.get_webview_window("main")
+				let hwnd = app.get_webview_window("main")
 					.and_then(|window| window.hwnd().ok())
 					.map(|hwnd| hwnd.0 as u64);
 				#[cfg(not(target_os = "windows"))]

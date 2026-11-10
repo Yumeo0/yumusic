@@ -8,6 +8,8 @@
 
 ### Bug fixes
 
+- Fixed recurring desktop sign-outs when saved YouTube cookies expire by automatically renewing the existing Google session.
+
 ## [0.10.3] - 2026-11-07
 
 ### Improvements
