@@ -2,7 +2,7 @@
 	"name": "yumusic",
 	"productName": "YuMusic",
 	"private": true,
-	"version": "0.10.3",
+	"version": "0.10.4",
 	"description": "Crossplatform app for YTM",
 	"license": "GPL-3.0-only",
 	"type": "module",
