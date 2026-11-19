@@ -78,7 +78,7 @@ function SectionMenu({ title, onHide }: { title: string; onHide: () => void }) {
 					className="z-90 outline-none"
 					sideOffset={6}
 				>
-					<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+					<Menu.Popup className="ui-popup min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none">
 						<Menu.Item
 							className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
 							onClick={onHide}
@@ -597,7 +597,7 @@ export function HomeFeed() {
 						className="animate-track-in pb-3"
 						// biome-ignore lint/suspicious/noArrayIndexKey: home feed sections may repeat titles
 						key={`feed-${section.title}-${si}`}
-						style={{ animationDelay: `${si * 80}ms` }}
+						style={{ animationDelay: `${Math.min(si * 40, 160)}ms` }}
 					>
 						<div className="group/section mb-4 flex items-center gap-2">
 							<h2 className="text-sm font-medium text-muted-foreground">

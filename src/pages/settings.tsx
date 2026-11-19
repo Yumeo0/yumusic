@@ -279,8 +279,8 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.romanizeLyrics}
 							aria-label="Toggle romanized lyrics"
-							aria-pressed={settings.romanizeLyrics}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.romanizeLyrics ? "bg-primary" : "bg-foreground/15",
@@ -288,6 +288,7 @@ export default function SettingsPage({
 							onClick={() =>
 								update({ romanizeLyrics: !settings.romanizeLyrics })
 							}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -309,8 +310,8 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.preferSyncedLyrics}
 							aria-label="Toggle prefer synced lyrics"
-							aria-pressed={settings.preferSyncedLyrics}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.preferSyncedLyrics ? "bg-primary" : "bg-foreground/15",
@@ -318,6 +319,7 @@ export default function SettingsPage({
 							onClick={() =>
 								update({ preferSyncedLyrics: !settings.preferSyncedLyrics })
 							}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -339,8 +341,8 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.lrclibLooseMatch}
 							aria-label="Toggle loose lyrics matching"
-							aria-pressed={settings.lrclibLooseMatch}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.lrclibLooseMatch ? "bg-primary" : "bg-foreground/15",
@@ -348,6 +350,7 @@ export default function SettingsPage({
 							onClick={() =>
 								update({ lrclibLooseMatch: !settings.lrclibLooseMatch })
 							}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -477,13 +480,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.cleanTitles}
 							aria-label="Toggle title cleanup"
-							aria-pressed={settings.cleanTitles}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.cleanTitles ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ cleanTitles: !settings.cleanTitles })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -510,13 +514,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.autoplay}
 							aria-label="Toggle autoplay"
-							aria-pressed={settings.autoplay}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.autoplay ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ autoplay: !settings.autoplay })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -537,13 +542,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.crossfade}
 							aria-label="Toggle crossfade"
-							aria-pressed={settings.crossfade}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.crossfade ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ crossfade: !settings.crossfade })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -605,13 +611,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.watchHistory}
 							aria-label="Toggle watch history reporting"
-							aria-pressed={settings.watchHistory}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.watchHistory ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ watchHistory: !settings.watchHistory })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -641,13 +648,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.listenbrainz}
 							aria-label="Toggle ListenBrainz scrobbling"
-							aria-pressed={settings.listenbrainz}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.listenbrainz ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ listenbrainz: !settings.listenbrainz })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -740,13 +748,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.discordRpc}
 							aria-label="Toggle Discord rich presence"
-							aria-pressed={settings.discordRpc}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.discordRpc ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ discordRpc: !settings.discordRpc })}
+							role="switch"
 							type="button"
 						>
 							<span
@@ -829,13 +838,14 @@ export default function SettingsPage({
 							</p>
 						</div>
 						<button
+							aria-checked={settings.developerMode}
 							aria-label="Toggle developer mode"
-							aria-pressed={settings.developerMode}
 							className={cn(
 								"relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200",
 								settings.developerMode ? "bg-primary" : "bg-foreground/15",
 							)}
 							onClick={() => update({ developerMode: !settings.developerMode })}
+							role="switch"
 							type="button"
 						>
 							<span

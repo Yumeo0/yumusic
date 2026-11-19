@@ -6,7 +6,16 @@
 
 ### Improvements
 
+- Player and queue gestures now follow the finger directly, carry flick momentum into interruptible springs, and use softer feedback across controls and menus.
+- Reduced motion, reduced transparency, higher contrast, and keyboard focus are respected across player controls, dialogs, and navigation.
+
 ### Bug fixes
+
+- Fixed opening the half-height queue centering the current song below the screen instead of within the visible list.
+- Fixed seeking getting stuck after a cancelled gesture and hidden queue controls remaining in the keyboard path.
+- Fixed the android icon clipping on all edges.
+- Fixed sudden volume dips and jumps during Android crossfades.
+- Fixed Android playback stopping early with the screen locked and a sleep timer active. The next song can buffer and crossfade whenever the timer allows playback to continue.
 
 ## [0.10.4] - 2026-11-10
 

@@ -10,11 +10,11 @@ const flush = async () => {
 	for (let i = 0; i < 20; i++) await Promise.resolve();
 };
 
-function fixture() {
+function fixture(deck = 0) {
 	const events = new EventTarget();
 	const commands: Record<string, unknown>[] = [];
 	const batches: { id: string; epoch: number; data: string }[] = [];
-	const media = new NativeAudioElement(0, {
+	const media = new NativeAudioElement(deck, {
 		events,
 		command: async (command) => {
 			commands.push(command);
@@ -28,7 +28,7 @@ function fixture() {
 		events.dispatchEvent(
 			new CustomEvent(NATIVE_AUDIO_EVENT, {
 				detail: {
-					deck: 0,
+					deck,
 					id: commands.findLast((c) => c.op === "load")?.id,
 					...state,
 				},
@@ -36,6 +36,53 @@ function fixture() {
 		);
 	return { media, commands, batches, emit };
 }
+
+test("Android runs a crossfade for the two mounted tracks and ignores stale results", async () => {
+	const outgoing = fixture();
+	const incoming = fixture(1);
+	const { signal } = new AbortController();
+	outgoing.media.volume = 0.8;
+	const mounts = [
+		outgoing.media.mountFile("outgoing.m4a", 120, signal, true),
+		incoming.media.mountFile("incoming.m4a", 120, signal),
+	];
+	outgoing.emit({ type: "state", ready: true, paused: false });
+	incoming.emit({ type: "state", ready: true, paused: true });
+	await Promise.all(mounts);
+	const id = outgoing.commands[0].id as string;
+	const nextId = incoming.commands[0].id as string;
+	expect(outgoing.commands[0]).toMatchObject({ op: "load", volume: 0.8 });
+
+	const results: boolean[] = [];
+	outgoing.media.crossfadeTo(incoming.media, 3, (completed) => {
+		results.push(completed);
+	});
+	expect(outgoing.commands.at(-1)).toEqual({
+		op: "crossfade",
+		deck: 0,
+		id,
+		nextDeck: 1,
+		nextId,
+		seconds: 3,
+	});
+	outgoing.emit({
+		type: "crossfade",
+		nextId: "previous-preload",
+		completed: true,
+	});
+	outgoing.emit({
+		type: "crossfade",
+		id: "previous-track",
+		nextId,
+		completed: true,
+	});
+	expect(results).toEqual([]);
+	outgoing.emit({ type: "crossfade", nextId, completed: true });
+	outgoing.emit({ type: "crossfade", nextId, completed: false });
+	expect(results).toEqual([true]);
+	outgoing.media.dispose();
+	incoming.media.dispose();
+});
 
 test("a native decoder failure before readiness clears playback intent", async () => {
 	const f = fixture();

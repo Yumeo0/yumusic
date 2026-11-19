@@ -1,6 +1,7 @@
 package dev.yumeo.yumusic.audio
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
@@ -22,20 +23,38 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import dev.yumeo.yumusic.MainActivity
 import java.io.File
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import org.json.JSONObject
 
 /** The service owns Android's decoders, AudioTrack, focus and system media session.
  * Both decks share one audio session so an external equalizer also covers crossfades. */
 @UnstableApi
-class PlaybackService : MediaSessionService() {
+class PlaybackService internal constructor(private val createPlayer: (Context) -> ExoPlayer) : MediaSessionService() {
+  constructor() : this({ context ->
+    ExoPlayer.Builder(context)
+      .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(15000, 45000, 500, 1000).build())
+      .build()
+  })
+
   companion object { var instance: PlaybackService? = null; private set }
-  private data class Deck(val player: ExoPlayer, var id: String = "", var source: SabrMediaSource? = null)
+  private data class Deck(val player: ExoPlayer, var id: String = "", var source: SabrMediaSource? = null, var volume: Float = 1f)
+  private data class Crossfade(
+    val from: Int,
+    val to: Int,
+    var durationMs: Long,
+    var startPositionMs: Long? = null,
+    var progress: Double = 0.0,
+  )
   private lateinit var decks: Array<Deck>
+  private var crossfade: Crossfade? = null
   private var session: MediaSession? = null
   private var active = 0
   private var audioSession = 0
   private var snapshot = JSONObject()
   private val main = Handler(Looper.getMainLooper())
+  private val fadeTick = Runnable { advanceCrossfade() }
   private val clock = object : Runnable {
     override fun run() { decks.forEachIndexed { i, deck -> if (deck.id.isNotEmpty()) publish(i) }; main.postDelayed(this, 250) }
   }
@@ -44,27 +63,24 @@ class PlaybackService : MediaSessionService() {
     super.onCreate()
     audioSession = (getSystemService(AUDIO_SERVICE) as AudioManager).generateAudioSessionId()
     decks = Array(2) { index ->
-      val player = ExoPlayer.Builder(this)
-        .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(15000, 45000, 500, 1000).build())
-        .build().apply {
-          setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), index == 0)
-          setAudioSessionId(audioSession)
-          setHandleAudioBecomingNoisy(true)
-          setWakeMode(C.WAKE_MODE_LOCAL)
-          addListener(object : Player.Listener {
-            override fun onEvents(player: Player, events: Player.Events) {
-              // Volume ramps are not clock ticks. Echoing each volume command
-              // into JS timeupdate feeds the crossfade back into itself.
-              if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED,
-                  Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_IS_PLAYING_CHANGED,
-                  Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_TIMELINE_CHANGED,
-                  Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) publish(index)
-            }
-            override fun onPlayerError(error: PlaybackException) {
-              AudioBridge.emit(JSONObject().put("type", "error").put("deck", index).put("id", decks[index].id).put("message", error.message ?: "Native playback failed"))
-            }
-          })
-        }
+      val player = createPlayer(this).apply {
+        setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), index == 0)
+        setAudioSessionId(audioSession)
+        setHandleAudioBecomingNoisy(true)
+        setWakeMode(C.WAKE_MODE_LOCAL)
+        addListener(object : Player.Listener {
+          override fun onEvents(player: Player, events: Player.Events) {
+            // Keep frequent gain changes out of JS playback-clock updates.
+            if (events.containsAny(Player.EVENT_PLAYBACK_STATE_CHANGED,
+                Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_IS_PLAYING_CHANGED,
+                Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_TIMELINE_CHANGED,
+                Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) publish(index)
+          }
+          override fun onPlayerError(error: PlaybackException) {
+            AudioBridge.emit(JSONObject().put("type", "error").put("deck", index).put("id", decks[index].id).put("message", error.message ?: "Native playback failed"))
+          }
+        })
+      }
       Deck(player)
     }
     val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -92,13 +108,17 @@ class PlaybackService : MediaSessionService() {
     if (index !in decks.indices) return
     val deck = decks[index]
     val op = value.getString("op")
+    if (op == "crossfade") return startCrossfade(index, value)
     if (op != "load" && op != "stop" && value.optString("id") != deck.id) return
     when (op) {
       "load" -> {
+        clearCrossfade(index)
         deck.source?.queue?.restart()
         deck.player.stop()
         deck.id = value.getString("id")
         deck.source = null
+        deck.volume = value.optDouble("volume", 1.0).toFloat().coerceIn(0f, 1f)
+        deck.player.volume = deck.volume
         val path = value.optString("path")
         val item = item(deck.id, if (path.isNotEmpty()) Uri.fromFile(File(path)) else Uri.parse("sabr://audio/${deck.id}"))
         if (path.isNotEmpty()) deck.player.setMediaSource(IndexedAudioFile.create(item, path, (value.optDouble("duration", 0.0) * 1_000_000).toLong()))
@@ -118,14 +138,24 @@ class PlaybackService : MediaSessionService() {
         activate(index)
         deck.player.play()
       }
-      "pause" -> deck.player.pause()
-      "seek" -> deck.player.seekTo((value.getDouble("value").coerceAtLeast(0.0) * 1000).toLong())
-      "volume" -> deck.player.volume = value.getDouble("value").toFloat().coerceIn(0f, 1f)
+      "pause" -> {
+        clearCrossfade(index)
+        deck.player.pause()
+      }
+      "seek" -> {
+        clearCrossfade(index)
+        deck.player.seekTo((value.getDouble("value").coerceAtLeast(0.0) * 1000).toLong())
+      }
+      "volume" -> {
+        deck.volume = value.getDouble("value").toFloat().coerceIn(0f, 1f)
+        if (crossfade == null) deck.player.volume = deck.volume
+      }
       "rate" -> deck.player.playbackParameters = PlaybackParameters(value.getDouble("value").toFloat().coerceIn(0.5f, 2f))
       "end" -> deck.source?.queue?.finish(value.getInt("epoch"), value.optString("error").ifEmpty { null })
       "stop" -> {
         // A late teardown must not stop a newer track mounted on the same deck.
         if (value.optString("id") != deck.id) return
+        clearCrossfade(index, handoff = true)
         deck.source?.queue?.restart()
         deck.source = null
         deck.id = ""
@@ -138,6 +168,88 @@ class PlaybackService : MediaSessionService() {
       }
     }
     if (op != "volume" && op != "rate") publish(index)
+  }
+
+  private fun startCrossfade(index: Int, value: JSONObject) {
+    val id = value.optString("id")
+    val nextIndex = value.optInt("nextDeck", -1)
+    val nextId = value.optString("nextId")
+    val next = decks.getOrNull(nextIndex)
+    val outgoing = decks[index].player
+    val durationMs = (value.optDouble("seconds", -1.0) * 1000).toLong()
+    // A zero-duration handover is only allowed at a natural track boundary.
+    if (crossfade != null || index != active || nextIndex == index ||
+      id.isEmpty() || decks[index].id != id || nextId.isEmpty() || next?.id != nextId ||
+      !outgoing.playWhenReady || durationMs < 0 ||
+      (durationMs == 0L && outgoing.playbackState != Player.STATE_ENDED)) {
+      crossfadeResult(index, id, nextId, false)
+      return
+    }
+    crossfade = Crossfade(index, nextIndex, durationMs)
+    // The outgoing deck owns audio focus until the handover. Start the second
+    // deck muted and leave the outgoing gain alone until both can render audio.
+    next.player.volume = 0f
+    next.player.play()
+    main.post(fadeTick)
+  }
+
+  private fun advanceCrossfade() {
+    val fade = crossfade ?: return
+    val from = decks[fade.from]
+    val outgoing = from.player
+    val incoming = decks[fade.to].player
+    val ended = outgoing.playbackState == Player.STATE_ENDED
+    if ((!ended && !outgoing.playWhenReady) ||
+      outgoing.playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE ||
+      !incoming.playWhenReady || incoming.playbackState == Player.STATE_IDLE ||
+      incoming.playbackState == Player.STATE_ENDED ||
+      (!incoming.isPlaying && (ended || fade.startPositionMs != null))) {
+      clearCrossfade(fade.from)
+      return
+    }
+    if (incoming.isPlaying && (outgoing.isPlaying || ended)) {
+      val position = outgoing.currentPosition
+      val start = fade.startPositionMs ?: position.also {
+        fade.startPositionMs = it
+        val trackDuration = outgoing.duration
+        if (trackDuration > it) fade.durationMs = minOf(fade.durationMs, trackDuration - it)
+      }
+      if (ended) fade.progress = 1.0
+      else fade.progress = ((position - start).toDouble() / fade.durationMs).coerceIn(fade.progress, 1.0)
+      val angle = fade.progress * PI / 2
+      outgoing.volume = if (fade.progress == 1.0) 0f else from.volume * cos(angle).toFloat()
+      incoming.volume = from.volume * sin(angle).toFloat()
+      if (fade.progress == 1.0) {
+        // Keep the final gains until the queue promotes the incoming deck and stops this one.
+        crossfadeResult(fade.from, from.id, decks[fade.to].id, true)
+        return
+      }
+    }
+    main.postDelayed(fadeTick, 16)
+  }
+
+  private fun clearCrossfade(index: Int, handoff: Boolean = false) {
+    val fade = crossfade ?: return
+    if (index != fade.from && index != fade.to) return
+    crossfade = null
+    main.removeCallbacks(fadeTick)
+    val from = decks[fade.from]
+    val to = decks[fade.to]
+    val completed = fade.progress == 1.0
+    if (handoff && index == fade.from && completed) {
+      to.volume = from.volume
+      to.player.volume = to.volume
+      return
+    }
+    from.player.volume = from.volume
+    to.player.pause()
+    to.player.volume = to.volume
+    if (!completed) crossfadeResult(fade.from, from.id, to.id, false)
+  }
+
+  private fun crossfadeResult(index: Int, id: String, nextId: String, completed: Boolean) {
+    AudioBridge.emit(JSONObject().put("type", "crossfade").put("deck", index).put("id", id)
+      .put("nextId", nextId).put("completed", completed))
   }
 
   private fun activate(index: Int) {

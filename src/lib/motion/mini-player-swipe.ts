@@ -1,6 +1,12 @@
 import { type RefObject, type TouchEvent, useEffect, useRef } from "react";
 import { getNowPlayingOpen, getQueueOpen } from "@/lib/player/player-ui";
 import { haptic } from "@/lib/utils/haptics";
+import {
+	createSpring,
+	GestureVelocity,
+	projectMomentum,
+	rubberband,
+} from "./spring";
 
 /** Horizontal track changes share axis locking with the vertical player gesture. */
 export function useMiniPlayerTrackSwipe({
@@ -18,61 +24,49 @@ export function useMiniPlayerTrackSwipe({
 	next: () => void;
 	previous: () => void;
 }) {
+	const springRef = useRef<ReturnType<typeof createSpring> | null>(null);
+	if (!springRef.current)
+		springRef.current = createSpring(0, (position) => {
+			const node = trackRef.current;
+			if (!node) return;
+			node.style.translate = `${position}px`;
+			node.style.opacity = String(1 - Math.min(0.25, Math.abs(position) / 400));
+		});
+	const spring = springRef.current;
+	useEffect(() => () => spring.stop(), [spring]);
 	const gesture = useRef<{
 		x: number;
 		y: number;
+		origin: number;
 		distance: number;
 		following: boolean;
+		velocity: GestureVelocity;
 	} | null>(null);
 	const suppressClick = useRef(false);
-	const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-	useEffect(
-		() => () => {
-			if (timer.current) clearTimeout(timer.current);
-		},
-		[],
-	);
 	const finish = (event: TouchEvent, cancelled: boolean) => {
 		const current = gesture.current;
 		gesture.current = null;
 		if (!current?.following) return;
-		event.preventDefault();
+		if (event.cancelable) event.preventDefault();
+		const velocity = cancelled ? 0 : current.velocity.read();
+		const projected = current.distance + projectMomentum(velocity);
 		const node = trackRef.current;
-		if (node) {
-			node.dataset.swipeContextUntil = String(performance.now() + 700);
-			node.style.transition = window.matchMedia(
-				"(prefers-reduced-motion: reduce)",
-			).matches
-				? "none"
-				: "translate 280ms cubic-bezier(.2,1.4,.4,1), opacity 180ms ease";
-			node.style.translate = "0px";
-			node.style.opacity = "1";
-		}
-		if (!cancelled && Math.abs(current.distance) >= 64) {
-			if (current.distance < 0 && hasNext) {
+		if (node) node.dataset.swipeContextUntil = String(performance.now() + 700);
+		spring.animate(0, { velocity, momentum: !cancelled });
+		if (!cancelled && Math.abs(projected) >= 64) {
+			if (projected < 0 && hasNext) {
 				haptic("confirm");
 				next();
-			} else if (current.distance > 0 && hasPrevious) {
+			} else if (projected > 0 && hasPrevious) {
 				haptic("confirm");
 				previous();
 			}
 		}
-		timer.current = setTimeout(() => {
-			suppressClick.current = false;
-			node?.style.removeProperty("transition");
-			node?.style.removeProperty("translate");
-			node?.style.removeProperty("opacity");
-		}, 350);
 	};
 	return {
 		onTouchStartCapture: (event: TouchEvent) => {
 			gesture.current = null;
 			suppressClick.current = false;
-			if (timer.current) clearTimeout(timer.current);
-			const node = trackRef.current;
-			node?.style.removeProperty("transition");
-			node?.style.removeProperty("translate");
-			node?.style.removeProperty("opacity");
 			if (
 				!enabled ||
 				event.touches.length !== 1 ||
@@ -88,14 +82,19 @@ export function useMiniPlayerTrackSwipe({
 				)
 			)
 				return;
-			const touch = event.touches[0];
+			const touch = event.touches[0],
+				node = trackRef.current;
 			if (!node || touch.clientY < node.getBoundingClientRect().top) return;
 			node.dataset.swipeContextUntil = "0";
+			const velocity = new GestureVelocity();
+			velocity.add(touch.clientX);
 			gesture.current = {
 				x: touch.clientX,
 				y: touch.clientY,
+				origin: spring.position,
 				distance: 0,
 				following: false,
+				velocity,
 			};
 		},
 		onTouchMoveCapture: (event: TouchEvent) => {
@@ -107,31 +106,38 @@ export function useMiniPlayerTrackSwipe({
 			}
 			const dx = event.touches[0].clientX - current.x;
 			const dy = event.touches[0].clientY - current.y;
+			current.velocity.add(event.touches[0].clientX);
 			if (!current.following) {
 				if (Math.abs(dy) > Math.max(10, Math.abs(dx))) {
 					gesture.current = null;
 					return;
 				}
 				if (Math.abs(dx) <= Math.max(10, Math.abs(dy))) return;
+				current.origin = spring.position;
+				spring.stop();
 				current.following = true;
 				suppressClick.current = true;
 			}
 			current.distance = dx;
 			const node = trackRef.current;
-			if (node) {
-				node.dataset.swipeContextUntil = "Infinity";
-				const allowed = dx < 0 ? hasNext : hasPrevious;
-				node.style.translate = `${Math.sign(dx) * Math.min(64, Math.abs(dx) * (allowed ? 0.45 : 0.12))}px`;
-				node.style.opacity = String(1 - Math.min(0.25, Math.abs(dx) / 400));
-			}
+			if (node) node.dataset.swipeContextUntil = "Infinity";
+			const allowed = dx < 0 ? hasNext : hasPrevious;
+			const distance =
+				allowed && Math.abs(dx) <= 96
+					? dx
+					: Math.sign(dx) *
+						(allowed
+							? 96 + rubberband(Math.abs(dx) - 96, 96)
+							: rubberband(Math.abs(dx), 64));
+			spring.jump(current.origin + distance, current.velocity.read());
 		},
 		onTouchEndCapture: (event: TouchEvent) => finish(event, false),
 		onTouchCancelCapture: (event: TouchEvent) => finish(event, true),
 		onClickCapture: (event: React.MouseEvent) => {
-			if (suppressClick.current) {
-				event.preventDefault();
-				event.stopPropagation();
-			}
+			if (!suppressClick.current) return;
+			suppressClick.current = false;
+			event.preventDefault();
+			event.stopPropagation();
 		},
 	};
 }

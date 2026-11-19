@@ -2,6 +2,26 @@ import { describe, expect, test } from "bun:test";
 import { SleepTimerStore, sleepTimerLabel } from "./sleep-timer";
 
 describe("sleep timer song boundaries", () => {
+	test("checking a future handover leaves the timer for the actual song boundary", () => {
+		const timer = new SleepTimerStore();
+		timer.afterSongs(2);
+		expect(timer.shouldStopAtTrackEnd(0, 3)).toBe(false);
+		expect(timer.shouldStopAtTrackEnd(0, 3)).toBe(false);
+		expect(timer.getSnapshot()).toEqual({ mode: "songs", remaining: 2 });
+		expect(timer.trackEnded(0, 3)).toBe(false);
+		expect(timer.shouldStopAtTrackEnd(1, 3)).toBe(true);
+
+		timer.afterMinutes(1, 0);
+		expect(timer.shouldStopAtTrackEnd(0, 3, 59_000)).toBe(false);
+		expect(timer.shouldStopAtTrackEnd(0, 3, 60_000)).toBe(true);
+		expect(timer.getSnapshot()).toEqual({ mode: "duration", deadline: 60_000 });
+
+		timer.finishQueue();
+		expect(timer.shouldStopAtTrackEnd(0, 2)).toBe(false);
+		expect(timer.shouldStopAtTrackEnd(1, 2)).toBe(true);
+		expect(timer.getSnapshot()).toEqual({ mode: "queue" });
+	});
+
 	test("duration finishes a song that crosses its deadline, without stopping the earlier song", () => {
 		const timer = new SleepTimerStore();
 		timer.afterMinutes(1, 1000);

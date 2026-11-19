@@ -55,8 +55,8 @@ export function StorageManagerDialog({
 	return (
 		<Dialog.Root onOpenChange={onOpenChange} open={open}>
 			<Dialog.Portal>
-				<Dialog.Backdrop className="fixed inset-0 z-100 bg-black/50 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-				<Dialog.Popup className="fixed top-1/2 left-1/2 z-100 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-foreground/10 bg-popover p-5 text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+				<Dialog.Backdrop className="ui-backdrop fixed inset-0 z-100 bg-black/50 backdrop-blur-xs" />
+				<Dialog.Popup className="ui-popup fixed top-1/2 left-1/2 z-100 flex w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl border border-foreground/10 bg-popover p-5 text-popover-foreground shadow-2xl outline-none">
 					<Dialog.Title className="text-base font-semibold">
 						Download storage
 					</Dialog.Title>

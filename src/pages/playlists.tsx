@@ -678,7 +678,7 @@ export function PlaylistDetails() {
 									className="z-90 outline-none"
 									sideOffset={8}
 								>
-									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+									<Menu.Popup className="ui-popup min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none">
 										<Menu.RadioGroup
 											onValueChange={(value) => setSort(value as PlaylistSort)}
 											value={sort}
@@ -780,7 +780,7 @@ export function PlaylistDetails() {
 									className="z-90 outline-none"
 									sideOffset={8}
 								>
-									<Menu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+									<Menu.Popup className="ui-popup min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none">
 										<Menu.Item
 											className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm outline-none select-none data-highlighted:bg-foreground/8"
 											onClick={() =>

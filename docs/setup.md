@@ -47,6 +47,10 @@ provide every native integration. Android devices must reach the development
 server over the network; use the address reported by Tauri and allow it through
 the host firewall. Native changes require rebuilding the app.
 
+On Windows, the project and Cargo cache can live on different drives. The
+Android Gradle configuration disables incremental Kotlin compilation for
+included modules on another drive to avoid Kotlin's relative-path cache error.
+
 `bun run test` runs the tests and `bun run lint` checks formatting and lint
 rules. See [Android audio](android-audio.md) and
 [Android links](android-links.md) for native regression checks.

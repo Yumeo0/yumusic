@@ -84,14 +84,12 @@ export function Player() {
 			{...playerSwipeHandlers(swipeHandlers, trackSwipe)}
 		>
 			{/* Progress — seeking must not trigger the fullscreen open */}
-			<div className="px-4 pt-1.5 sm:px-5" onClick={(e) => e.stopPropagation()}>
-				<div data-mini-progress>
-					<MiniProgress
-						knownDuration={knownDuration}
-						songId={currentSong?.id ?? ""}
-						videoElementRef={videoElementRef}
-					/>
-				</div>
+			<div className="px-4 sm:px-5" onClick={(e) => e.stopPropagation()}>
+				<MiniProgress
+					knownDuration={knownDuration}
+					songId={currentSong?.id ?? ""}
+					videoElementRef={videoElementRef}
+				/>
 			</div>
 
 			{/* Track identity — click to open fullscreen. The row owns the
@@ -218,7 +216,7 @@ export function Player() {
 					</div>
 					<button
 						aria-label="Previous"
-						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-[0.97] disabled:pointer-events-none disabled:opacity-25"
 						data-mini-prev
 						disabled={!currentSong || !hasPrevious}
 						onClick={(e) => {
@@ -232,7 +230,7 @@ export function Player() {
 					<button
 						aria-label={isPlaying ? "Pause" : "Play"}
 						className={cn(
-							"player-ctl grid size-11 place-items-center rounded-full max-md:col-start-3 max-md:row-start-1 bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-90 disabled:opacity-40",
+							"player-ctl grid size-11 place-items-center rounded-full max-md:col-start-3 max-md:row-start-1 bg-primary text-primary-foreground shadow-[0_4px_16px_-4px_color-mix(in_oklab,var(--primary)_60%,transparent)] transition-all duration-200 hover:brightness-110 active:scale-[0.97] disabled:opacity-40",
 						)}
 						data-mini-play
 						disabled={!currentSong}
@@ -250,7 +248,7 @@ export function Player() {
 					</button>
 					<button
 						aria-label="Next"
-						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-90 disabled:pointer-events-none disabled:opacity-25"
+						className="player-ctl hidden md:grid size-9 place-items-center rounded-full text-foreground/80 transition-all duration-200 hover:bg-foreground/8 hover:text-foreground active:scale-[0.97] disabled:pointer-events-none disabled:opacity-25"
 						data-mini-next
 						disabled={!currentSong || !hasNext}
 						onClick={(e) => {
@@ -293,7 +291,7 @@ export function Player() {
 					<button
 						aria-label="Toggle queue"
 						className={cn(
-							"player-ctl grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-90 max-md:hidden",
+							"player-ctl grid size-9 place-items-center rounded-full transition-all duration-200 active:scale-[0.97] max-md:hidden",
 							isQueueOpen
 								? "bg-primary/12 text-primary"
 								: "text-muted-foreground hover:bg-foreground/8 hover:text-foreground",
@@ -308,14 +306,6 @@ export function Player() {
 					>
 						<ListMusic className="size-4.5" />
 					</button>
-
-					<div className="max-md:hidden">
-						<MiniTime
-							knownDuration={knownDuration}
-							songId={currentSong?.id ?? ""}
-							videoElementRef={videoElementRef}
-						/>
-					</div>
 				</div>
 			</div>
 		</footer>
@@ -352,41 +342,29 @@ function MiniProgress({
 		}
 	};
 	return (
-		<ProgressBar
-			disabled={!songId}
-			onSeek={roomRole === "guest" || !songId ? undefined : handleSeek}
-			onSeekCommit={songId ? handleSeek : undefined}
-			progress={songId && duration > 0 ? currentTime / duration : 0}
-		/>
-	);
-}
-
-function MiniTime({
-	songId,
-	videoElementRef,
-	knownDuration,
-}: {
-	songId: string;
-	videoElementRef: VideoRef;
-	knownDuration?: number;
-}) {
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		songId,
-		knownDuration,
-	);
-	return (
-		<span className="font-mono text-xs text-muted-foreground tabular-nums">
-			<span className="text-foreground/80" data-mini-elapsed>
-				{formatTime(songId ? currentTime : 0)}
-			</span>
-			<span
-				className="mx-1 inline-block text-foreground/25"
-				data-player-morph-extra
-			>
-				/
-			</span>
-			<span data-mini-duration>{formatDuration(songId ? duration : 0)}</span>
-		</span>
+		<div className="pt-1.5">
+			<div className="relative h-3 w-full" data-mini-progress>
+				{/* Keep the full touch target in the compact row's surrounding padding. */}
+				<ProgressBar
+					className="absolute inset-x-0 top-1/2 -translate-y-1/2"
+					disabled={!songId}
+					onSeek={roomRole === "guest" || !songId ? undefined : handleSeek}
+					onSeekCommit={songId ? handleSeek : undefined}
+					progress={songId && duration > 0 ? currentTime / duration : 0}
+				/>
+			</div>
+			<div className="pointer-events-none relative flex justify-between font-mono text-[11px] leading-4 text-muted-foreground tabular-nums">
+				<span
+					className="text-foreground/80"
+					data-mini-elapsed
+					title="Elapsed time"
+				>
+					{formatTime(songId ? currentTime : 0)}
+				</span>
+				<span data-mini-duration title="Total duration">
+					{formatDuration(songId ? duration : 0)}
+				</span>
+			</div>
+		</div>
 	);
 }

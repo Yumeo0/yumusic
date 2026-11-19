@@ -1,5 +1,4 @@
-import { useEffect, useRef } from "react";
-import { useQueueSheetRef } from "@/contexts/player-context";
+import { type RefObject, useLayoutEffect, useRef } from "react";
 import {
 	getQueueState,
 	type QueueState,
@@ -7,11 +6,10 @@ import {
 	setQueueState,
 } from "@/lib/player/player-ui";
 import { haptic } from "@/lib/utils/haptics";
-import { QUEUE_STAGES, queueDragStage, queueStageOffset } from "./queue-stages";
+import { QUEUE_STAGES, queueReleaseStage } from "./queue-stages";
+import { createSpring, GestureVelocity, rubberband } from "./spring";
 
-// Opening from the player and dragging the header share a single sheet.
-let cancelActiveSpring: (() => void) | null = null;
-
+const MOBILE_QUERY = "(max-width: 767.98px)";
 export type QueueGestureCheck = (event: React.TouchEvent) => boolean;
 export interface TouchHandlers {
 	onTouchStart: (event: React.TouchEvent) => void;
@@ -31,142 +29,156 @@ export function mergeTouchHandlers(...sets: TouchHandlers[]): TouchHandlers {
 	};
 }
 
+interface QueueMotion {
+	begin: () => number;
+	drag: (position: number, velocity: number) => void;
+	settle: (stage: QueueState, velocity?: number) => void;
+	height: () => number;
+	update: (stage: QueueState) => void;
+	moving: () => boolean;
+}
+let motion: QueueMotion | null = null;
+
+/** Taps and gestures share one presentation value, including mid-flight grabs. */
+export function useQueueMotion(
+	sheetRef: RefObject<HTMLElement | null> | null | undefined,
+	stage: QueueState,
+) {
+	useLayoutEffect(() => {
+		const sheet = sheetRef?.current;
+		if (!sheet) return;
+		const mobile = () => window.matchMedia(MOBILE_QUERY).matches;
+		const height = () => sheet.offsetHeight || window.innerHeight;
+		const offset = (state: QueueState) =>
+			mobile()
+				? (QUEUE_STAGES.indexOf(state) * height()) / 2
+				: state === "closed"
+					? sheet.offsetWidth
+					: 0;
+		let dragging = false;
+		let moving = false;
+		let targetState = getQueueState();
+		const apply = (position: number) => {
+			sheet.style.translate = mobile() ? `0 ${position}px` : `${position}px 0`;
+			setQueueReveal(
+				mobile()
+					? (1 - position / height()) * 2
+					: getQueueState() === "closed"
+						? 0
+						: 1,
+			);
+		};
+		const spring = createSpring(offset(getQueueState()), apply);
+		const rest = () => {
+			moving = false;
+			sheet.inert = getQueueState() === "closed";
+			delete document.documentElement.dataset.morphDragging;
+		};
+		const driver = {
+			height,
+			moving: () => moving,
+			begin: () => {
+				spring.stop();
+				dragging = true;
+				document.documentElement.dataset.morphDragging = "true";
+				return spring.position;
+			},
+			drag: (position: number, velocity: number) =>
+				spring.jump(position, velocity),
+			settle: (state: QueueState, velocity?: number) => {
+				dragging = false;
+				moving = true;
+				sheet.inert = false;
+				targetState = state;
+				document.documentElement.dataset.morphDragging = "true";
+				spring.animate(offset(state), {
+					velocity,
+					momentum: velocity !== undefined,
+					onRest: rest,
+				});
+			},
+			update: (state: QueueState) => {
+				if (!dragging && state !== targetState) driver.settle(state);
+			},
+		};
+		motion = driver;
+		apply(spring.position);
+		const resize = new ResizeObserver(() => {
+			if (dragging) return;
+			spring.jump(offset(getQueueState()));
+			rest();
+		});
+		resize.observe(sheet);
+		return () => {
+			resize.disconnect();
+			spring.stop();
+			rest();
+			if (motion === driver) motion = null;
+		};
+	}, [sheetRef]);
+	useLayoutEffect(() => {
+		// The gesture owns the presentation value until release.
+		motion?.update(stage);
+	}, [stage]);
+}
+
 function useQueueGesture(opening: boolean, canStart?: QueueGestureCheck) {
-	const sheetRef = useQueueSheetRef();
 	const gesture = useRef<{
 		x: number;
 		y: number;
 		rest: QueueState;
 		stage: QueueState;
+		origin: number;
+		distance: number;
 		dragging: boolean;
+		velocity: GestureVelocity;
 	} | null>(null);
 	const suppressClick = useRef(false);
-	const spring = useRef({
-		position: 0,
-		velocity: 0,
-		target: 0,
-		frame: 0,
-		time: 0,
-		settling: false,
-		ownerState: getQueueState(),
-	});
-	const reset = () => {
-		cancelAnimationFrame(spring.current.frame);
-		spring.current.frame = 0;
-		const sheet = sheetRef?.current;
-		if (sheet) {
-			sheet.style.translate = "";
-			sheet.style.transition = "";
-		}
-		delete document.documentElement.dataset.morphDragging;
-	};
-	useEffect(
-		() => () => {
-			cancelAnimationFrame(spring.current.frame);
-			delete document.documentElement.dataset.morphDragging;
-		},
-		[],
-	);
-	const render = () => {
-		const sheet = sheetRef?.current;
-		if (!sheet) return;
-		sheet.style.translate = `0 ${spring.current.position}px`;
-		setQueueReveal(
-			(1 -
-				spring.current.position / (sheet.offsetHeight || window.innerHeight)) *
-				2,
-		);
-	};
-	const move = (target: number, settling = false, magnet = false) => {
-		const state = spring.current;
-		state.target = target;
-		state.settling = settling;
-		state.ownerState = getQueueState();
-		// Follow the finger directly between the short spring capture zones.
-		if (!settling && !magnet) {
-			cancelAnimationFrame(state.frame);
-			state.frame = 0;
-			state.position = target;
-			state.velocity = 0;
-			render();
-			return;
-		}
-		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-			state.position = target;
-			render();
-			if (settling) reset();
-			return;
-		}
-		if (state.frame) return;
-		state.time = performance.now();
-		const tick = (now: number) => {
-			if (getQueueState() !== state.ownerState) {
-				reset();
-				setQueueReveal(getQueueState() === "closed" ? 0 : 1);
-				return;
-			}
-			const elapsed = Math.min(
-				0.032,
-				Math.max(0.001, (now - state.time) / 1000),
-			);
-			state.time = now;
-			const steps = Math.ceil(elapsed / 0.008),
-				dt = elapsed / steps;
-			for (let i = 0; i < steps; i++) {
-				state.velocity +=
-					((state.target - state.position) * 520 - state.velocity * 30) * dt;
-				state.position += state.velocity * dt;
-			}
-			const done =
-				Math.abs(state.target - state.position) < 0.25 &&
-				Math.abs(state.velocity) < 2;
-			if (done) {
-				state.position = state.target;
-				state.velocity = 0;
-			}
-			render();
-			state.frame = done ? 0 : requestAnimationFrame(tick);
-			if (done && state.settling) reset();
-		};
-		state.frame = requestAnimationFrame(tick);
-	};
 	const finish = (cancelled: boolean) => {
 		const current = gesture.current;
 		gesture.current = null;
 		if (!current?.dragging) return;
-		const stage = cancelled ? current.rest : current.stage;
+		const velocity = cancelled ? 0 : current.velocity.read();
+		const stage = cancelled
+			? current.rest
+			: queueReleaseStage(
+					current.origin - current.distance,
+					motion?.height() ?? window.innerHeight,
+					velocity,
+					current.origin,
+				);
 		setQueueState(stage);
-		move(
-			(QUEUE_STAGES.indexOf(stage) *
-				(sheetRef?.current?.offsetHeight || window.innerHeight)) /
-				2,
-			true,
-		);
+		motion?.settle(stage, velocity);
 	};
 	return {
 		onClickCapture: (event: React.MouseEvent) => {
-			if (suppressClick.current) {
-				event.preventDefault();
-				event.stopPropagation();
-			}
+			if (!suppressClick.current) return;
+			suppressClick.current = false;
+			event.preventDefault();
+			event.stopPropagation();
 		},
 		onTouchStart: (event: React.TouchEvent) => {
 			suppressClick.current = false;
 			gesture.current = null;
 			if (
 				event.touches.length !== 1 ||
-				!window.matchMedia("(max-width: 767.98px)").matches ||
-				(getQueueState() === "closed") !== opening ||
+				!window.matchMedia(MOBILE_QUERY).matches ||
+				((getQueueState() === "closed") !== opening && !motion?.moving()) ||
 				(canStart && !canStart(event))
 			)
 				return;
 			const touch = event.touches[0];
+			const velocity = new GestureVelocity();
+			velocity.add(touch.clientY);
 			gesture.current = {
 				x: touch.clientX,
 				y: touch.clientY,
 				rest: getQueueState(),
 				stage: getQueueState(),
+				origin: 0,
+				distance: 0,
 				dragging: false,
+				velocity,
 			};
 		},
 		onTouchMove: (event: React.TouchEvent) => {
@@ -178,6 +190,7 @@ function useQueueGesture(opening: boolean, canStart?: QueueGestureCheck) {
 				return;
 			}
 			const distance = current.y - touch.clientY;
+			current.velocity.add(touch.clientY);
 			if (!current.dragging) {
 				if (
 					Math.abs(touch.clientX - current.x) > Math.max(10, Math.abs(distance))
@@ -185,35 +198,27 @@ function useQueueGesture(opening: boolean, canStart?: QueueGestureCheck) {
 					gesture.current = null;
 					return;
 				}
-				if (Math.abs(distance) < 10 || (opening && distance < 0)) return;
-				cancelActiveSpring?.();
-				reset();
-				cancelActiveSpring = reset;
-				const height = sheetRef?.current?.offsetHeight || window.innerHeight;
-				spring.current.position =
-					(QUEUE_STAGES.indexOf(current.rest) * height) / 2;
-				spring.current.velocity = 0;
+				if (Math.abs(distance) < 10 || (opening && distance < 0) || !motion)
+					return;
+				current.origin = motion.begin();
 				current.dragging = true;
 				suppressClick.current = true;
-				document.documentElement.dataset.morphDragging = "true";
 				if (opening) setQueueState("half");
-				if (sheetRef?.current) sheetRef.current.style.transition = "none";
-				render();
 			}
 			if (event.cancelable) event.preventDefault();
-			const height = sheetRef?.current?.offsetHeight || window.innerHeight;
-			const stage = queueDragStage(current.rest, distance);
+			current.distance = distance;
+			const height = motion?.height() ?? window.innerHeight;
+			const stage = queueReleaseStage(current.origin - distance, height);
 			if (stage !== current.stage) haptic("tick");
 			current.stage = stage;
-			const offset = queueStageOffset(current.rest, stage, distance, height);
-			const finger = Math.max(
-				0,
-				Math.min(
-					height,
-					(QUEUE_STAGES.indexOf(current.rest) * height) / 2 - distance,
-				),
-			);
-			move(offset, false, Math.abs(offset - finger) > 0.5);
+			const finger = current.origin - distance;
+			const position =
+				finger < 0
+					? rubberband(finger, height)
+					: finger > height
+						? height + rubberband(finger - height, height)
+						: finger;
+			motion?.drag(position, current.velocity.read());
 		},
 		onTouchEnd: () => finish(false),
 		onTouchCancel: () => finish(true),

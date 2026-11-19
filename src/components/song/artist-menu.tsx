@@ -35,7 +35,7 @@ export function ArtistContextMenu({
 			</ContextMenu.Trigger>
 			<ContextMenu.Portal>
 				<ContextMenu.Positioner className="z-100" sideOffset={4}>
-					<ContextMenu.Popup className="min-w-48 rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl outline-none">
+					<ContextMenu.Popup className="ui-popup min-w-48 rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl outline-none">
 						<ContextMenu.Group>
 							<ContextMenu.Item
 								className={item}

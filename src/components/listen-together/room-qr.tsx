@@ -170,8 +170,8 @@ export function RoomQrScanner({
 			open
 		>
 			<Dialog.Portal>
-				<Dialog.Backdrop className="fixed inset-0 z-100 bg-black/60 backdrop-blur-sm" />
-				<Dialog.Popup className="fixed top-1/2 left-1/2 z-100 max-h-[calc(100dvh-2rem)] w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-foreground/10 bg-popover p-5 shadow-2xl">
+				<Dialog.Backdrop className="ui-backdrop fixed inset-0 z-100 bg-black/60 backdrop-blur-sm" />
+				<Dialog.Popup className="ui-popup fixed top-1/2 left-1/2 z-100 max-h-[calc(100dvh-2rem)] w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-foreground/10 bg-popover p-5 shadow-2xl">
 					<div className="flex items-center justify-between gap-3">
 						<Dialog.Title className="flex items-center gap-2 text-lg font-semibold">
 							<Camera aria-hidden className="size-5 text-primary" />

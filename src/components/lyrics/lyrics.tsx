@@ -31,6 +31,7 @@ import { fetchMusixmatchSynced } from "@/lib/lyrics/musixmatch";
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
 import { parseLyricSection } from "@/lib/lyrics/sections";
 import { fetchVocadbLyrics } from "@/lib/lyrics/vocadb";
+import { prefersReducedMotion } from "@/lib/motion/spring";
 import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
 import { getSongLyrics, getTrackMeta } from "@/lib/youtube/youtube-client";
@@ -390,7 +391,7 @@ function SyncedLines({
 		const container = containerRef.current;
 		if (!container) return;
 		// Center the first line before playback reaches its timestamp too
-		const idx = activeIndex < 0 ? 0 : activeIndex;
+		const idx = Math.max(0, activeIndex);
 		const el = anchorRefs.current[idx];
 		if (!el) return;
 		if (Date.now() < holdUntilRef.current) return;
@@ -406,10 +407,19 @@ function SyncedLines({
 		const from = container.scrollTop;
 		const distance = target - from;
 		if (Math.abs(distance) < 1) return;
+		if (prefersReducedMotion()) {
+			container.scrollTop = target;
+			return;
+		}
 		// Long jumps (seeks, first load) get a bit more time, capped.
 		const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
 		const start = performance.now();
 		const tick = (now: number) => {
+			if (prefersReducedMotion()) {
+				container.scrollTop = target;
+				stopScroll();
+				return;
+			}
 			const t = Math.min((now - start) / duration, 1);
 			// easeInOutCubic: settles like the browser's smooth scroll
 			const eased = t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2;
@@ -434,6 +444,8 @@ function SyncedLines({
 		<div
 			className="no-scrollbar fade-mask-y relative min-h-0 flex-1 overflow-y-auto pr-2"
 			data-swipe-dismiss-ignore
+			onKeyDown={hold}
+			onPointerDown={hold}
 			onTouchMove={hold}
 			onWheel={hold}
 			ref={containerRef}

@@ -19,6 +19,11 @@ type-erased native webview handles. Upstream's MIT license remains with the
 source. To update, change the pinned submodule revision, refresh the patch,
 and run `bun run setup:mcp` before testing.
 
+When upgrading Tauri, keep the patch's `tauri` and `tauri-runtime-wry` version
+ranges compatible with `src-tauri/Cargo.toml`, then regenerate the copy and
+refresh `src-tauri/Cargo.lock`. Cargo resolves the optional bridge's versions
+even for mobile builds that do not enable it.
+
 The Bun Tauri wrapper enables the optional `mcp-bridge` Cargo feature only for
 desktop `dev`. The bridge and its main-window capability are registered only
 in debug builds, on `127.0.0.1:9223` (or the next available port). Production

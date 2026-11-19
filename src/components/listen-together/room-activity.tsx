@@ -23,7 +23,7 @@ export function RoomActivity() {
 						side="top"
 						sideOffset={10}
 					>
-						<Popover.Popup className="flex max-h-[min(36rem,var(--available-height))] w-[44rem] max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+						<Popover.Popup className="ui-popup flex max-h-[min(36rem,var(--available-height))] w-[44rem] max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) flex-col overflow-hidden rounded-2xl border border-border bg-popover text-popover-foreground shadow-2xl outline-none">
 							<div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
 								<Popover.Title className="flex items-center gap-2 text-base font-semibold">
 									<Headphones aria-hidden className="size-5 text-primary" />
@@ -47,7 +47,7 @@ export function RoomActivity() {
 	return (
 		<Dialog.Root handle={roomDialogHandle}>
 			<Dialog.Portal>
-				<Dialog.Popup className="fixed inset-0 z-100 flex h-dvh w-full flex-col overflow-hidden bg-background pt-(--safe-area-top) pb-(--safe-area-bottom)">
+				<Dialog.Popup className="ui-popup ui-fullscreen fixed inset-0 z-100 flex h-dvh w-full flex-col overflow-hidden bg-background pt-(--safe-area-top) pb-(--safe-area-bottom)">
 					<div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 py-3">
 						<Dialog.Title className="flex items-center gap-2 text-lg font-semibold tracking-tight">
 							<Headphones aria-hidden className="size-5 text-primary" />

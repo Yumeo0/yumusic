@@ -1,10 +1,11 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { IS_MOBILE } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 
-const appWindow = getCurrentWindow();
+const appWindow = isTauri() ? getCurrentWindow() : null;
 
 /**
  * Custom window decorations: drag region + minimize/maximize/close. The
@@ -14,6 +15,7 @@ export function Titlebar() {
 	const [maximized, setMaximized] = useState(false);
 
 	useEffect(() => {
+		if (!appWindow) return;
 		let unlisten: (() => void) | undefined;
 		appWindow
 			.onResized(async () => {
@@ -32,7 +34,7 @@ export function Titlebar() {
 	}, []);
 
 	// Mobile platforms keep their system window chrome.
-	if (IS_MOBILE) return null;
+	if (IS_MOBILE || !appWindow) return null;
 
 	return (
 		<div

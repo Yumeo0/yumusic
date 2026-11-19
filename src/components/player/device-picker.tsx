@@ -334,7 +334,7 @@ export function DeviceActivity() {
 					side="top"
 					sideOffset={10}
 				>
-					<Popover.Popup className="max-h-[min(36rem,var(--available-height))] w-96 max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+					<Popover.Popup className="ui-popup max-h-[min(36rem,var(--available-height))] w-96 max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) overflow-y-auto overscroll-contain rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-2xl outline-none">
 						<div className="mb-5 flex items-center justify-between gap-3">
 							<Popover.Title className="flex items-center gap-2 text-base font-semibold">
 								<MonitorSpeaker aria-hidden className="size-5 text-primary" />{" "}

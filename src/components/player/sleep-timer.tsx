@@ -56,7 +56,7 @@ export function SleepTimerButton() {
 					sideOffset={8}
 				>
 					<Popover.Popup
-						className="w-80 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none"
+						className="ui-popup w-80 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none"
 						data-swipe-dismiss-ignore
 					>
 						<div className="mb-3 flex items-center justify-between">

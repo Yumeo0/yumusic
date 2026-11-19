@@ -86,8 +86,8 @@ export function RoomProfileDialog({
 			open
 		>
 			<Dialog.Portal>
-				<Dialog.Backdrop className="fixed inset-0 z-100 bg-black/60 backdrop-blur-sm" />
-				<Dialog.Popup className="fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-6 shadow-2xl">
+				<Dialog.Backdrop className="ui-backdrop fixed inset-0 z-100 bg-black/60 backdrop-blur-sm" />
+				<Dialog.Popup className="ui-popup fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-6 shadow-2xl">
 					<div className="flex items-start justify-between gap-4">
 						<div>
 							<Dialog.Title className="text-xl font-semibold tracking-tight">

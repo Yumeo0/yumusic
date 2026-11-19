@@ -132,7 +132,7 @@ export function LyricsSourceSelect({
 					sideOffset={6}
 				>
 					<Select.Popup
-						className="min-w-44 max-w-[calc(100vw-2rem)] origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0"
+						className="ui-popup min-w-44 max-w-[calc(100vw-2rem)] origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none"
 						ref={popup}
 					>
 						<Select.List className="max-h-[min(20rem,var(--available-height))] overflow-y-auto overscroll-contain">

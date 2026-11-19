@@ -12,12 +12,16 @@ import {
 } from "@/contexts/player-context";
 import { useRoomRole } from "@/lib/listen-together/room";
 import { useQueueSheetGesture } from "@/lib/motion/queue-drag";
+import { useQueueMotion } from "@/lib/motion/queue-gesture";
+import { queueScrollOffset } from "@/lib/motion/queue-scroll";
+import { prefersReducedMotion } from "@/lib/motion/spring";
 import {
 	setQueueOpen,
 	useNowPlayingOpen,
 	useQueueState,
 } from "@/lib/player/player-ui";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
+import { useMediaQuery } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { EqualizerBars } from "../player/waveform";
@@ -54,9 +58,21 @@ export function QueuePanel() {
 	const sheetRef = useQueueSheetRef();
 	const sheetGesture = useQueueSheetGesture();
 	const queueState = useQueueState();
+	useQueueMotion(sheetRef, queueState);
 	const open = queueState !== "closed";
+	const compact = useMediaQuery("(max-width: 767.98px)");
 	const fullscreen = useNowPlayingOpen();
 	const onClose = () => setQueueOpen(false);
+	useEffect(() => {
+		if (!open) return;
+		const dismiss = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || event.defaultPrevented) return;
+			event.preventDefault();
+			setQueueOpen(false);
+		};
+		window.addEventListener("keydown", dismiss);
+		return () => window.removeEventListener("keydown", dismiss);
+	}, [open]);
 	// Shuffling mixes only the upcoming tracks, so it needs at least two.
 	const canShuffle = queue.length - currentIndex - 1 > 1;
 
@@ -97,23 +113,44 @@ export function QueuePanel() {
 		const container = scrollRef.current;
 		const index = currentIndexRef.current;
 		if (!container || index < 0) return;
+		const paddingTop =
+			Number.parseFloat(getComputedStyle(container).paddingTop) || 0;
 		// Re-read the target every frame: scrolling through a long list renders
 		// (and measures) rows, which shifts the offsets and would otherwise
 		// leave the animation short or past the song.
 		const target = () => {
-			const offset = rowVirtualizer.getOffsetForIndex(index, "center")?.[0];
-			if (offset === undefined) return null;
-			const max = container.scrollHeight - container.clientHeight;
-			return Math.min(max, Math.max(0, offset));
+			// Refresh measurements before reading the row's unclamped position.
+			// A full-height center offset may already be clamped at either end.
+			rowVirtualizer.getTotalSize();
+			const row = rowVirtualizer.measurementsCache[index];
+			if (!row) return null;
+			return queueScrollOffset(row, {
+				height: container.clientHeight,
+				hiddenHeight:
+					compact && queueState === "half"
+						? (sheetRef?.current?.offsetHeight ?? window.innerHeight) / 2
+						: 0,
+				paddingTop,
+				scrollHeight: container.scrollHeight,
+			});
 		};
 		const from = container.scrollTop;
 		const initial = target();
 		if (initial === null) return;
 		const distance = initial - from;
 		if (Math.abs(distance) < 1) return;
+		if (prefersReducedMotion()) {
+			container.scrollTop = initial;
+			return;
+		}
 		const duration = Math.min(900, 450 + Math.abs(distance) * 0.25);
 		const start = performance.now();
 		const tick = (now: number) => {
+			if (prefersReducedMotion()) {
+				container.scrollTop = target() ?? initial;
+				stopScroll();
+				return;
+			}
 			const t = Math.min((now - start) / duration, 1);
 			// easeOutCubic: quick off the line, settling onto the song
 			const eased = 1 - (1 - t) ** 3;
@@ -123,23 +160,23 @@ export function QueuePanel() {
 				scrollFrameRef.current = requestAnimationFrame(tick);
 			} else {
 				scrollFrameRef.current = 0;
-				rowVirtualizer.scrollToIndex(index, { align: "center" });
 			}
 		};
 		scrollFrameRef.current = requestAnimationFrame(tick);
 		return stopScroll;
-	}, [open, rowVirtualizer, stopScroll]);
+	}, [open, compact, queueState, rowVirtualizer, sheetRef, stopScroll]);
 
 	return (
 		<aside
+			aria-label="Queue"
 			className={cn(
 				// Desktop: blurred translucent drawer from the right. Mobile: the
 				// sheet follows the finger every frame while dragging, and
 				// re-filtering a backdrop blur per frame tanks the framerate —
 				// so the blur is desktop-only and the sheet sits opaque.
-				"fixed top-9 right-0 z-60 flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl transition-transform duration-300 ease-out max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:backdrop-blur-none",
+				"fixed top-9 right-0 z-60 flex w-80 flex-col border-l border-foreground/10 bg-background/85 backdrop-blur-xl max-md:inset-x-0 max-md:top-0 max-md:bottom-0 max-md:w-full max-md:border-l-0 max-md:bg-background max-md:backdrop-blur-none",
 				fullscreen ? "bottom-0" : "bottom-22.5",
-				open ? "translate-x-0" : "pointer-events-none translate-x-full",
+				open ? "translate-x-0" : "translate-x-full",
 				"max-md:translate-x-0",
 				// Add the system safe-area inset only at the top of the screen.
 				queueState === "full"
@@ -148,6 +185,7 @@ export function QueuePanel() {
 						? "max-md:translate-y-1/2"
 						: "max-md:translate-y-full",
 			)}
+			inert={!open}
 			ref={sheetRef}
 		>
 			<div
@@ -220,7 +258,16 @@ export function QueuePanel() {
 			</div>
 
 			<div
-				className="min-h-0 flex-1 overflow-y-auto p-2 max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]"
+				className={cn(
+					"min-h-0 flex-1 overflow-y-auto p-2",
+					// Keep the end of the list reachable above the screen edge
+					// while the full-height sheet rests halfway below it.
+					queueState === "half"
+						? "max-md:pb-[calc(50dvh+0.5rem+var(--safe-area-bottom))]"
+						: "max-md:pb-[calc(0.5rem+var(--safe-area-bottom))]",
+				)}
+				onKeyDown={stopScroll}
+				onPointerDown={stopScroll}
 				onTouchMove={stopScroll}
 				onWheel={stopScroll}
 				ref={scrollRef}

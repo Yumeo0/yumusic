@@ -35,7 +35,7 @@ export function RatingButtons({
 	});
 	const buttonClass = (active: boolean) =>
 		cn(
-			"grid place-items-center rounded-full transition-all duration-200 active:scale-90 disabled:pointer-events-none disabled:opacity-40",
+			"grid place-items-center rounded-full transition-all duration-200 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-40",
 			compact ? "size-7" : "size-9",
 			active
 				? "bg-primary/15 text-primary"

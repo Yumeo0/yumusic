@@ -87,7 +87,7 @@ export function DownloadQueueButton({
 					side={side}
 					sideOffset={8}
 				>
-					<Popover.Popup className="w-80 max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-3 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+					<Popover.Popup className="ui-popup w-80 max-w-[calc(100vw-1.5rem)] origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-3 text-popover-foreground shadow-xl outline-none">
 						<p className="px-1.5 pb-1 font-mono text-[10px] font-medium tracking-[0.18em] text-muted-foreground/70 uppercase">
 							Downloads
 						</p>

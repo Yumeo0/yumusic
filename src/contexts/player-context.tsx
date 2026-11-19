@@ -283,7 +283,7 @@ interface MountOptions {
 
 /** Crossfade runtime state; null while no crossfade is in flight. */
 interface CrossfadeState {
-	phase: "preload" | "fading";
+	phase: "preload" | "transitioning" | "failed";
 	/** Song that fades in (the track after the current one). */
 	nextSong: Song;
 	/**
@@ -301,6 +301,8 @@ interface CrossfadeState {
 	localEntry: DownloadEntry | null;
 	/** Overlap length in seconds, captured when the preload was armed. */
 	seconds: number;
+	/** Time the outgoing deck reported its natural end during the handover. */
+	endedAt?: number;
 	/** Next song comes from the autoplay radio and gets promoted to the queue. */
 	promote: boolean;
 	/** Queue position to select, including a playlist wrap to zero. */
@@ -510,7 +512,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		deck.stop = null;
 		const videoEl = deck.ref.current;
 		if (videoEl) {
-			videoEl.pause();
+			// Native load() sends stop. A separate pause would undo a completed fade.
+			if (!nativeAudio(videoEl)) videoEl.pause();
 			if (videoEl.src) {
 				videoEl.removeAttribute("src");
 				videoEl.load();
@@ -712,6 +715,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		teardownDeck(decksRef.current[state.deckIndex]);
 	}, [teardownDeck]);
 
+	const stopForSleepTimer = useCallback(
+		(endedAt?: number) => {
+			if (!sleepTimer.trackEnded(currentIndex, queue.length, endedAt))
+				return false;
+			abortCrossfade();
+			videoElementRef.current?.pause();
+			setIsPlaying(false);
+			if (listenRoom.getSnapshot().role === "guest")
+				listenRoom.setGuestAudio("remote");
+			showToast("Sleep timer finished");
+			return true;
+		},
+		[abortCrossfade, currentIndex, queue.length],
+	);
+
 	/**
 	 * Hands playback from the fading track to the preloaded one: flips the
 	 * active deck, advances the queue (promoting an autoplay track when the
@@ -727,13 +745,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			) {
 				return;
 			}
+			const oldDeck = decksRef.current[activeDeckRef.current];
+			// A timer changed during the fade. Finish the outgoing song at full gain.
+			if (
+				!oldDeck.ref.current?.ended &&
+				sleepTimer.shouldStopAtTrackEnd(
+					currentIndex,
+					queue.length,
+					state.endedAt,
+				)
+			) {
+				abortCrossfade();
+				return;
+			}
+			if (stopForSleepTimer(state.endedAt)) return;
 			crossfadeRef.current = null;
 			if (crossfadeRafRef.current !== null) {
 				cancelAnimationFrame(crossfadeRafRef.current);
 				crossfadeRafRef.current = null;
 			}
 
-			const oldDeck = decksRef.current[activeDeckRef.current];
 			activeDeckRef.current = state.deckIndex;
 			// Repoint the shared media ref so progress, watch-history and the
 			// OS media session follow the element that is now audible.
@@ -777,16 +808,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			// The old track is done; free its stream and media element.
 			teardownDeck(oldDeck);
 		},
-		[teardownDeck],
+		[
+			abortCrossfade,
+			currentIndex,
+			queue.length,
+			stopForSleepTimer,
+			teardownDeck,
+		],
 	);
 
 	/**
-	 * Runs the actual overlap: the preloaded deck starts at zero volume and
+	 * Starts a preloaded track. With an overlap, the incoming deck starts muted and
 	 * the two are ramped with equal-power curves over the overlap length.
 	 * The ramp follows the audio clock, so throttled frames in a background
 	 * window still reach the handover; rAF only smooths the visible steps.
 	 */
-	const startFade = useCallback(
+	const startTransition = useCallback(
 		(state: CrossfadeState) => {
 			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
 			const currentEl = decksRef.current[activeDeckRef.current]?.ref.current;
@@ -798,7 +835,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			) {
 				return;
 			}
-			state.phase = "fading";
+			state.phase = "transitioning";
+
+			const currentNative = nativeAudio(currentEl);
+			const nextNative = nativeAudio(nextEl);
+			if (currentNative && nextNative) {
+				currentNative.crossfadeTo(nextNative, state.seconds, (completed) => {
+					if (crossfadeRef.current !== state) return;
+					if (completed) {
+						commitCrossfade(state);
+						return;
+					}
+					// Let the normal end handler load the next track if the overlap failed.
+					state.phase = "failed";
+					teardownDeck(decksRef.current[state.deckIndex]);
+					if (currentNative.ended)
+						endedHandlerRef.current(activeDeckRef.current);
+				});
+				return;
+			}
 
 			// If the preload landed late, shorten the fade so it still ends
 			// roughly where the track does instead of trailing into silence.
@@ -840,7 +895,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			state.advance = advance;
 			advance();
 		},
-		[abortCrossfade, commitCrossfade],
+		[abortCrossfade, commitCrossfade, teardownDeck],
 	);
 
 	/**
@@ -932,6 +987,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				}
 				// Uploader videos without a release keep their raw titles.
 				state.nextSong = await markUpload(state.nextSong);
+				if (crossfadeRef.current !== state) return;
 				state.result = {
 					videoInfo: result.videoInfo,
 					innertube: result.innertube,
@@ -953,6 +1009,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[markUpload, mountLocalTrack, mountTrack],
 	);
 
+	const nextTransitionTrack = useCallback(
+		(finishQueue: boolean) => {
+			if (!finishQueue && repeatMode === "one") return null;
+			const index = nextQueueIndex(
+				currentIndex,
+				queue.length,
+				finishQueue ? "off" : repeatMode,
+				true,
+			);
+			if (index === currentIndex) return null;
+			if (index !== null) return { song: queue[index], index, promote: false };
+			const song = !finishQueue && settings.autoplay ? autoplayTracks[0] : null;
+			return song ? { song, index: queue.length, promote: true } : null;
+		},
+		[currentIndex, queue, repeatMode, settings.autoplay, autoplayTracks],
+	);
+
 	/**
 	 * Crossfade scheduler, called on every timeupdate of the active deck and
 	 * whenever playback, the queue or the settings change. Preloads the
@@ -960,52 +1033,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 * window, and aborts everything when the target changes.
 	 */
 	const updateCrossfade = useCallback(() => {
-		const seconds =
-			settings.crossfade && !roomRole && !activeSleepTimer
-				? clampCrossfadeSeconds(settings.crossfadeSeconds)
-				: 0;
+		const seconds = settings.crossfade
+			? clampCrossfadeSeconds(settings.crossfadeSeconds)
+			: 0;
+		const preloadWithoutFade = IS_ANDROID && activeSleepTimer !== null;
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
+		if (roomRole || !isPlaying || !currentSong || !activeEl) {
+			abortCrossfade();
+			return;
+		}
+
+		const state = crossfadeRef.current;
+		// The outgoing song has ended and Android is confirming the handover.
+		if (state?.phase === "transitioning" && state.endedAt !== undefined) return;
+		const target = nextTransitionTrack(activeSleepTimer?.mode === "queue");
 		if (
-			!seconds ||
-			!isPlaying ||
-			!currentSong ||
-			!activeEl ||
-			repeatMode === "one"
+			(!seconds && !preloadWithoutFade) ||
+			!target ||
+			sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length)
 		) {
 			abortCrossfade();
 			return;
 		}
 
-		// The song that will play next, mirroring next(): queue first, then
-		// the autoplay radio (whose first track gets promoted to the queue).
-		const nextIndex = nextQueueIndex(currentIndex, queue.length, repeatMode);
-		const queuedNext = nextIndex !== null ? queue[nextIndex] : null;
-		const nextSong =
-			queuedNext ?? (settings.autoplay ? (autoplayTracks[0] ?? null) : null);
-
-		const state = crossfadeRef.current;
 		// The queue changed under an armed crossfade; re-evaluate from scratch.
 		// Compared against the queued id: the state's song may already be the
 		// album track of that entry.
 		if (
 			state &&
-			(!nextSong ||
-				nextSong.id !== state.originalId ||
-				state.nextIndex !== (nextIndex ?? queue.length))
+			(target.song.id !== state.originalId ||
+				state.nextIndex !== target.index ||
+				state.promote !== target.promote)
 		) {
 			abortCrossfade();
-		}
-		// Replaying a single-entry playlist starts at its natural end.
-		if (nextIndex === currentIndex) {
-			abortCrossfade();
-			return;
 		}
 
 		const duration = activeEl.duration;
 		if (!Number.isFinite(duration) || duration <= 0) return;
 		const remaining = duration - activeEl.currentTime;
 
-		if (!nextSong) return;
 		if (remaining > seconds + CROSSFADE_PRELOAD_LEAD_SECONDS) {
 			if (crossfadeRef.current) abortCrossfade();
 			return;
@@ -1014,45 +1080,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		const armed = crossfadeRef.current;
 		if (!armed) {
 			void armCrossfade(
-				nextSong,
-				queuedNext === null,
+				target.song,
+				target.promote,
 				seconds,
 				currentSong,
-				nextIndex ?? queue.length,
+				target.index,
 			);
 			return;
 		}
-		// rAF is paused while the window is hidden; timeupdate (which keeps
-		// firing during background audio playback) drives the fade then.
-		if (armed.phase === "fading") {
-			armed.advance?.();
+		// A duration timer can expire during the overlap. Keep the preload, but
+		// wait for the actual end if the deadline is likely to fall in this song.
+		const expectedEnd =
+			Date.now() + (Math.max(remaining, 0) * 1000) / activeEl.playbackRate;
+		const canFade =
+			seconds > 0 &&
+			!sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length, expectedEnd);
+		if (armed.phase === "transitioning") {
+			if (canFade) armed.advance?.();
+			else abortCrossfade();
 			return;
 		}
 		const deck = decksRef.current[armed.deckIndex];
 		if (
+			armed.phase === "preload" &&
+			canFade &&
 			deck?.ready &&
 			(armed.result || armed.localEntry) &&
 			remaining <= seconds
 		) {
 			// Respect a length change made while the preload was buffering.
 			armed.seconds = seconds;
-			startFade(armed);
+			startTransition(armed);
 		}
 	}, [
 		roomRole,
 		activeSleepTimer,
 		settings.crossfade,
 		settings.crossfadeSeconds,
-		settings.autoplay,
-		repeatMode,
 		isPlaying,
 		currentSong,
 		currentIndex,
-		queue,
-		autoplayTracks,
+		queue.length,
 		abortCrossfade,
 		armCrossfade,
-		startFade,
+		nextTransitionTrack,
+		startTransition,
 	]);
 	updateCrossfadeRef.current = updateCrossfade;
 
@@ -1532,17 +1604,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const handleEnded = useCallback(
 		(deckIndex: number) => {
 			if (deckIndex !== activeDeckRef.current) return;
-			const queueTimer = sleepTimer.getSnapshot()?.mode === "queue";
-			if (sleepTimer.trackEnded(currentIndex, queue.length)) {
-				abortCrossfade();
-				decksRef.current[deckIndex]?.ref.current?.pause();
-				setIsPlaying(false);
-				if (listenRoom.getSnapshot().role === "guest")
-					listenRoom.setGuestAudio("remote");
-				showToast("Sleep timer finished");
+			const endedAt = Date.now();
+			const state = crossfadeRef.current;
+			if (state?.phase === "transitioning") {
+				// Count this song when the fade commits or falls back to a normal transition.
+				state.endedAt ??= endedAt;
+				if (state.advance) commitCrossfade(state);
 				return;
 			}
-			if (listenRoom.getSnapshot().role === "guest") return;
+
+			const queueTimer = sleepTimer.getSnapshot()?.mode === "queue";
+			const guest = listenRoom.getSnapshot().role === "guest";
+			if (
+				IS_ANDROID &&
+				!guest &&
+				state?.phase === "preload" &&
+				!sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length, endedAt)
+			) {
+				const target = nextTransitionTrack(queueTimer);
+				const deck = decksRef.current[state.deckIndex];
+				if (
+					target?.song.id === state.originalId &&
+					target.index === state.nextIndex &&
+					target.promote === state.promote &&
+					deck.ready &&
+					(state.result || state.localEntry)
+				) {
+					state.seconds = 0;
+					state.endedAt = endedAt;
+					startTransition(state);
+					return;
+				}
+			}
+			if (stopForSleepTimer(state?.endedAt ?? endedAt) || guest) return;
 			const nextIndex = nextQueueIndex(
 				currentIndex,
 				queue.length,
@@ -1558,21 +1652,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				void playSong(currentSong);
 				return;
 			}
-			const state = crossfadeRef.current;
-			if (state?.phase === "fading") {
-				// The fade follows the audio clock, so if the track ran out
-				// first (or the ramp was throttled), finish the handover now
-				// instead of stalling on a paused rAF.
-				commitCrossfade(state);
-				return;
-			}
 			setIsPlaying(false);
 			void next();
 		},
 		[
-			abortCrossfade,
 			commitCrossfade,
 			next,
+			nextTransitionTrack,
+			startTransition,
+			stopForSleepTimer,
 			currentIndex,
 			queue.length,
 			repeatMode,

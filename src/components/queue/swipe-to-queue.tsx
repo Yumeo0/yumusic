@@ -8,12 +8,12 @@ import {
 	useState,
 } from "react";
 import { type Song, usePlayer } from "@/contexts/player-context";
+import { GestureVelocity, rubberband } from "@/lib/motion/spring";
 import { useSpringOffset } from "@/lib/motion/use-spring-offset";
 import {
 	NEXT_THRESHOLD,
 	type SwipeAction,
 	swipeDetent,
-	swipeDetentOffset,
 } from "@/lib/player/swipe-action";
 import { haptic } from "@/lib/utils/haptics";
 import { cn } from "@/lib/utils/utils";
@@ -37,12 +37,17 @@ export function SwipeToQueue({
 	style,
 }: SwipeToQueueProps) {
 	const { playNext } = usePlayer();
-	const [drag, springTo] = useSpringOffset();
+	const [drag, springTo, spring] = useSpringOffset();
 	const row = useRef<HTMLDivElement>(null);
 	const detent = useRef<SwipeAction>(null);
 	const [action, setAction] = useState<SwipeAction>(null);
 	const [direction, setDirection] = useState(1);
-	const start = useRef<{ x: number; y: number } | null>(null);
+	const start = useRef<{
+		x: number;
+		y: number;
+		offset: number;
+		velocity: GestureVelocity;
+	} | null>(null);
 	const axis = useRef<"horizontal" | "vertical" | null>(null);
 	const suppressClick = useRef(false);
 	const suppressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,9 +60,10 @@ export function SwipeToQueue({
 	const finish = (cancelled: boolean) => {
 		if (!start.current) return;
 		const selected = detent.current;
+		const velocity = cancelled ? 0 : start.current.velocity.read();
 		start.current = null;
 		axis.current = null;
-		springTo(0);
+		springTo(0, { velocity, momentum: !cancelled });
 		if (row.current && suppressClick.current)
 			row.current.dataset.swipeContextUntil = String(performance.now() + 700);
 		if (!cancelled && selected) {
@@ -94,7 +100,15 @@ export function SwipeToQueue({
 		}
 		if (axis.current !== "horizontal") return;
 		suppressClick.current = true;
-		const next = Math.max(onRemove ? -180 : 0, Math.min(dx, 260));
+		const distance = origin.offset + dx;
+		const lower = onRemove ? -104 : 0;
+		const upper = 168;
+		const next =
+			distance < lower
+				? lower + rubberband(distance - lower, 120)
+				: distance > upper
+					? upper + rubberband(distance - upper, 120)
+					: distance;
 		const selected = swipeDetent(next, detent.current, !!onRemove);
 		if (selected !== detent.current) {
 			haptic("tick");
@@ -103,7 +117,8 @@ export function SwipeToQueue({
 		}
 		if (row.current) row.current.dataset.swipeContextUntil = "Infinity";
 		setDirection(next < 0 ? -1 : 1);
-		springTo(swipeDetentOffset(next, selected));
+		origin.velocity.add(next);
+		spring.jump(next, origin.velocity.read());
 	};
 	const Icon =
 		direction < 0 ? Trash2 : action === "queue" ? ListEnd : ListStart;
@@ -161,7 +176,15 @@ export function SwipeToQueue({
 						return;
 					}
 					const touch = event.touches[0];
-					start.current = { x: touch.clientX, y: touch.clientY };
+					const velocity = new GestureVelocity();
+					velocity.add(spring.position);
+					start.current = {
+						x: touch.clientX,
+						y: touch.clientY,
+						offset: spring.position,
+						velocity,
+					};
+					spring.stop();
 					axis.current = null;
 					detent.current = null;
 					setAction(null);
@@ -171,7 +194,6 @@ export function SwipeToQueue({
 				}}
 				style={{
 					transform: `translateX(${drag}px)`,
-					willChange: drag ? "transform" : undefined,
 				}}
 			>
 				{children}

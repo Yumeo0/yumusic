@@ -43,8 +43,12 @@ reused for another track. The Android window stays hidden and the screen stays
 off; normal renderer visibility returns when audio work ends. The Gradle
 template patch reapplies this base class to the generated `RustWebView` before
 Kotlin compilation.
-Volume changes do not emit synthetic playback-clock updates, and crossfade ticks
-share one pending animation frame to avoid IPC/animation feedback loops.
+The service runs crossfades on the outgoing player's clock. It starts the
+incoming deck muted, waits for it to play, and updates both gains on the same
+tick. The outgoing deck holds audio focus until the handover.
+Sleep timers allow the next track to buffer and crossfade while the timer allows
+playback to continue. The player checks the timer at each song boundary, even
+when it starts a buffered track without an overlap.
 Removing the app from recent tasks stops playback because its queue and SABR
 producer belong to the activity. Playback resumption after process death and
 Android Auto browsing are not implemented.

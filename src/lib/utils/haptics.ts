@@ -34,6 +34,13 @@ export function installMobileHaptics() {
 			)
 		)
 			return;
+		// Navigation and menu browsing stay quiet; feedback marks a control commit.
+		if (
+			!target.matches(
+				'[data-haptic="tap"], [data-haptic="confirm"], [aria-pressed], [role="switch"], [role="slider"], input[type="range"], input[type="checkbox"], input[type="radio"], .player-ctl',
+			)
+		)
+			return;
 		if (event.type === "pointerup" && !target.matches('[role="slider"]'))
 			return;
 		// Observe capture-phase events even when a control stops propagation.

@@ -3,9 +3,11 @@ import type { AudioStreamSession } from "./media-buffer";
 
 export const NATIVE_AUDIO_EVENT = "yumusic-native-audio";
 export interface NativeAudioEvent {
-	type: "state" | "stream" | "error" | "control";
+	type: "state" | "stream" | "error" | "control" | "crossfade";
 	deck?: number;
 	id?: string;
+	nextId?: string;
+	completed?: boolean;
 	epoch?: number;
 	position?: number;
 	duration?: number;
@@ -63,6 +65,10 @@ export class NativeAudioElement extends EventTarget {
 	private onReady: (() => void) | null = null;
 	private onStream: ((epoch: number, position: number) => void) | null = null;
 	private onFailure: ((error: Error) => void) | null = null;
+	private crossfade: {
+		nextId: string;
+		onFinish: (completed: boolean) => void;
+	} | null = null;
 	private readonly bridge: NativeAudioBridge;
 	constructor(
 		readonly deck: number,
@@ -82,6 +88,14 @@ export class NativeAudioElement extends EventTarget {
 	private receive = (event: Event) => {
 		const state = (event as CustomEvent<NativeAudioEvent>).detail;
 		if (state.deck !== this.deck || state.id !== this.id || !this.id) return;
+		if (state.type === "crossfade") {
+			const fade = this.crossfade;
+			if (fade && state.nextId === fade.nextId) {
+				this.crossfade = null;
+				fade.onFinish(state.completed === true);
+			}
+			return;
+		}
 		if (state.type === "stream") {
 			this.onStream?.(state.epoch ?? 0, state.position ?? 0);
 			return;
@@ -184,6 +198,27 @@ export class NativeAudioElement extends EventTarget {
 			throw error;
 		}
 	}
+	crossfadeTo(
+		next: NativeAudioElement,
+		seconds: number,
+		onFinish: (completed: boolean) => void,
+	) {
+		if (!this.id || !next.id) {
+			onFinish(false);
+			return;
+		}
+		const fade = { nextId: next.id, onFinish };
+		this.crossfade = fade;
+		void this.command("crossfade", {
+			nextDeck: next.deck,
+			nextId: fade.nextId,
+			seconds,
+		}).catch(() => {
+			if (this.crossfade !== fade) return;
+			this.crossfade = null;
+			onFinish(false);
+		});
+	}
 	pause() {
 		void this.command("pause").catch(this.failed);
 	}
@@ -194,6 +229,7 @@ export class NativeAudioElement extends EventTarget {
 		if (this.src) return;
 		void this.command("stop").catch(this.failed);
 		this.id = "";
+		this.crossfade = null;
 		this.readyState = 0;
 		this.paused = true;
 	}
@@ -213,8 +249,7 @@ export class NativeAudioElement extends EventTarget {
 		this.readyState = 0;
 		this.duration = duration;
 		this.onReady = ready;
-		await this.command("load", { ...data, duration });
-		await this.command("volume", { value: this.level });
+		await this.command("load", { ...data, duration, volume: this.level });
 		await this.command("rate", { value: this.speed });
 	}
 

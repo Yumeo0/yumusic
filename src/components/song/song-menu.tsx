@@ -172,7 +172,7 @@ export function SongContextMenu({
 				</ContextMenu.Trigger>
 				<ContextMenu.Portal>
 					<ContextMenu.Positioner className="z-90 outline-none" sideOffset={6}>
-						<ContextMenu.Popup className="min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none transition-[transform,opacity] duration-100 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+						<ContextMenu.Popup className="ui-popup min-w-44 origin-(--transform-origin) rounded-xl border border-foreground/10 bg-popover p-1 text-popover-foreground shadow-xl outline-none">
 							<MenuItem
 								icon={ListStart}
 								label="Play next"

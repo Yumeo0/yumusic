@@ -621,7 +621,7 @@ function NativeBackNavigation() {
 function NowPlayingOverlay() {
 	const isNowPlayingOpen = useNowPlayingOpen();
 	const isQueueOpen = useQueueOpen();
-	const overlayRef = useRef<HTMLDivElement>(null);
+	const overlayRef = useRef<HTMLElement>(null);
 	useNowPlayingMotion(overlayRef, isNowPlayingOpen);
 	// Dragging down on the fullscreen player minimizes it — but only while the
 	// queue is closed: with the sheet open, the same swipe drags the queue.
@@ -645,9 +645,10 @@ function NowPlayingOverlay() {
 	}, [isNowPlayingOpen, isQueueOpen]);
 
 	return (
-		<div
+		<section
 			aria-hidden={!isNowPlayingOpen}
-			className="np-overlay invisible fixed inset-0 z-50 will-change-transform"
+			aria-label="Now Playing"
+			className="np-overlay invisible fixed inset-0 z-50"
 			inert={!isNowPlayingOpen}
 			ref={overlayRef}
 			style={{ transform: "translateY(var(--np-slide, 0px))" }}
@@ -658,7 +659,7 @@ function NowPlayingOverlay() {
 				onClose={toggleNowPlaying}
 				onToggleQueue={toggleQueue}
 			/>
-		</div>
+		</section>
 	);
 }
 
@@ -945,7 +946,7 @@ function AppShell({
 													</button>
 													<button
 														aria-label={`Unpin ${playlist.title}`}
-														className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100"
+														className="absolute top-1/2 right-1.5 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted-foreground opacity-0 transition-all duration-150 hover:bg-foreground/10 hover:text-foreground group-hover/pin:opacity-100 group-focus-within/pin:opacity-100"
 														onClick={() => unpin(playlist.id)}
 														type="button"
 													>
@@ -1079,6 +1080,7 @@ function MobileNav() {
 function MobileNavItem({ icon, label, isActive, onClick }: SidebarItemProps) {
 	return (
 		<button
+			aria-current={isActive ? "page" : undefined}
 			className={cn(
 				"flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200 active:scale-95",
 				isActive ? "text-primary" : "text-muted-foreground",
@@ -1110,6 +1112,7 @@ interface SidebarItemProps {
 function SidebarItem({ icon, label, isActive, onClick }: SidebarItemProps) {
 	return (
 		<button
+			aria-current={isActive ? "page" : undefined}
 			className={cn(
 				"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
 				isActive

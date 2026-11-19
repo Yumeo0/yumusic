@@ -1,28 +1,30 @@
 import type { QueueState } from "@/lib/player/player-ui";
+import { projectMomentum } from "./spring";
 
 export const QUEUE_STAGES: QueueState[] = ["full", "half", "closed"];
 
-/** Preserve the original gesture: 64 px advances one stage, on any screen. */
-export function queueDragStage(rest: QueueState, distance: number): QueueState {
-	if (Math.abs(distance) < 64) return rest;
-	const index = QUEUE_STAGES.indexOf(rest) + (distance > 0 ? -1 : 1);
-	return QUEUE_STAGES[Math.max(0, Math.min(2, index))];
-}
-
-export function queueStageOffset(
-	rest: QueueState,
-	stage: QueueState,
-	distance: number,
+/** Momentum advances one detent; direct travel can still cross multiple detents. */
+export function queueReleaseStage(
+	position: number,
 	height: number,
-): number {
-	const index = QUEUE_STAGES.indexOf(stage);
-	const finger = Math.max(
-		0,
-		Math.min(height, (QUEUE_STAGES.indexOf(rest) * height) / 2 - distance),
-	);
-	const destination = (index * height) / 2;
-	if (stage === rest) return finger;
-	return Math.abs(finger - destination) <= Math.min(36, height * 0.045)
-		? destination
-		: finger;
+	velocity = 0,
+	origin = position,
+): QueueState {
+	const nearest = (offset: number) =>
+		Math.max(
+			0,
+			Math.min(
+				QUEUE_STAGES.length - 1,
+				Math.round(offset / Math.max(1, height / 2)),
+			),
+		);
+	const from = nearest(origin);
+	const dragged = nearest(position);
+	const projected = nearest(position + projectMomentum(velocity));
+	// A fast, short flick must not skip the halfway stop. Dragging close to
+	// the far endpoint explicitly makes it reachable, regardless of speed.
+	const first = Math.max(0, Math.min(from - 1, dragged));
+	const last = Math.min(QUEUE_STAGES.length - 1, Math.max(from + 1, dragged));
+	const index = Math.max(first, Math.min(last, projected));
+	return QUEUE_STAGES[index];
 }

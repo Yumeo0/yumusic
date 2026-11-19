@@ -33,16 +33,19 @@ export class SleepTimerStore {
 		if (!Number.isFinite(count) || count < 1) return;
 		this.set({ mode: "songs", remaining: Math.min(Math.floor(count), 999) });
 	}
-	/** Call only at a natural song boundary, before repeat/autoplay advances. */
+	/** Checks a song boundary without consuming any of the timer. */
+	shouldStopAtTrackEnd(index: number, queueLength: number, time = Date.now()) {
+		const timer = this.state;
+		if (!timer) return false;
+		if (timer.mode === "duration") return time >= timer.deadline;
+		if (timer.mode === "queue") return index >= queueLength - 1;
+		return timer.remaining <= 1;
+	}
+	/** Call once at each completed song, before repeat/autoplay advances. */
 	trackEnded(index: number, queueLength: number, now = Date.now()): boolean {
 		const timer = this.state;
 		if (!timer) return false;
-		const stop =
-			timer.mode === "duration"
-				? now >= timer.deadline
-				: timer.mode === "queue"
-					? index >= queueLength - 1
-					: timer.remaining <= 1;
+		const stop = this.shouldStopAtTrackEnd(index, queueLength, now);
 		if (stop) this.cancel();
 		else if (timer.mode === "songs")
 			this.set({ ...timer, remaining: timer.remaining - 1 });

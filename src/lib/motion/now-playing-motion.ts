@@ -12,6 +12,12 @@ import {
 	setQueueOpen,
 	setQueueReveal,
 } from "@/lib/player/player-ui";
+import {
+	createSpring,
+	GestureVelocity,
+	prefersReducedMotion,
+	projectMomentum,
+} from "./spring";
 
 /** Matches Tailwind's max-md breakpoint; swipes mirror the mobile layout. */
 const MOBILE_QUERY = "(max-width: 767.98px)";
@@ -21,7 +27,7 @@ interface PlayerMotion {
 	animate: (open: boolean) => void;
 	begin: () => boolean;
 	drag: (distance: number, opening: boolean) => void;
-	settle: (open: boolean) => void;
+	settle: (open: boolean, velocity?: number) => void;
 }
 let motion: PlayerMotion | null = null;
 
@@ -32,13 +38,14 @@ export function useNowPlayingMotion(
 	useLayoutEffect(() => {
 		const overlay = overlayRef.current;
 		if (!overlay) return;
-		let frame = 0;
 		let progress = getNowPlayingOpen() ? 0 : 1;
 		let geometry: DismissGeometry | null = null;
 		let active = false;
 		let dragOrigin = progress;
 		/** Queue blend the stage rested at when the motion closed the queue. */
 		let revealFrom = 0;
+		let revealOrigin = progress;
+		let focusBeforeOpen: HTMLElement | null = null;
 
 		const apply = (value: number) => {
 			progress = value;
@@ -49,9 +56,16 @@ export function useNowPlayingMotion(
 				"--np-slide",
 				`${value * (geometry?.height ?? overlay.offsetHeight)}px`,
 			);
+			if (revealFrom > 0) {
+				setQueueReveal(
+					revealFrom *
+						Math.max(0, (1 - value) / Math.max(0.001, 1 - revealOrigin)),
+				);
+			}
 		};
+		const spring = createSpring(progress, apply, 0.001);
 		const begin = () => {
-			cancelAnimationFrame(frame);
+			spring.stop();
 			if (!active) {
 				// Measure the resting, visible layout, including lyrics mode.
 				// Reset/read/restore happens before paint, with easing disabled.
@@ -65,6 +79,7 @@ export function useNowPlayingMotion(
 					const reveal = getQueueReveal();
 					setQueueOpen(false);
 					revealFrom = reveal;
+					revealOrigin = progress;
 				}
 				const previous = progress;
 				apply(0);
@@ -82,15 +97,19 @@ export function useNowPlayingMotion(
 				document.documentElement.dataset.playerMorphing = "true";
 			}
 			overlay.style.visibility = "visible";
+			overlay.inert = false;
 			dragOrigin = progress;
 			return true;
 		};
 		const complete = (target: number) => {
+			const restoreFocus =
+				target === 1 && overlay.contains(document.activeElement);
 			apply(target);
 			if (revealFrom > 0) setQueueReveal(0);
 			revealFrom = 0;
 			active = false;
 			overlay.style.visibility = target === 1 ? "hidden" : "visible";
+			overlay.inert = target === 1;
 			if (geometry?.page) geometry.page.style.overflow = "";
 			// Commit the resting values while nested easing is still off.
 			// Re-enabling transitions in the same style pass as the final
@@ -102,36 +121,40 @@ export function useNowPlayingMotion(
 			delete document.documentElement.dataset.playerMorphing;
 			geometry?.release();
 			geometry = null;
+			if (restoreFocus) {
+				const trigger = focusBeforeOpen?.isConnected
+					? focusBeforeOpen
+					: document.querySelector<HTMLElement>("[data-mini-thumb]");
+				queueMicrotask(() => trigger?.focus({ preventScroll: true }));
+			}
 		};
-		const animate = (expanded: boolean) => {
+		const animate = (expanded: boolean, velocity?: number) => {
 			const target = expanded ? 0 : 1;
+			if (
+				expanded &&
+				!active &&
+				document.activeElement instanceof HTMLElement &&
+				!overlay.contains(document.activeElement)
+			)
+				focusBeforeOpen = document.activeElement;
 			if (progress === target && !active) {
 				complete(target);
 				return;
 			}
-			if (!begin()) {
+			if (prefersReducedMotion()) {
+				if (!expanded && window.matchMedia(MOBILE_QUERY).matches)
+					setQueueOpen(false);
+				spring.stop();
+				spring.jump(target);
 				complete(target);
 				return;
 			}
-			const from = progress;
-			const revealStart = revealFrom > 0 ? getQueueReveal() : 0;
-			const start = performance.now();
-			// Deliberately not gated on prefers-reduced-motion: Windows reports
-			// "reduce" whenever its animation effects are off, which made the
-			// player snap shut on desktop. The motion is a short spatial
-			// transition tied to a deliberate tap, not ambient animation.
-			const duration = 300;
-			const tick = (now: number) => {
-				// rAF timestamps can predate `start`; clamp so the blend
-				// never overshoots past either end.
-				const time = Math.min(Math.max((now - start) / duration, 0), 1);
-				const eased = 1 - (1 - time) ** 3;
-				apply(from + (target - from) * eased);
-				if (revealStart > 0) setQueueReveal(revealStart * (1 - eased));
-				if (time < 1) frame = requestAnimationFrame(tick);
-				else complete(target);
-			};
-			frame = requestAnimationFrame(tick);
+			if (!begin()) {
+				spring.jump(target);
+				complete(target);
+				return;
+			}
+			spring.animate(target, { velocity, onRest: () => complete(target) });
 		};
 		const driver: PlayerMotion = {
 			animate,
@@ -141,23 +164,27 @@ export function useNowPlayingMotion(
 					geometry?.travel ?? window.innerHeight * 0.6,
 					120,
 				);
-				apply(
+				spring.jump(
 					Math.min(
 						1,
 						Math.max(0, dragOrigin + ((opening ? -1 : 1) * distance) / travel),
 					),
 				);
 			},
-			settle: (expanded) => {
-				// The store effect runs the same animation for changed targets;
-				// explicitly settle when a short/cancelled drag returns to rest.
-				if (expanded === getNowPlayingOpen()) animate(expanded);
-				else setNowPlayingOpen(expanded);
+			settle: (expanded, velocity = 0) => {
+				const travel = Math.max(
+					geometry?.travel ?? window.innerHeight * 0.6,
+					120,
+				);
+				spring.jump(progress, velocity / travel);
+				// Also settle cancelled/short drags whose logical state did not change.
+				setNowPlayingOpen(expanded);
+				animate(expanded);
 			},
 		};
 		motion = driver;
 		return () => {
-			cancelAnimationFrame(frame);
+			spring.stop();
 			complete(getNowPlayingOpen() ? 0 : 1);
 			if (motion === driver) motion = null;
 		};
@@ -166,6 +193,26 @@ export function useNowPlayingMotion(
 	useLayoutEffect(() => {
 		motion?.animate(open);
 	}, [open]);
+
+	useLayoutEffect(() => {
+		const overlay = overlayRef.current;
+		if (!open || !overlay) return;
+		// Only the player and its parallel queue remain in the keyboard path.
+		const background = [
+			...document.querySelectorAll<HTMLElement>(
+				'main, aside:not([aria-label="Queue"]), [data-mobile-nav], [data-mini-player]',
+			),
+		]
+			.filter((element) => !overlay.contains(element))
+			.map((element) => ({ element, inert: element.inert }));
+		for (const { element } of background) element.inert = true;
+		overlay
+			.querySelector<HTMLElement>('[aria-label="Close Now Playing"]')
+			?.focus({ preventScroll: true });
+		return () => {
+			for (const { element, inert } of background) element.inert = inert;
+		};
+	}, [open, overlayRef]);
 }
 
 /** Locks to vertical travel and leaves seeks, lyrics scrolling and taps alone. */
@@ -178,13 +225,20 @@ export function useNowPlayingSwipe(
 		y: number;
 		distance: number;
 		following: boolean;
+		velocity: GestureVelocity;
 	} | null>(null);
 	const suppressClick = useRef(false);
 	const finish = (cancelled: boolean) => {
 		const current = gesture.current;
 		gesture.current = null;
 		if (!current?.following) return;
-		motion?.settle(!cancelled && current.distance >= 64 ? opening : !opening);
+		const velocity = cancelled ? 0 : current.velocity.read();
+		motion?.settle(
+			!cancelled && current.distance + projectMomentum(velocity) >= 64
+				? opening
+				: !opening,
+			velocity * (opening ? -1 : 1),
+		);
 	};
 	return {
 		onClickCapture: (event: React.MouseEvent) => {
@@ -202,7 +256,8 @@ export function useNowPlayingSwipe(
 			if (
 				event.touches.length !== 1 ||
 				!window.matchMedia(MOBILE_QUERY).matches ||
-				getNowPlayingOpen() === opening ||
+				(getNowPlayingOpen() === opening &&
+					!document.documentElement.dataset.playerMorphing) ||
 				(!opening && getQueueOpen()) ||
 				(canStart && !canStart(event)) ||
 				(event.target instanceof Element &&
@@ -212,11 +267,14 @@ export function useNowPlayingSwipe(
 			)
 				return;
 			const touch = event.touches[0];
+			const velocity = new GestureVelocity();
+			velocity.add(0);
 			gesture.current = {
 				x: touch.clientX,
 				y: touch.clientY,
 				distance: 0,
 				following: false,
+				velocity,
 			};
 		},
 		onTouchMove: (event: React.TouchEvent) => {
@@ -231,12 +289,12 @@ export function useNowPlayingSwipe(
 			if (!current.following) {
 				if (
 					Math.abs(touch.clientX - current.x) > Math.max(10, Math.abs(dy)) ||
-					dy < -10
+					(dy < -10 && !document.documentElement.dataset.playerMorphing)
 				) {
 					gesture.current = null;
 					return;
 				}
-				if (dy < 10) return;
+				if (Math.abs(dy) < 10) return;
 				if (!motion?.begin()) {
 					gesture.current = null;
 					return;
@@ -244,7 +302,8 @@ export function useNowPlayingSwipe(
 				current.following = true;
 				suppressClick.current = true;
 			}
-			current.distance = Math.max(0, dy);
+			current.distance = dy;
+			current.velocity.add(current.distance);
 			motion?.drag(current.distance, opening);
 		},
 		onTouchEnd: () => finish(false),

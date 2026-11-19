@@ -11,10 +11,12 @@ export function Toaster() {
 
 	useEffect(() => subscribeToasts(setToasts), []);
 
-	if (toasts.length === 0) return null;
-
 	return (
-		<div className="pointer-events-none fixed inset-x-0 bottom-28 z-90 flex flex-col items-center gap-2 px-4">
+		<div
+			aria-live="polite"
+			aria-relevant="additions text"
+			className="pointer-events-none fixed inset-x-0 bottom-28 z-90 flex flex-col items-center gap-2 px-4"
+		>
 			{toasts.map((toast) =>
 				toast.onClick ? (
 					<button

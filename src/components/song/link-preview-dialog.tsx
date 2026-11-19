@@ -231,8 +231,8 @@ export function LinkPreviewDialog() {
 				open={videoId !== null}
 			>
 				<Dialog.Portal>
-					<Dialog.Backdrop className="fixed inset-0 z-100 bg-black/50 backdrop-blur-xs transition-opacity duration-150 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-					<Dialog.Popup className="fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none transition-[transform,opacity] duration-150 data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0">
+					<Dialog.Backdrop className="ui-backdrop fixed inset-0 z-100 bg-black/50 backdrop-blur-xs" />
+					<Dialog.Popup className="ui-popup fixed top-1/2 left-1/2 z-100 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-foreground/10 bg-popover p-4 text-popover-foreground shadow-2xl outline-none">
 						<Dialog.Close
 							aria-label="Close"
 							className="absolute top-3 right-3 grid size-7 place-items-center rounded-full text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground"
