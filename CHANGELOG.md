@@ -6,6 +6,12 @@
 
 ### Improvements
 
+### Bug fixes
+
+## [1.0.0] - 2026-11-19
+
+### Improvements
+
 - Player and queue gestures now follow the finger directly, carry flick momentum into interruptible springs, and use softer feedback across controls and menus.
 - Reduced motion, reduced transparency, higher contrast, and keyboard focus are respected across player controls, dialogs, and navigation.
 
