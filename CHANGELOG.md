@@ -4,6 +4,8 @@
 
 ### Features
 
+- Added **See all** buttons that open full category lists on artist pages.
+
 ### Improvements
 
 ### Bug fixes
