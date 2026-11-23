@@ -8,6 +8,8 @@
 
 ### Bug fixes
 
+- Fixed recurring desktop sign-outs by renewing expired sessions directly through YouTube Music in the background.
+
 ## [1.0.0] - 2026-11-19
 
 ### Improvements

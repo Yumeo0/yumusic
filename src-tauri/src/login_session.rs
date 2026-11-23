@@ -1,11 +1,13 @@
 use serde_json::Value;
 use tauri::Url;
 
+pub const YOUTUBE_MUSIC_URL: &str = "https://music.youtube.com/";
+
 pub fn google_login_url() -> Result<Url, String> {
 	let mut url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
 		.map_err(|e| e.to_string())?;
 	url.query_pairs_mut()
-		.append_pair("continue", "https://music.youtube.com/");
+		.append_pair("continue", YOUTUBE_MUSIC_URL);
 	Ok(url)
 }
 
@@ -98,7 +100,7 @@ fn page_login_status(html: &str) -> Option<bool> {
 
 pub async fn verify_login(client: &reqwest::Client, cookie: &str) -> Result<bool, String> {
 	let response = client
-		.get("https://music.youtube.com/")
+		.get(YOUTUBE_MUSIC_URL)
 		.header(reqwest::header::COOKIE, cookie)
 		.header(reqwest::header::CACHE_CONTROL, "no-cache")
 		.send()
