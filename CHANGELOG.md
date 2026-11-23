@@ -4,9 +4,15 @@
 
 ### Features
 
-- Added **See all** buttons that open full category lists on artist pages.
-
 ### Improvements
+
+### Bug fixes
+
+## [1.1.0] - 2026-11-23
+
+### Features
+
+- Added **See all** buttons that open full category lists on artist pages.
 
 ### Bug fixes
 

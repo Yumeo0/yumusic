@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.0"
+version = "1.1.0"
 description = "A desktop music player for YouTube Music"
 authors = ["Yumeo"]
 license = "GPL-3.0-only"
