@@ -2,37 +2,37 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@babel/runtime/-/runtime-8.0.8.tgz",
-        "sha512": "744bbc9c6951aa3b09b2fbe2514a1231f7111e9c28982891957b1cda63df27bf7e7df4e90e6f89b5f52d4cccd4aea080a474270ac54f0f7813d594fc46005109",
-        "dest": "bun-cache/@babel/runtime@8.0.8@@@1"
+        "url": "https://registry.npmjs.org/@babel/runtime/-/runtime-7.29.15.tgz",
+        "sha512": "df4e20b1b6c656641cf9c3461f3c07065a9ea587562ca8f7557090046b7f106715ecf50f7ca23b90050d5b515910e0b095088bbd08e0d4911a025450eb5ea1f9",
+        "dest": "bun-cache/@babel\\runtime@7.29.15@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@base-ui/react/-/react-1.9.0.tgz",
         "sha512": "4bc092628b004812ada4bf125947d2efcac51257cb8a3882800ee81ce2b6da3089f791542ec6322b004d14e82e76dd1103effbc8d73b17cd5b3af4274606c189",
-        "dest": "bun-cache/@base-ui/react@1.9.0@@@1"
+        "dest": "bun-cache/@base-ui\\react@1.9.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@base-ui/utils/-/utils-0.5.0.tgz",
         "sha512": "758186704b6d8e46223286b99c79bcbcb689d9472e4d6c68dc1140c0e61779183fabb51556f03a71a70421712cdc58017cad421ad5b5a6d125aacef0b31fadf4",
-        "dest": "bun-cache/@base-ui/utils@0.5.0@@@1"
+        "dest": "bun-cache/@base-ui\\utils@0.5.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@biomejs/biome/-/biome-2.6.2.tgz",
-        "sha512": "24b4c500517dbdf25c5b02e1c2e2f86477e52e0f977d3102e085270252515f570c46de7bfbe5ddd58b1bf45766961f5852bbf20977cf1078e3108a8a24674f2b",
-        "dest": "bun-cache/@biomejs/biome@2.6.2@@@1"
+        "url": "https://registry.npmjs.org/@biomejs/biome/-/biome-2.6.8.tgz",
+        "sha512": "92a65416f5fafda6103a6cdf44de4035c7cd4bdc0b1f86872d658ffdd40aca145956803aadd5accc0ec31ae8057313db322ce7532558cae91597e13164de0f40",
+        "dest": "bun-cache/@biomejs\\biome@2.6.8@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@biomejs/cli-linux-arm64/-/cli-linux-arm64-2.6.2.tgz",
-        "sha512": "42ce02a1f084f0c7648d915f123b3087634071bc90ec8558b464b3401bcba859656bf0925eba066e4b541677561bf915493cb069d6aecc0b29616b527ea01cda",
-        "dest": "bun-cache/@biomejs/cli-linux-arm64@2.6.2@@@1",
+        "url": "https://registry.npmjs.org/@biomejs/cli-linux-arm64/-/cli-linux-arm64-2.6.8.tgz",
+        "sha512": "d018e29bc94ac27aef5d41e82389374dbe75063a222c4c039e8bc223c9d2ce493ac23ddd4a18ae023af1ebe5f41e37f87a3475b116604d08920c7969cbdbc1ef",
+        "dest": "bun-cache/@biomejs\\cli-linux-arm64@2.6.8@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -40,9 +40,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@biomejs/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.6.2.tgz",
-        "sha512": "23e15808b552991ddc61f29c43e28d78b399e70d3045df5f405970dc96d2bf2edb91e82f4ea747681451709cc7401ff595d95d4cb21c1b6d646ba5f67135a627",
-        "dest": "bun-cache/@biomejs/cli-linux-arm64-musl@2.6.2@@@1",
+        "url": "https://registry.npmjs.org/@biomejs/cli-linux-arm64-musl/-/cli-linux-arm64-musl-2.6.8.tgz",
+        "sha512": "581f4f84e8ad5fe6d17341b7f863491a5bdb2a85a7dc9a01f73e04d382508b3202f5a3c243222fc2f586ed0647c70ea4db4162f9d1cb999d9f4849816bd1ea88",
+        "dest": "bun-cache/@biomejs\\cli-linux-arm64-musl@2.6.8@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -50,9 +50,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@biomejs/cli-linux-x64/-/cli-linux-x64-2.6.2.tgz",
-        "sha512": "1492ac6fde78d7cd77f710dd6eff579cd26c208c2fb20476d4e7f4684f41f54fa74253ad46ae60265da9b348d9526601c5368e94ff412a8f0df857fcf91ba2d6",
-        "dest": "bun-cache/@biomejs/cli-linux-x64@2.6.2@@@1",
+        "url": "https://registry.npmjs.org/@biomejs/cli-linux-x64/-/cli-linux-x64-2.6.8.tgz",
+        "sha512": "5c8937a4b413e7a23a4ed8bebb40c5f05b523578c23133dbc554f37c9f5c4b6b7522654abeba95e5be761ae11a260ebfc2e897bf3d2c8df6f9b1a0784cf463cc",
+        "dest": "bun-cache/@biomejs\\cli-linux-x64@2.6.8@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -60,9 +60,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@biomejs/cli-linux-x64-musl/-/cli-linux-x64-musl-2.6.2.tgz",
-        "sha512": "c278c45c02b6a437768fcafd80a2372fee38b08c63918cd2e5a1e60f5f8ae7b44d277b05c93e27db6347e9014faaa795751071379e07de47245140ab14a09c27",
-        "dest": "bun-cache/@biomejs/cli-linux-x64-musl@2.6.2@@@1",
+        "url": "https://registry.npmjs.org/@biomejs/cli-linux-x64-musl/-/cli-linux-x64-musl-2.6.8.tgz",
+        "sha512": "eb8633a3e2787c493b29ff5232755d5710be6360367bf2fce904cff498c6439ee5b1d77210b2e96c170d331489820aded93d40bc84b0c12ace0299010070ea34",
+        "dest": "bun-cache/@biomejs\\cli-linux-x64-musl@2.6.8@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -70,107 +70,142 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-2.16.0.tgz",
-        "sha512": "1566b4b0f96a606260a53b3a3b105170bfc05b8253d0e20ef96d5a8deae5ba84d587c095d01ed7335aac3424609e44829110a038808a1d1425635ee3aec9b4f9",
-        "dest": "bun-cache/@bufbuild/protobuf@2.16.0@@@1"
+        "url": "https://registry.npmjs.org/@bufbuild/protobuf/-/protobuf-2.17.0.tgz",
+        "sha512": "85c3e44b3e83ecc89353fe5504184afa4c5a603a0e750eb2251149de44bc372769f956577e0d6fae900128f36877c6d732e7ec5429a2509548285cc2ced6b8bb",
+        "dest": "bun-cache/@bufbuild\\protobuf@2.17.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@dehoist/romanize-thai/-/romanize-thai-1.0.0.tgz",
         "sha512": "e92a83e2fc99e3ca2d9f2a4b5cc87dd3509e41eb683f9a6d60e688af9f0deb30ea8e3a0dd1b1ecccc6f977fe805c92507fc908bdb9925817ae0eb6c058b6a33d",
-        "dest": "bun-cache/@dehoist/romanize-thai@1.0.0@@@1"
+        "dest": "bun-cache/@dehoist\\romanize-thai@1.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@emnapi/core/-/core-2.0.0-beta.2.tgz",
+        "sha512": "333095a16b5c8383e6d81de37b998cbd832f8f732604ac3e7d4eef6ec25cf7f893f22a7afde6081e8fc3b26fe6afec2c1c1e92132243bb1074f58cbaafff3ee0",
+        "dest": "bun-cache/@emnapi\\core@2.0.0-4049f5e8f1219d89@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@emnapi/runtime/-/runtime-2.0.0-beta.2.tgz",
+        "sha512": "25cad23f33ef66e359bc9a8f4c5f45c36e4b6ce27c6afcc556569fda0ae61f80a4bb4a063f8eed460a8f65a75c7e3dd8a1930790556709815b40cf08fa2e5013",
+        "dest": "bun-cache/@emnapi\\runtime@2.0.0-4049f5e8f1219d89@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@emnapi/wasi-threads/-/wasi-threads-2.2.0.tgz",
+        "sha512": "24fece607dfc43bfa9c9301ed78ada6472d020aec10ca6ddc238be5e2de971dffa424258407dd25f8c2ee84a651ab1895917a9a0dcde75f9b41b707d6787bd47",
+        "dest": "bun-cache/@emnapi\\wasi-threads@2.2.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@floating-ui/core/-/core-1.8.0.tgz",
         "sha512": "d02219e62b69b3ff31ec11bc744221b39dc1bc2507d8f0a8a20b5a930453badf80ae6e7cb09a2827402e6612f0d87258211e5c30b34f0524bbdbcb0f868da485",
-        "dest": "bun-cache/@floating-ui/core@1.8.0@@@1"
+        "dest": "bun-cache/@floating-ui\\core@1.8.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@floating-ui/dom/-/dom-1.8.0.tgz",
         "sha512": "c974abcde1d905365a74b3a57f28429091cd78b2671d19d1227c1d678d0bed989a02dac1c28625b03ad7defe7307552d93b08b7f370e5675555a85c4932ec27a",
-        "dest": "bun-cache/@floating-ui/dom@1.8.0@@@1"
+        "dest": "bun-cache/@floating-ui\\dom@1.8.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@floating-ui/react-dom/-/react-dom-2.1.9.tgz",
         "sha512": "2438c41460a9226c43080ec924abe203433df91b6625d8f49bf35553920c8012be026668b80410efffb618b1f41975d8d18330f685cf07c84a75b3d883940b62",
-        "dest": "bun-cache/@floating-ui/react-dom@2.1.9@@@1"
+        "dest": "bun-cache/@floating-ui\\react-dom@2.1.9@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@floating-ui/utils/-/utils-0.2.12.tgz",
         "sha512": "1e90a8f2d996ccb55a779b36775f44840cf9ceaaeb43ab3af6a77a9a83cc42f90eb92c034f562045f59256e7387a79eaae0bf7387a6988e18c43ba02d77c88c3",
-        "dest": "bun-cache/@floating-ui/utils@0.2.12@@@1"
+        "dest": "bun-cache/@floating-ui\\utils@0.2.12@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@indic-transliteration/common_maps/-/common_maps-1.0.6.tgz",
         "sha512": "3985fe4aba4adba16355936984e76c41cf4f874c850eda16b14ec83638448615af1aacf117732a8b47c5d1bb94b01e23a515897beed4faef4f3b87ec4cffe57e",
-        "dest": "bun-cache/@indic-transliteration/common_maps@1.0.6@@@1"
+        "dest": "bun-cache/@indic-transliteration\\common_maps@1.0.6@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@indic-transliteration/sanscript/-/sanscript-1.3.3.tgz",
         "sha512": "ccd19e0119904cf225b9bc2012197f26e9a9c133c7add4ff70db107822fe1baed24268c97b7a919cc2188215e256defe283b28fe95352b2d997c3fd104849f25",
-        "dest": "bun-cache/@indic-transliteration/sanscript@1.3.3@@@1"
+        "dest": "bun-cache/@indic-transliteration\\sanscript@1.3.3@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@jridgewell/gen-mapping/-/gen-mapping-0.3.13.tgz",
         "sha512": "da492dffb9e227a32010fc45d1b61d43a7ad65a03e7d0bc370b29c921cb5c8840ecdaa0a8c10634a3eb7fda2d58d8137aa146de5dbccfae5327c283a50a0816c",
-        "dest": "bun-cache/@jridgewell/gen-mapping@0.3.13@@@1"
+        "dest": "bun-cache/@jridgewell\\gen-mapping@0.3.13@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@jridgewell/remapping/-/remapping-2.3.5.tgz",
         "sha512": "2c8f6effe95a606e03b354c3292256d983eb22571560ec22d9f502eb1078de5b9e0a383157895f7ce0990ad605887e9334e5feb50297c7ded3e082876e1c8711",
-        "dest": "bun-cache/@jridgewell/remapping@2.3.5@@@1"
+        "dest": "bun-cache/@jridgewell\\remapping@2.3.5@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.2.tgz",
-        "sha512": "6d12128022233f6d3fb5b5923d63048b9e1054f45913192e0fd9492fe508c542adc15240f305b54eb6f58ccb354455e8d42053359ff98690bd42f98a59da292b",
-        "dest": "bun-cache/@jridgewell/resolve-uri@3.1.2@@@1"
+        "url": "https://registry.npmjs.org/@jridgewell/resolve-uri/-/resolve-uri-3.1.3.tgz",
+        "sha512": "9614ed8eda0402b5818e2b26b5f4bbeb54bd1e5ca7fa7219a8e6556286755e7f363cc34c56793e8e3fcd842e1f017193b3bc9d38d709891e6fc90053303bb6ee",
+        "dest": "bun-cache/@jridgewell\\resolve-uri@3.1.3@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.6.0.tgz",
         "sha512": "4fb8dffb9ce0b191f0349e25bd0eff69ecdbca4d27357fb32555a998703b558b04c7b6bbaabe5183921bb4916a920cdee58dacaeeab545463c43cdfb39dee217",
-        "dest": "bun-cache/@jridgewell/sourcemap-codec@1.6.0@@@1"
+        "dest": "bun-cache/@jridgewell\\sourcemap-codec@1.6.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@jridgewell/trace-mapping/-/trace-mapping-0.3.31.tgz",
         "sha512": "cf3351f9275048327373c8e869e3fc410a0242bf0db98c76748232b65d507811191c9f6e5ba85e6ecad881bcfc849c1441aa374d608cb667d5f0dbb5b7038b03",
-        "dest": "bun-cache/@jridgewell/trace-mapping@0.3.31@@@1"
+        "dest": "bun-cache/@jridgewell\\trace-mapping@0.3.31@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@oxc-project/types/-/types-0.155.0.tgz",
-        "sha512": "49e13c24fc16d71b35b4778dc9c8d4b5405d868ad16bca388e5be3c24e3d47bfd9dbdd62fb80d06bb2492203a6fd3698419c7e42b3d06d527ff5cf1d30864df1",
-        "dest": "bun-cache/@oxc-project/types@0.155.0@@@1"
+        "url": "https://registry.npmjs.org/@msgpack/msgpack/-/msgpack-2.8.0.tgz",
+        "sha512": "87dbb8bbf8e221129bab6e4f33ecf2993c96e9b853cc42ef3a851df80bd8ae258e00aa4b1a721a99a113de99c7628239898a61007048e1acb1d0c7a147e5553d",
+        "dest": "bun-cache/@msgpack\\msgpack@2.8.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.2.15.tgz",
-        "sha512": "8930635f1f81e504af808f3d9497e6aa1e304e1f0d69b47561920837784dc78cd21b41157d5aa43af2ee94da46e36e75a5b77afc802667f2de7d5935638acf87",
-        "dest": "bun-cache/@rolldown/binding-linux-arm64-gnu@1.2.15@@@1",
+        "url": "https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.2.6.tgz",
+        "sha512": "991c83984c3dfdf0835c219f2f5b1b808c3f1942b43d5c515b863080f37ad45dcb43e7d2ca80456ab255ce01b2845ea447311067415e8c3aa6e162d749ea909b",
+        "dest": "bun-cache/@napi-rs/wasm-runtime@1.2.6@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@oxc-project/types/-/types-0.156.0.tgz",
+        "sha512": "d43bb2838f1374935dca1101f179f52f7e9b4fd3efe8652d94a8c7c4ecacf3191a17fad0ab75c913e6c0bab48afc0808cf998616c6fbedc9fd3dbdb4f9609273",
+        "dest": "bun-cache/@oxc-project\\types@0.156.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-gnu/-/binding-linux-arm64-gnu-1.2.19.tgz",
+        "sha512": "a66fdaa453019d26c56f73ba9c6e691ced62a87859ae31831448d29bea2df49d7b5d73ef1fd2fdd32e61fa381f1c213e41d96cbf2f2a284714e152b18230febc",
+        "dest": "bun-cache/@rolldown\\binding-linux-arm64-gnu@1.2.19@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -178,9 +213,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-musl/-/binding-linux-arm64-musl-1.2.15.tgz",
-        "sha512": "b8ddba5ce9d547baea42ea46dd5f68006d841866ad5a37091ce7833875050a1e1305698fdad1d316854dd776986f07e6d1a1ea240126730840bbab28a088dfa9",
-        "dest": "bun-cache/@rolldown/binding-linux-arm64-musl@1.2.15@@@1",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-arm64-musl/-/binding-linux-arm64-musl-1.2.19.tgz",
+        "sha512": "2b54a6429dc51627219fca2aacd230bc5a19e7072f8c2ee0a01ce968c36f2dff4565cf9007f42f2e69e92598000061e20fdf34b4ff056599d79362bde2bbe5c6",
+        "dest": "bun-cache/@rolldown\\binding-linux-arm64-musl@1.2.19@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -188,9 +223,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.15.tgz",
-        "sha512": "14783ad2b4ba0c178f01867d5fd17aef1f8939b15d9a09fab6ea40d42fdadc1f82b9f1664c3e265fe7bc33be6d0a200eddfa11ffac70541234290888eec9ffaf",
-        "dest": "bun-cache/@rolldown/binding-linux-x64-gnu@1.2.15@@@1",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.19.tgz",
+        "sha512": "ae6ef9ffd0e41ca794d969c0f30e17f785866202e50c21427e4402fb86e0b952660bf8ef0d1bf607edb02ce621c84d1f56ebfbfff0a4937f4ea0eb9fc82bbbe9",
+        "dest": "bun-cache/@rolldown\\binding-linux-x64-gnu@1.2.19@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -198,9 +233,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.15.tgz",
-        "sha512": "fdcbd5ffbbf9546cff9a88b3d172918f6744f03cec2b2848bb52a93af2463e3472c20df2b1c38df3cf541af01ef337e224b1eea7b54b8c176ea065a2dc7bac59",
-        "dest": "bun-cache/@rolldown/binding-linux-x64-musl@1.2.15@@@1",
+        "url": "https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.19.tgz",
+        "sha512": "8ab87fe3e89814ce06033a65b8312b823cfcf5b8fa343b6aa8c006ffa3b52c6dfc11ddcda7279bcc2a5c54d9055bcba1cbeff7fc1a1c52f9d70d1df709759ef4",
+        "dest": "bun-cache/@rolldown\\binding-linux-x64-musl@1.2.19@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -208,58 +243,107 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.0.1.tgz",
-        "sha512": "da3f5b1ade4987c863faf3ed8333ed97bda3d324711c0cae9a8a3a4cd7c08ec2c1d3852da52bcf6cf703701331cfb9fef42601d1cd46c501716118368e29aa1b",
-        "dest": "bun-cache/@rolldown/pluginutils@1.0.1@@@1"
+        "url": "https://registry.npmjs.org/@rolldown/pluginutils/-/pluginutils-1.1.1.tgz",
+        "sha512": "825148243bcb343b49853f6aacc1562cf6ef4beb24c60b782f42bc122d98b6784fcac0099ec23b9f2c522712a3e000de297d0e2e30b89ed464c292cea12debc0",
+        "dest": "bun-cache/@rolldown\\pluginutils@1.1.1@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@romanize/korean/-/korean-0.1.3.tgz",
         "sha512": "05fc737b7e52ee4b4aaa6ee07bbf31defece5bf4eb6cf57481cbeb1ee4d751e7880fb986896594207fdf392f653b6e4dd4b63e9f54bdc6c8b1b714fd2a080462",
-        "dest": "bun-cache/@romanize/korean@0.1.3@@@1"
+        "dest": "bun-cache/@romanize\\korean@0.1.3@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@sglkc/kuromoji/-/kuromoji-1.1.0.tgz",
         "sha512": "b8ac576143395cd8d9c3489ad323184c8de31d287f73580430dbdcbd2e89e3d078988f8f02af224583d3c61da66b44569b8e4bc965ab20bc42240217a62fe9c3",
-        "dest": "bun-cache/@sglkc/kuromoji@1.1.0@@@1"
+        "dest": "bun-cache/@sglkc\\kuromoji@1.1.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@sglkc/kuroshiro/-/kuroshiro-1.0.1.tgz",
         "sha512": "a438f341af8a1dca0a6ace62d277f6bb1361d1c159960b0acef8f9007324005edcbca4dac8df919656ff5fe4b71b3f0ca4c93aa55f79532bbdd3e8b2ab7c3efc",
-        "dest": "bun-cache/@sglkc/kuroshiro@1.0.1@@@1"
+        "dest": "bun-cache/@sglkc\\kuroshiro@1.0.1@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@sglkc/kuroshiro-analyzer-kuromoji/-/kuroshiro-analyzer-kuromoji-1.0.1.tgz",
         "sha512": "a96121866aeed93e982a13b1d60e81371c66f0ad0620ac9de4d63aca7ac61ff94bc3136f7efda8b21d8f01ea122618e5a15acb7bbc27fcd129ff9f88a1137cf0",
-        "dest": "bun-cache/@sglkc/kuroshiro-analyzer-kuromoji@1.0.1@@@1"
+        "dest": "bun-cache/@sglkc\\kuroshiro-analyzer-kuromoji@1.0.1@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/node/-/node-4.3.3.tgz",
-        "sha512": "fd3f08284b1ff554d4ead2e3802efeb2fda638fb50c731368ccc3bbb84ede344f1f90499c69ce1f79fc7e9c30aa236bd5ee5bb88c74b258041d28f46d4268082",
-        "dest": "bun-cache/@tailwindcss/node@4.3.3@@@1"
+        "url": "https://registry.npmjs.org/@supabase/auth-js/-/auth-js-2.119.2.tgz",
+        "sha512": "cd68bba464fa5c83161b425ae549efb2ff62c7080b4eafe99d6373195c155e5affa27ada7f7bf85707a90854a5c46aef3722919a19fb3ba7b80871754c983bdd",
+        "dest": "bun-cache/@supabase\\auth-js@2.119.2@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/oxide/-/oxide-4.3.3.tgz",
-        "sha512": "92b5e302292268548f68afc5900413e544f1dd5a2b9906a2679841165259f54150181febc20d4c648847006f6c98c4114ddc89c4fe90b7933032d772539156ac",
-        "dest": "bun-cache/@tailwindcss/oxide@4.3.3@@@1"
+        "url": "https://registry.npmjs.org/@supabase/functions-js/-/functions-js-2.119.2.tgz",
+        "sha512": "d2998d41129a8466dece0515da6d3697b8f8b7459d97b28c34d31618231eefa6de03b7b521f4cf8a1b4db2ca965b0d488ea3038b46b1a2a2e20cfcdc75b3ee1b",
+        "dest": "bun-cache/@supabase\\functions-js@2.119.2@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-arm64-gnu/-/oxide-linux-arm64-gnu-4.3.3.tgz",
-        "sha512": "9c3c6575c10434ec594730b6baef63aeeb59740010b5bfbc5960c24a758bd73bc1935f8537ec7a32d0d588f07900931fb6d5425217a1196bacdd704f81ab4cff",
-        "dest": "bun-cache/@tailwindcss/oxide-linux-arm64-gnu@4.3.3@@@1",
+        "url": "https://registry.npmjs.org/@supabase/phoenix/-/phoenix-0.4.5.tgz",
+        "sha512": "6809fd1fda2f572780a4acb5d4e58eaeb386abc0d5ebcc96787e2e77694df5fce7e1a3bc65be462cbf66d69520f672ea21c4fe6437c072c65ed04fe7a9dbf697",
+        "dest": "bun-cache/@supabase\\phoenix@0.4.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@supabase/postgrest-js/-/postgrest-js-2.119.2.tgz",
+        "sha512": "439448cb9c03efd8c0ad04880f4e895ea4bd17e6ca2dc4ebf35633ee1c24daa90c5f87d632bbb81cbbc6dd4be86341654338dc8d7a956daefee8679a22daba51",
+        "dest": "bun-cache/@supabase\\postgrest-js@2.119.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@supabase/realtime-js/-/realtime-js-2.119.2.tgz",
+        "sha512": "d711d16d9f1180aabc427e74b8d24c9c1764bb32b7e46413a35871dbe6c2dd0bc2c5bcd79c591b9aad99c93f714a3382b8b05f0f9bdedd92b125c6d679f2f7a3",
+        "dest": "bun-cache/@supabase\\realtime-js@2.119.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@supabase/storage-js/-/storage-js-2.119.2.tgz",
+        "sha512": "75bccfb98298737fc71b3f9c45700ae39cd1e4558c107ea5af622cd7764e13184e04233717488ef7a67d56e8652c0eb8bcf2de4903f6e0efe37ac5a0d5063a7f",
+        "dest": "bun-cache/@supabase\\storage-js@2.119.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@supabase/supabase-js/-/supabase-js-2.119.2.tgz",
+        "sha512": "e07bc5e06d83c1daa39b03c1a73f511e75d67dd2b4c12930e32061c5eeb809d785f20771b1317d599b8716e356b509c7965abbd590f202086be10f270b49bf34",
+        "dest": "bun-cache/@supabase\\supabase-js@2.119.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@tailwindcss/node/-/node-4.3.5.tgz",
+        "sha512": "c93e7717357891ed1caff060b83c6158ca66e4c26ed4eda6bb393eb4ac3a94a1e338302c600ac16d6c056c989a92c7f316fd6da643bd4071b399fb358494faea",
+        "dest": "bun-cache/@tailwindcss\\node@4.3.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide/-/oxide-4.3.5.tgz",
+        "sha512": "3f29ea18b66c66fc0cf6da83fc253190e21fc9de8ae5e959d8ca286aecc9af23ff52a5d8822df261bb6ddcdd177be30757f78528f1500847c8280aa5012d4206",
+        "dest": "bun-cache/@tailwindcss\\oxide@4.3.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-arm64-gnu/-/oxide-linux-arm64-gnu-4.3.5.tgz",
+        "sha512": "0d3092cae71ce9284ca7540ca95e51f7867bc6580d814ce41a6145d6b2f91c7d908f2e1e4a612acbe60b1a4aaa62f59ae2c20bb60ac1b7526344a6e7790b6215",
+        "dest": "bun-cache/@tailwindcss\\oxide-linux-arm64-gnu@4.3.5@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -267,9 +351,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-arm64-musl/-/oxide-linux-arm64-musl-4.3.3.tgz",
-        "sha512": "31de386c3eaf797fcf0b98b217c703567c381c12003597a945967b6bc0d03af91fa39594070729ea202e094cf6deefb84949212650f778bee135d5bc7b377f90",
-        "dest": "bun-cache/@tailwindcss/oxide-linux-arm64-musl@4.3.3@@@1",
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-arm64-musl/-/oxide-linux-arm64-musl-4.3.5.tgz",
+        "sha512": "1fd96cbcee31f44e271381e2f21ecd1c7c343bf91c552bbe88ec851cd19d6336b31a00e314765b13a4b7850f2431c6cd5d206531d362ebb2d5e4456ab69689b7",
+        "dest": "bun-cache/@tailwindcss\\oxide-linux-arm64-musl@4.3.5@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -277,9 +361,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-gnu/-/oxide-linux-x64-gnu-4.3.3.tgz",
-        "sha512": "b71eeeb359aec0e2802966a8daffc669a7c57906e813a6a3f3cbc2eb388dd8d0867119bc816521c23ce0f987550757b86e802d76d99ae0be37a27ba723a352e3",
-        "dest": "bun-cache/@tailwindcss/oxide-linux-x64-gnu@4.3.3@@@1",
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-gnu/-/oxide-linux-x64-gnu-4.3.5.tgz",
+        "sha512": "e2ec50bed06f3ee21d975dd67d4063f713191c7d783ed1d9f0e65db4b99dc83b46ebab026b5b79f7d3594fe8da82453346d5a1bae975a91650d67009b1c5cde6",
+        "dest": "bun-cache/@tailwindcss\\oxide-linux-x64-gnu@4.3.5@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -287,9 +371,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-musl/-/oxide-linux-x64-musl-4.3.3.tgz",
-        "sha512": "489c57eb4b26bc781ab19a01cb5d5d5fa6118d7245a2fc1606879d85b40f381ce0156047181f9354f581f41c7347b4d3c54f05419008d80ca2342333166f089a",
-        "dest": "bun-cache/@tailwindcss/oxide-linux-x64-musl@4.3.3@@@1",
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide-linux-x64-musl/-/oxide-linux-x64-musl-4.3.5.tgz",
+        "sha512": "d09400cecee3c1b03b3bafb3fda754f89937017c2cbb79e9021b6be5eb1c5d2ed3a84a9671a0d5eea1ee23ed15cbf29046e5469cb41111c4895986aec95de8aa",
+        "dest": "bun-cache/@tailwindcss\\oxide-linux-x64-musl@4.3.5@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -297,44 +381,51 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.3.tgz",
-        "sha512": "c9853c72880b79287f9acda387c163ee369b6bf1166bb25ae86a14a9865aada12e088e584ba9ace8e6d98238de766fa39ba5d98dd351581a4f3fa67cea83b173",
-        "dest": "bun-cache/@tailwindcss/vite@4.3.3@@@1"
+        "url": "https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.5.tgz",
+        "sha512": "3898459a511f77332bf9abc009d8b8d113ed9e45b407a857cb12fff2bfad9c41c15998e2dfa098463117aebbe0066698b03de810e06ac181512ac62fcc57bb07",
+        "dest": "bun-cache/@tailwindcss\\oxide-wasm32-wasi@4.3.5@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tanstack/react-virtual/-/react-virtual-3.14.22.tgz",
-        "sha512": "ccd881f48177a6bc924df014ae3f6d3c78c3fe5a2705891fc6b3cfe2fe084d4c7eab01da8c9479718ff18ab8efc1cf8a5a4babd74197dd3a6c6ca87b2640fc2f",
-        "dest": "bun-cache/@tanstack/react-virtual@3.14.22@@@1"
+        "url": "https://registry.npmjs.org/@tailwindcss/vite/-/vite-4.3.5.tgz",
+        "sha512": "0423626346b566374e1d5ab0ee4c9bed4ef60707cc17775f52e37eb50b0b5a4cbf27924e23fafb69b89b8255dfca0ad98553bfdeedd5f84db992429378c91769",
+        "dest": "bun-cache/@tailwindcss\\vite@4.3.5@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tanstack/virtual-core/-/virtual-core-3.19.7.tgz",
-        "sha512": "831cb94af1f4985449d18ba3b6b7e507fd4702ef569f5286bcbd1b8d97d091855532c229422c1c7f5991d3afd588de0d8e59546f81cd0a3a84f451b0813bcc09",
-        "dest": "bun-cache/@tanstack/virtual-core@3.19.7@@@1"
+        "url": "https://registry.npmjs.org/@tanstack/react-virtual/-/react-virtual-3.14.28.tgz",
+        "sha512": "ce833879d748554b0eb2e9ce7b6eaeafe87a60941bbddcd4d746b6b4acc8a2f4e1bb93f84af13243e711c7499b78a7e09d1d0ccfb291fcdc2b6771b3567505fe",
+        "dest": "bun-cache/@tanstack\\react-virtual@3.14.28@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@tanstack/virtual-core/-/virtual-core-3.19.13.tgz",
+        "sha512": "0b20af326ee6e49baf3d6e9e30f664641664e9d8b24ab95440d351a503e2127876bda932821c7cd87c37c16d931c552c97ac49eae33895251a880d93d28616f3",
+        "dest": "bun-cache/@tanstack\\virtual-core@3.19.13@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@tauri-apps/api/-/api-3.0.0-alpha.3.tgz",
         "sha512": "96430886814664feeddb7ca41b5da236f62496191fe34ed989bab432c0164000000d52d06e151da7fbc85ef1dfa1da8ef0d768be428fa06e3ddf083f0ab9fdaa",
-        "dest": "bun-cache/@tauri-apps/api@3.0.0-3f776051070f1260@@@1"
+        "dest": "bun-cache/@tauri-apps\\api@3.0.0-3f776051070f1260@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tauri-apps/cli/-/cli-3.0.0-alpha.5.tgz",
-        "sha512": "8484b077f5f80ac8d1286ba09bc3b117d2a450b0ac9016685513a9740d07f293deb10b476c8271bc59c9807315d968e0aeb24435334bdd0dd1f4c73662e08870",
-        "dest": "bun-cache/@tauri-apps/cli@3.0.0-e2ccf10bb4d28062@@@1"
+        "url": "https://registry.npmjs.org/@tauri-apps/cli/-/cli-3.0.0-alpha.6.tgz",
+        "sha512": "72129adb521215490274895112e95de768b14c27b3425e9b4bf7bef26568b0649384e53b012ccfca7c1a9cdb83267538a9a507b6cd167a47862644791677d957",
+        "dest": "bun-cache/@tauri-apps\\cli@3.0.0-32bd5ff2c1a25ef6@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-arm64-gnu/-/cli-linux-arm64-gnu-3.0.0-alpha.5.tgz",
-        "sha512": "f7f411a94a7d12f5442b46ab778f0929899fcdc369974110e37fe85097ca0bdbe8c7b8a38e05da55e647d58643bac769bb5ae3731933c5e8083d408c304e808d",
-        "dest": "bun-cache/@tauri-apps/cli-linux-arm64-gnu@3.0.0-e2ccf10bb4d28062@@@1",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-arm64-gnu/-/cli-linux-arm64-gnu-3.0.0-alpha.6.tgz",
+        "sha512": "cbd157b29c0da0ab9e62c8da3849c7ab60ddf9316a9690d69f546fac75edb69dbd3925329ab5e677247d42431d721c02bfafa6ce039cb7f7a3f56d8708365707",
+        "dest": "bun-cache/@tauri-apps\\cli-linux-arm64-gnu@3.0.0-32bd5ff2c1a25ef6@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -342,9 +433,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-arm64-musl/-/cli-linux-arm64-musl-3.0.0-alpha.5.tgz",
-        "sha512": "4b153775b207700f564d2ad2e3af5a526cfc71dc04dd0cc2055809132c523c4908ef195648c3c01f50b28d98e97fdec5334143d90bcc63f82ceef7fed44dc404",
-        "dest": "bun-cache/@tauri-apps/cli-linux-arm64-musl@3.0.0-e2ccf10bb4d28062@@@1",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-arm64-musl/-/cli-linux-arm64-musl-3.0.0-alpha.6.tgz",
+        "sha512": "c5f5747d172f12e2933d641472b483810d9ca2c512e5e9abb1813c928b05b7c66a1df8248670b3a4ce384f9336a52aa59bdd4f0c7d522b8ba029858d419da30e",
+        "dest": "bun-cache/@tauri-apps\\cli-linux-arm64-musl@3.0.0-32bd5ff2c1a25ef6@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -352,9 +443,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-x64-gnu/-/cli-linux-x64-gnu-3.0.0-alpha.5.tgz",
-        "sha512": "9e760065ed276869677b23a92612b76ae6cbfd1e61bf45f7258ce600039c75c61a90d9bd574d1b6487dad05858fe48f14d0c7832c323d08b4ed3aeb7f16fb43f",
-        "dest": "bun-cache/@tauri-apps/cli-linux-x64-gnu@3.0.0-e2ccf10bb4d28062@@@1",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-x64-gnu/-/cli-linux-x64-gnu-3.0.0-alpha.6.tgz",
+        "sha512": "cde1ee4c336545ed2e0576f40b7ae795ceab4f1719ee0dbd5e442eb2c00e202ffe2ee62e0f522ac39ff9b3cce165371b982111173703180ef0cbebb3ed900132",
+        "dest": "bun-cache/@tauri-apps\\cli-linux-x64-gnu@3.0.0-32bd5ff2c1a25ef6@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -362,9 +453,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-x64-musl/-/cli-linux-x64-musl-3.0.0-alpha.5.tgz",
-        "sha512": "14cbdf4876020cee1d666e7c8015334fc512c545bb9e43a767700ac1655cf2cca526e59f4e35e45abd886b9be10c6a6dd094a2ace0c6078365618b1dc1b44055",
-        "dest": "bun-cache/@tauri-apps/cli-linux-x64-musl@3.0.0-e2ccf10bb4d28062@@@1",
+        "url": "https://registry.npmjs.org/@tauri-apps/cli-linux-x64-musl/-/cli-linux-x64-musl-3.0.0-alpha.6.tgz",
+        "sha512": "b1a236b4e0c8ff87a174a4a39d80951e3e5111c0c151e7ab7a0cf946545f0819e8b2d5bcd81e2ed0fc5ef74b7b22f8ab51959f8ad3f31d7a577c39a2f4bd4b01",
+        "dest": "bun-cache/@tauri-apps\\cli-linux-x64-musl@3.0.0-32bd5ff2c1a25ef6@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -374,63 +465,91 @@
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@tauri-apps/plugin-opener/-/plugin-opener-3.0.0-alpha.3.tgz",
         "sha512": "5279a0567ffc4d999729ff6ce9d857f23bd22ac6f899579e7d227768bf4dc5e5305c2bda6115420d4ee14ea99b4c0c30c4a46622a67a8742de4fee7f7b8cc102",
-        "dest": "bun-cache/@tauri-apps/plugin-opener@3.0.0-3f776051070f1260@@@1"
+        "dest": "bun-cache/@tauri-apps\\plugin-opener@3.0.0-3f776051070f1260@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@tauri-apps/plugin-os/-/plugin-os-3.0.0-alpha.3.tgz",
         "sha512": "129424c9809c193df889cdc483209767220f4eb11fd5a8de8c4c1cfbc19af07f052d6359f9a0538301838618174d95b9d1f67fb1e6066aee84ce0c6d54f6476a",
-        "dest": "bun-cache/@tauri-apps/plugin-os@3.0.0-3f776051070f1260@@@1"
+        "dest": "bun-cache/@tauri-apps\\plugin-os@3.0.0-3f776051070f1260@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@tauri-apps/plugin-process/-/plugin-process-3.0.0-alpha.3.tgz",
         "sha512": "2557711290bc3dcde7198fb7022f7cf6c6029c37b62e678fc61d5d80030ec2c28f7c76dfecf038d6aaece069f108ef62c8b255d4660bc6882a01f99a43c62375",
-        "dest": "bun-cache/@tauri-apps/plugin-process@3.0.0-3f776051070f1260@@@1"
+        "dest": "bun-cache/@tauri-apps\\plugin-process@3.0.0-3f776051070f1260@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-3.0.0-alpha.3.tgz",
         "sha512": "ec9d16d68ed66998bc1fd13d231b5ec9fd8a13f3e0a831a5bd3f1fce15e8b30ac25aff00112ef3cf0a312d1b0af94cf8b46904153a946f3f31ca2889f8dd7151",
-        "dest": "bun-cache/@tauri-apps/plugin-updater@3.0.0-3f776051070f1260@@@1"
+        "dest": "bun-cache/@tauri-apps\\plugin-updater@3.0.0-3f776051070f1260@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@types/bun/-/bun-1.4.4.tgz",
-        "sha512": "f709110d75172b5db8a449c0bad13a9ff975f23fa2f460b92001caf13997ff69e5c921139a4cb4394eb22f953ca56d40a0a87ef8037d6ae0c2afae3b05fbab8d",
-        "dest": "bun-cache/@types/bun@1.4.4@@@1"
+        "url": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.5.tgz",
+        "sha512": "74e18e3f195a355f86d38ea667337ef42d1d01c41979229c5e255a3344d8cbf2cce2db539a04810f161fa2f71823c126dfe7806e2018a6f58b3aff3e65544928",
+        "dest": "bun-cache/@tybys/wasm-util@0.10.5@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@types/node/-/node-26.6.5.tgz",
-        "sha512": "b8ccecbfdb2d0dda1f219071e141a1e19f598179c60bdb1e443b1c8a505c4c701e38593aecc660fe4f5b5957cef9b938a99986fa5e768519cbc14887d8b9c94e",
-        "dest": "bun-cache/@types/node@26.6.5@@@1"
+        "url": "https://registry.npmjs.org/@types/bun/-/bun-1.4.5.tgz",
+        "sha512": "0e9830348f73d0bd52d20b5be3940b09683009470c2e7b0760c24742fa4d8fb7ab1a208606fa60825b4021e011aeda1b34c28cbb2d143fb8b9ead28a83016cfd",
+        "dest": "bun-cache/@types\\bun@1.4.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@types/node/-/node-26.6.6.tgz",
+        "sha512": "333423fbc2b1dd7238d0e994004e90a21e7c64c36cb4d34cc27da77dddea5ac7deee70cd4aa24dcdeb389e3873e801f0ad21ce7df48bc1753ac9be3be10e1aa2",
+        "dest": "bun-cache/@types\\node@26.6.6@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@types/offscreencanvas/-/offscreencanvas-2019.7.3.tgz",
+        "sha512": "89e5e262681245750378e9ed135227c635b2bc47a56463fadccf9c1aeaaeb912ee20a293d68b279178f17aff41eddd675d2ba0e6fa6e9f1fa03656d5c4c942f4",
+        "dest": "bun-cache/@types\\offscreencanvas@2019.7.3@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@types/pngjs/-/pngjs-6.0.5.tgz",
+        "sha512": "d24e5e29fac0f3724e64fa692ed4b60bb394b72340976c0a3717f2625f50e60f653e480197ff6137202ee87b841f62785e622fdb39c4a640ddd126995715ba89",
+        "dest": "bun-cache/@types\\pngjs@6.0.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@types/qrcode/-/qrcode-1.5.6.tgz",
+        "sha512": "b5eecd41c57604ebdd8f66f5842007cc0a0c36e8fae64341333d0a05ac4ce9cdd51813a153475445028eb47f0214d23f76c2a4c25bf7da9dbaa984135a80796f",
+        "dest": "bun-cache/@types\\qrcode@1.5.6@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
         "sha512": "374ac50ae1fd628c46f7f9bad65f4c7e924a7e62ce554d1e9bb8a9233e9346049292f45e2c1f6f2fce4607ecabf01b3995eaa9be0f7a252c05e194b5b38be242",
-        "dest": "bun-cache/@types/react@19.3.0@@@1"
+        "dest": "bun-cache/@types\\react@19.3.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
         "sha512": "648edb538da66575ca1e7fea34b130d88adb888354ed7e7ebdf81d8b10479023696165e32a07d0fcffaec866f90a338b07d51c9d37a0debca542d5768729b8e1",
-        "dest": "bun-cache/@types/react-dom@19.3.0@@@1"
+        "dest": "bun-cache/@types\\react-dom@19.3.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@typescript/typescript-linux-arm64/-/typescript-linux-arm64-7.0.2.tgz",
         "sha512": "421e1e538ff2df20e39df8e3c8f62284c8f9fce0c8966b7e073bb5ece23e7e24910d6e7b4265394a237addec4f44d24f294cdc73520d6b535776b27e32a1e351",
-        "dest": "bun-cache/@typescript/typescript-linux-arm64@7.0.2@@@1",
+        "dest": "bun-cache/@typescript\\typescript-linux-arm64@7.0.2@@@1",
         "only-arches": [
             "aarch64"
         ]
@@ -440,7 +559,7 @@
         "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/@typescript/typescript-linux-x64/-/typescript-linux-x64-7.0.2.tgz",
         "sha512": "11875fd9c360eeb8025899f109d27e177577f4ef2285bdfb78702ed4b2bca00162ce04d06cf38aef31c75db3edf2b5f6e023aa3835de237b087f47c25c6ec7fc",
-        "dest": "bun-cache/@typescript/typescript-linux-x64@7.0.2@@@1",
+        "dest": "bun-cache/@typescript\\typescript-linux-x64@7.0.2@@@1",
         "only-arches": [
             "x86_64"
         ]
@@ -448,9 +567,23 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.1.2.tgz",
-        "sha512": "7e124d19476c7106b81e4234c45c70a275b28675517823c36d723b147ee39b3a67542ac5408ecf46b85679c3b6eb7eb5d2f3abb3db6bd98e3171ff2e01d1716f",
-        "dest": "bun-cache/@vitejs/plugin-react@6.1.2@@@1"
+        "url": "https://registry.npmjs.org/@vitejs/plugin-react/-/plugin-react-6.3.0.tgz",
+        "sha512": "1fd13de79695bc3d85e333470b0e1e2196c87c5eb12a576587b30dbbe85253bc7043387ae6523f37e0895aa99f862d0f1230d722dfc7ed3ec9ff8c14eb72898b",
+        "dest": "bun-cache/@vitejs\\plugin-react@6.3.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-5.0.1.tgz",
+        "sha512": "aae2505e54d25062f62c7f52517a3c570b18e2ca1a9e1828e8b3529bce04d4b05c13cb373b4c29762473c91f73fd9649325316bf7eea38e6fda5d26531410a15",
+        "dest": "bun-cache/ansi-regex@5.0.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/ansi-styles/-/ansi-styles-4.3.0.tgz",
+        "sha512": "cdb07dac22404f5adb8e25436f686a2851cd60bc60b64f0d511c59dc86700f717a36dc5b5d94029e74a2d4b931f880e885d3e5169db6db05402c885e64941212",
+        "dest": "bun-cache/ansi-styles@4.3.0@@@1"
     },
     {
         "type": "archive",
@@ -469,9 +602,16 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/bun-types/-/bun-types-1.4.4.tgz",
-        "sha512": "ca3ac9879a065fb98c3ca19dd7d617c888e612e8f81b8ccd0b7d1bb3b3ccf40cfb350de7745de3ea16de45dbc94d1404849fc5610c16d1ada6a307848b684cc5",
-        "dest": "bun-cache/bun-types@1.4.4@@@1"
+        "url": "https://registry.npmjs.org/bun-types/-/bun-types-1.4.5.tgz",
+        "sha512": "1021e7fbd7612f7c2fd06eaed3eedd42fae76a29978910f1c5ead806685368bc89104baf4cf5a4d85c9edd721fe58fbe2482221ca7d0c3867b5790fc2ae8976e",
+        "dest": "bun-cache/bun-types@1.4.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/camelcase/-/camelcase-5.3.1.tgz",
+        "sha512": "2f6f124c1d7bd27c164badd48ed944384ddd95d400a5a257664388d6e3057f37f7ad1b8f7a01da1deb3279ef98c50f96e92bd10d057a52b74e751891d79df026",
+        "dest": "bun-cache/camelcase@5.3.1@@@1"
     },
     {
         "type": "archive",
@@ -483,9 +623,30 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/cliui/-/cliui-6.0.0.tgz",
+        "sha512": "b7ac1b82da025ef033b2ded0817c4962a3edd2eb047db81075fb443db2cbfdcbefe873c4e5582fa82b80203474360539d9db3aac5c2aae06a434bac712309bad",
+        "dest": "bun-cache/cliui@6.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/clsx/-/clsx-2.1.1.tgz",
         "sha512": "7989b441606d52b0566561b4777f3a386030d7a67df793e2395a3607b6e35926c779d1a5e5ed1959aabae6438681448d7ac1080e407d2126d383f24af5d84264",
         "dest": "bun-cache/clsx@2.1.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/color-convert/-/color-convert-2.0.1.tgz",
+        "sha512": "4511023ec8fb8aeff16f9a0a61cb051d2a6914d9ec8ffe763954d129be333f9a275f0545df3566993a0d70e7c60be0910e97cafd4e7ce1f320dfc64709a12529",
+        "dest": "bun-cache/color-convert@2.0.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/color-name/-/color-name-1.1.4.tgz",
+        "sha512": "74ecbedc0b96ddadb035b64722e319a537208c6b8b53fb812ffb9b71917d3976c3a3c7dfe0ef32569e417f479f4bcb84a18a39ab8171edd63d3a04065e002c40",
+        "dest": "bun-cache/color-name@1.1.4@@@1"
     },
     {
         "type": "archive",
@@ -497,9 +658,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/csstype/-/csstype-3.2.3.tgz",
-        "sha512": "cf51c629c632db103c00641fc2b9f43c0cbe3c1ed7fc64a3dd45495bda8aca7e37c566be825e675e6538aaa2cc4735952c50bc2aeb145fc4ffd240a2398a4021",
-        "dest": "bun-cache/csstype@3.2.3@@@1"
+        "url": "https://registry.npmjs.org/csstype/-/csstype-3.2.4.tgz",
+        "sha512": "3e829aa0fcd06a99c4a2a5129c7c75bba5ba92ef0254480ab27a669b35379b59f09227693c143c57f66adbe6d636bb0e2a828bc1319d6f1eb117b0573f5ccb55",
+        "dest": "bun-cache/csstype@3.2.4@@@1"
     },
     {
         "type": "archive",
@@ -511,9 +672,23 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/decamelize/-/decamelize-1.2.0.tgz",
+        "sha512": "cf64be5bd5fbde10145248be37ef596b694196e9fcf738a03b21abb1ac7e29443ac0a5b86685a91180641a1423c008e30c2916c6163454a12193cc3363b17970",
+        "dest": "bun-cache/decamelize@1.2.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
         "sha512": "06d8f604e38ef37a375b21f9f5ef0c817b3111055c6ab9143a9118aee6c1d2eaf09cdd74c90dfae2bb22072535d67665a966199b4e62fe87fb8a8e26ce2841b5",
         "dest": "bun-cache/detect-libc@2.1.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/dijkstrajs/-/dijkstrajs-1.0.3.tgz",
+        "sha512": "aa24a5981abdf8109d080fcbe3a770f14cbdde6968c6c3d26f09e6e72aca9f6bcc3e2cbc2b202c91317acee57f8f904cb263866433ececa8d4fa68dbebbd247c",
+        "dest": "bun-cache/dijkstrajs@1.0.3@@@1"
     },
     {
         "type": "archive",
@@ -525,16 +700,30 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/enhanced-resolve/-/enhanced-resolve-5.26.0.tgz",
-        "sha512": "f6f85e772945a276f6606a20cd4297ebe25aef680e25b37540702a76bbea2f085d97f4166caa29ce8502f446d0355b009ecfdbc7fe2ecaa6a5ad0028cb5201cb",
-        "dest": "bun-cache/enhanced-resolve@5.26.0@@@1"
+        "url": "https://registry.npmjs.org/emoji-regex/-/emoji-regex-8.0.0.tgz",
+        "sha512": "3128d8cdc58d380d1ec001e9cf4331a5816fc20eb28f2d4d1b7c6d7a8ab3eb8e150a8fd13e09ebd7f186b7e89cde2253cd0f04bb74dd335e126b09d5526184e8",
+        "dest": "bun-cache/emoji-regex@8.0.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/entities/-/entities-6.0.1.tgz",
-        "sha512": "68df7b357585e805814da85f54e22b07f352864ce2e47ec5f6bd6cf660f77038f82a8e5fdaa86156860c89b5c5ec694bbde6ff0f68a859acbc97123ded57a7de",
-        "dest": "bun-cache/entities@6.0.1@@@1"
+        "url": "https://registry.npmjs.org/enhanced-resolve/-/enhanced-resolve-5.27.0.tgz",
+        "sha512": "0e8e81076c7395c73fa1d160f97118ca7780c784ff59fcb03bbd72c3d78f4b6b557d1b1fec9551e2651e10b69d21e1f38b19336c6e43a65ba21053e2d9619f61",
+        "dest": "bun-cache/enhanced-resolve@5.27.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/entities/-/entities-9.0.0.tgz",
+        "sha512": "a0914d0c98379133f0003d5c367dbe5a652ae30168a34f67a5cdd875fd43ec40f8b264625abb0a9da2f1ca4ad35a0c8611cbac73cecfe5dc650257a897d92992",
+        "dest": "bun-cache/entities@9.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/eventemitter3/-/eventemitter3-4.0.7.tgz",
+        "sha512": "f20b870590b02a716161d1ebdb2b2e45612b4f08683765fc5c42d196b470a667de6368e3b94378b5a40cb142ca515a352b80ef665fb4a607f2a32b07c6f9af13",
+        "dest": "bun-cache/eventemitter3@4.0.7@@@1"
     },
     {
         "type": "archive",
@@ -553,6 +742,20 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/find-up/-/find-up-4.1.0.tgz",
+        "sha512": "3e93b001d43f6255d0daf8fc6b787c222a43b98462df071e550406616c4d20d71cab8d009f0ec196c11708c6edd59b7e38b03a16af6cb88a48583d0eb2721297",
+        "dest": "bun-cache/find-up@4.1.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/get-caller-file/-/get-caller-file-2.0.5.tgz",
+        "sha512": "0f214fdc133fdd81d340e0942ffc343991d1d25a4a786af1a2d70759ca8d11d9e5b6a1705d57e110143de1e228df801f429a34ac6922e1cc8889fb58d3a87616",
+        "dest": "bun-cache/get-caller-file@2.0.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/googlevideo/-/googlevideo-5.0.1.tgz",
         "sha512": "8db42dadeb4fbb0357509ce35146886a9eb3f1c14632ed6d9d48b4d9b84281c10d3e801442f8b8291455285bec7994a20d5274a1c53b8026367007d6af00d2f6",
         "dest": "bun-cache/googlevideo@5.0.1@@@1"
@@ -560,9 +763,23 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/graceful-fs/-/graceful-fs-4.2.11.tgz",
-        "sha512": "45b279fe398570d342703579a3d7939c12c9fc7b33595d0fef76dcf857f89d2feb263f98692e881b288e2f45680585fe9755ab97793ade1fcaac7fa7849d17bd",
-        "dest": "bun-cache/graceful-fs@4.2.11@@@1"
+        "url": "https://registry.npmjs.org/graceful-fs/-/graceful-fs-4.2.12.tgz",
+        "sha512": "8aec86176138a1a7d07cfb11ac6db0b58d882eea4c86fb5dae1cebc41fb455c8ec3e948fb6da5f61d8e71851ac4e2e4c6891632358ce2873d0e944db4e3f5303",
+        "dest": "bun-cache/graceful-fs@4.2.12@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/iceberg-js/-/iceberg-js-0.8.1.tgz",
+        "sha512": "d5d8554195e17078deefbf7c21533ec68a3fd597557f338c21cf3fae05528a344adfc103a8e2681ae95af4dffc648e510fc413c4d42d2bf1a8ce9afea94a9144",
+        "dest": "bun-cache/iceberg-js@0.8.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/is-fullwidth-code-point/-/is-fullwidth-code-point-3.0.0.tgz",
+        "sha512": "cf29a6e7ebbeb02b125b20fda8d69e8d5dc316f84229c94a762cd868952e1c0f3744b8dbee74ae1a775d0871afd2193e298ec130096c59e2b851e83a115e9742",
+        "dest": "bun-cache/is-fullwidth-code-point@3.0.0@@@1"
     },
     {
         "type": "archive",
@@ -621,6 +838,13 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/locate-path/-/locate-path-5.0.0.tgz",
+        "sha512": "b7b870f6923e5afbb03495f0939cd51e9ca122ace0daa4e592524e7f4995c4649b7b7169d9589e65c76e3588da2c3a32ea9f6e1a94041961bced6a4c2a536af2",
+        "dest": "bun-cache/locate-path@5.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/lodash/-/lodash-4.18.1.tgz",
         "sha512": "74c22789c4cf544f1dd5ee68b5fc269a3971919a14a6254bc32793754b22fc26a3fe07f3cdb941702139b111d5fc0b23b829b15abb5ed93346498b82782abed1",
         "dest": "bun-cache/lodash@4.18.1@@@1"
@@ -635,9 +859,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.61.0.tgz",
-        "sha512": "bf64903cf3cd8e7afe06584bf52a6ece6a39c91fa12e47ed7ee1381378dac5d34f8121f484928f70b2413fbc80b5af3b8d034fb121114b9f4f263089fc2a2b04",
-        "dest": "bun-cache/lucide-react@1.61.0@@@1"
+        "url": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.78.0.tgz",
+        "sha512": "eb5345753e597c063cc6cdcb58a901efc1957ae8827236051177875b158ffa64213fe5162c6b00f6125940fb48c9744384ebd3f248265b0008c87e4bed122100",
+        "dest": "bun-cache/lucide-react@1.78.0@@@1"
     },
     {
         "type": "archive",
@@ -649,16 +873,16 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/magic-string/-/magic-string-0.30.21.tgz",
-        "sha512": "bddd85e1853211728670b1e8abe4c4c828f1b9e49e1e7171cb28cda7cd328345d5e2f5219c37abfe5bef96a33f6ab0796d740de4adbfde88a7c82472c7c4f609",
-        "dest": "bun-cache/magic-string@0.30.21@@@1"
+        "url": "https://registry.npmjs.org/magic-string/-/magic-string-1.4.5.tgz",
+        "sha512": "a0b2c2dbe62f4147c06bebf1a2e7c4ff273589c6fceccf625c846a02847fd84844ffc71bdd217ff868b4736072d41fb9573d9edaf42d52f1e2bb5fbadd99e1fb",
+        "dest": "bun-cache/magic-string@1.4.5@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/meriyah/-/meriyah-7.4.0.tgz",
-        "sha512": "e27a60f02fda79bfa4399a3cffa5d9af0ce8fa7780f8d414ed4e811cfdcac6a4f3a6bb5841bf85b3be76191bafb092d112f6e546342783817be8311ed9029b95",
-        "dest": "bun-cache/meriyah@7.4.0@@@1"
+        "url": "https://registry.npmjs.org/meriyah/-/meriyah-7.4.3.tgz",
+        "sha512": "5c8a93c37e72580834dad7a6ea9a7df7ae0a4e28688b41caa8fe5ff6bcd2d408eaf4e7f159e55ba567880020a4eb87625f11859843c938cee3973cf471ba5868",
+        "dest": "bun-cache/meriyah@7.4.3@@@1"
     },
     {
         "type": "archive",
@@ -670,9 +894,51 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/parse5/-/parse5-7.3.0.tgz",
-        "sha512": "2089ef53b7da6e5df8aa68bd818f17395c61632332b87db150da5bdaaf3f63eef9e762a57a3911beabc3d7d9cca145bfb901866ea36903a4ee7eee452f905983",
-        "dest": "bun-cache/parse5@7.3.0@@@1"
+        "url": "https://registry.npmjs.org/p-limit/-/p-limit-2.3.0.tgz",
+        "sha512": "ffff3c985592271f25c42cf07400014c92f6332581d76f9e218ecc0cbd92a8b98091e294f6ac51bd6b92c938e6dc5526a4110cb857dc90022a11a546503c5beb",
+        "dest": "bun-cache/p-limit@2.3.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/p-locate/-/p-locate-4.1.0.tgz",
+        "sha512": "47bf5967fd30031286bb7a18325cfc8f2fe46e1b0dad2ed2299ecfc441c1809e7e1769ad156d9f2b670eb4187570762442c6f3155ec8f84a1129ee98b74a0aec",
+        "dest": "bun-cache/p-locate@4.1.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/p-try/-/p-try-2.2.0.tgz",
+        "sha512": "4789cf0154c053407d0f7e7f1a4dee25fffb5d86d0732a2148a76f03121148d821165e1eef5855a069c1350cfd716697c4ed88d742930bede331dbefa0ac3a75",
+        "dest": "bun-cache/p-try@2.2.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/parse5/-/parse5-8.1.1.tgz",
+        "sha512": "11c47fe960dc53b6f6377bd04b12802c293d9571ad50c4315e2a34d3c38430113491abeeffb24b7c111e14fce2e379cca950d26c49f74022be04c09cf733bfff",
+        "dest": "bun-cache/parse5@8.1.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/path-exists/-/path-exists-4.0.0.tgz",
+        "sha512": "6a4f50cb943b8d86f65b071ecb9169be0d8aa0073f64884b48b392066466ca03ec1b091556dd1f65ad2aaed333fa6ead2530077d943c167981e0c1b82d6cbbff",
+        "dest": "bun-cache/path-exists@4.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/peerjs/-/peerjs-1.5.5.tgz",
+        "sha512": "be231408f0cbe8249f3aed19a95705a9b5915cd1c86efda53ea35bac12236c562b7e579b3a322d27884f7e18e7b940acb6a7221d5bbdbd527b8c5aaa2a2fc4b9",
+        "dest": "bun-cache/peerjs@1.5.5@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/peerjs-js-binarypack/-/peerjs-js-binarypack-2.1.0.tgz",
+        "sha512": "608c020bea53ce9dc18bc8cf23d50528ed2dd122e8eb100b9c792236dfe25059945191b47c412613214abe3b032b07a2162b731d1ca1ba1e8dbf2259e2737132",
+        "dest": "bun-cache/peerjs-js-binarypack@2.1.0@@@1"
     },
     {
         "type": "archive",
@@ -698,9 +964,30 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/postcss/-/postcss-8.5.31.tgz",
-        "sha512": "6146d6602804af09cc01592352761af8a94c0731a91f0888b7f0c4edfd06df702e5f62c7f5471393a2a05b1777cd153ea4ddeefc2f9797712730b3381de6bb4a",
-        "dest": "bun-cache/postcss@8.5.31@@@1"
+        "url": "https://registry.npmjs.org/pngjs/-/pngjs-7.0.0.tgz",
+        "sha512": "2ca5aa589461b2dc98a3da46be0a2bfe2be4db0f787928c4dd1195bb32c696bdcd983f1b7fb45c606cded6635d10744fe9344feab32e0c7939b78e219d3472a3",
+        "dest": "bun-cache/pngjs@7.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/postcss/-/postcss-8.5.33.tgz",
+        "sha512": "4551c453dfcfa751678ebfcca4026c668003ba408a85f222d793ae9c46221a4b489182e43d5bc2d6c8a85a89460d2ed7072313c7d9bf2066eba3426cd77ce19d",
+        "dest": "bun-cache/postcss@8.5.33@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/qr-scanner/-/qr-scanner-1.4.2.tgz",
+        "sha512": "915d724147b614436f9f9f6d3195ba98e55fa6af661b119ff25ebe10669750e77844138b83bb510bcdceae2acce40b43bd94697637655d446c1eb7803923ce53",
+        "dest": "bun-cache/qr-scanner@1.4.2@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/qrcode/-/qrcode-1.5.4.tgz",
+        "sha512": "d5c6bbd59822bba3918c7a85043a6748c4d1d91793a17e25d40bb55452f255e05315abf3427bf9271305af7ba41d52a94ab480d8c0a4d253494b292351fcfb66",
+        "dest": "bun-cache/qrcode@1.5.4@@@1"
     },
     {
         "type": "archive",
@@ -719,16 +1006,30 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/react-router/-/react-router-7.18.4.tgz",
-        "sha512": "3d43d070c84c19102c94b72fb653f3fe49b304458f84b7602c5acbee92cd7a904be9d5f49568f8583d9c518560602b93de3c6f82160583cd5c0d38f8e0385eb5",
-        "dest": "bun-cache/react-router@7.18.4@@@1"
+        "url": "https://registry.npmjs.org/react-router/-/react-router-7.18.6.tgz",
+        "sha512": "48ff0aa8a7d12e5273ab33ec782fabeb2605b2a3c46afb50082e01295f35d2d0468a38c448bb7054f6a6fa03ce3bec18797ad837f4cdcb6080ca441570d83889",
+        "dest": "bun-cache/react-router@7.18.6@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/react-router-dom/-/react-router-dom-7.18.4.tgz",
-        "sha512": "cab7e62472290c6eed682a6a2a34f51b907aab73b62be44df3f7e035fd254e30b088f6d0d1e8babd75fd663411fbb95df13afb679c66c8c9d9f1826ba6159053",
-        "dest": "bun-cache/react-router-dom@7.18.4@@@1"
+        "url": "https://registry.npmjs.org/react-router-dom/-/react-router-dom-7.18.6.tgz",
+        "sha512": "6bc27316c284637118f502fbb784f56f53a1b98d278047f03335d036004eff672e216f74dbc25b56adee936aca9e32eb79dcdc2280ca2f352482e22ae9f9e414",
+        "dest": "bun-cache/react-router-dom@7.18.6@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/require-directory/-/require-directory-2.1.1.tgz",
+        "sha512": "7c6c4423bfb0b06f71aef763b2b9662f6d8e3134e21d1c0032ba2211e320abc833a0b0bf3d0afb46c4434932d483f6d9019b45f9354890773aff84482abba2f9",
+        "dest": "bun-cache/require-directory@2.1.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/require-main-filename/-/require-main-filename-2.0.0.tgz",
+        "sha512": "34a37990c0f294aba577160b4947eb6e8e53bb387885dfb613c34f3d7d36999b67d55b911104e861efd9765272f89dee0a97da886174e5eec1f16d225db4079a",
+        "dest": "bun-cache/require-main-filename@2.0.0@@@1"
     },
     {
         "type": "archive",
@@ -740,9 +1041,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.15.tgz",
-        "sha512": "ea874d0fe7de979cd5c3723861cd9eebd82f82e0e75f408000688d0d94aae2293959471a2eb903d862eea20d1770e0dba2bdf5859e5ac843205439e8f8a3d5e6",
-        "dest": "bun-cache/rolldown@1.2.15@@@1"
+        "url": "https://registry.npmjs.org/rolldown/-/rolldown-1.2.19.tgz",
+        "sha512": "408895d49f5dd29ccde2379e4c7e2c8cfcb4019e9c032d9c1b41317a8135f94f11be3fa1477818928931d186de50d1a566a890249daeb5c1137b4a0a5f0cecb8",
+        "dest": "bun-cache/rolldown@1.2.19@@@1"
     },
     {
         "type": "archive",
@@ -754,30 +1055,58 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/set-cookie-parser/-/set-cookie-parser-2.7.2.tgz",
-        "sha512": "a1e33596953f52f853c70fa0ddc21fc571f225173fba275ddf22b53f6e368331ddb34b9d401633b37cbc8f8802096f9927b69dd3272d95df1160ef9b76eae5bf",
-        "dest": "bun-cache/set-cookie-parser@2.7.2@@@1"
+        "url": "https://registry.npmjs.org/sdp/-/sdp-3.2.3.tgz",
+        "sha512": "518b98dc915a55aed973eaf1c62f226e5c03ee6765a06c42ccc1102093dc08b8872a38ea32a2ecaee32423e7a68276004647c7938a3bb1e1044c005ce1bc2892",
+        "dest": "bun-cache/sdp@3.2.3@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.2.tgz",
-        "sha512": "2868fff18e37c77e5a6550edb7e27898ad61a0b18750b3187d290e0c93508cd0c2de85b53ea3e8c4cc28d292d4b1633f5041b338dfcdc5e1f2c047cd5cd3f757",
-        "dest": "bun-cache/source-map-js@1.2.2@@@1"
+        "url": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
+        "sha512": "2a22814bc0275861322f3a1f15f9af2b0a5d3f3aa2cb5e8bbd07cadf2bff7d51fb063d77ff097725247527eadf81113dabbc5424ae2abe04bcada48e78b51e87",
+        "dest": "bun-cache/set-blocking@2.0.0@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.7.0.tgz",
-        "sha512": "5cf3d4c8073e72fb29cf79474dc47f4203df5b603496fff140d2235f71c684b47e36ada51da2eae4cb537ac1e7f0652bdd6dc382e4f6293e71dcd56046d63098",
-        "dest": "bun-cache/tailwind-merge@3.7.0@@@1"
+        "url": "https://registry.npmjs.org/set-cookie-parser/-/set-cookie-parser-2.7.3.tgz",
+        "sha512": "8ab647b53aaeacb9dae7b2901bfb3e7f33b0bff27a5d21f872cf0cfefb2b637b82690dd2ebe40982e007d1674de3b497964f36be8319e276963107fc7dd12822",
+        "dest": "bun-cache/set-cookie-parser@2.7.3@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.3.tgz",
-        "sha512": "80e855dcfeee7c4eb64031a0d7355a4e0091f84b4fbfdda4da722155c54a70b9b14f5b1406c406867663d7be63f8ca91b78ccb17b89cfac0988df8713318fb61",
-        "dest": "bun-cache/tailwindcss@4.3.3@@@1"
+        "url": "https://registry.npmjs.org/source-map-js/-/source-map-js-1.2.4.tgz",
+        "sha512": "27b66332f1ddf4ed5f713ff9574f5059a69297605b5b1dc5e8ed3cb2975ef3635a99ff540741b145520f88d6d5b1d2a4a22cc7892a53a1da37be9d9b032f7530",
+        "dest": "bun-cache/source-map-js@1.2.4@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+        "sha512": "c0ac90450a63274b08a7ad84ad265d1ac8cc256b1aa79a1136284786ee86ec954effd8c807a5327af2feb57b8eaab9e0f23fdcc4a4d6c96530bd24eb8a2673fe",
+        "dest": "bun-cache/string-width@4.2.3@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz",
+        "sha512": "637f153d21dcaa416b0a916743dbee4979aabaebf9a1738aa46793e9a1abaf7a3719cf409556ba2417d448e0a76f1186645fbfd28a08ecaacfb944b3b54754e4",
+        "dest": "bun-cache/strip-ansi@6.0.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.7.1.tgz",
+        "sha512": "bfbcb8055e055253bc7b18ffe0ce545ca7a8a300e2bae815520ded90c348c8e502387cb9c69f3ee5a5907970ad676e3dd6c515d583ec55e33d12f799ebfc6e65",
+        "dest": "bun-cache/tailwind-merge@3.7.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tailwindcss/-/tailwindcss-4.3.5.tgz",
+        "sha512": "15c424f41b9f7e610724fd86d17981d92a6553568b4c8ee3d3b2ae9e4f94ef8372f978963adcd7cfd6ae8c567f6af9edc357b670ebffdcf920cdf950ee05f6bd",
+        "dest": "bun-cache/tailwindcss@4.3.5@@@1"
     },
     {
         "type": "archive",
@@ -789,9 +1118,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/tapable/-/tapable-2.3.3.tgz",
-        "sha512": "bb173fce9a8583ac7b0bcbce13b961e8b6dd6bc7842fdce6566fcf2de4cf051861d710a0756690f89d42522786a487e6d8776db14a51bfe1ec8626ac04c71ce8",
-        "dest": "bun-cache/tapable@2.3.3@@@1"
+        "url": "https://registry.npmjs.org/tapable/-/tapable-2.3.4.tgz",
+        "sha512": "3471625a701b309c4d36907088eee3255183baa3314fdfe857cbf9ed147e7e00504a19098a5e629c60fcff15b2d218cbc874325f5b6edbb400361973dca06a0a",
+        "dest": "bun-cache/tapable@2.3.4@@@1"
     },
     {
         "type": "archive",
@@ -824,6 +1153,13 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
+        "sha512": "a0916ef781d06fe29576e49440bef09e99aa9df98bb0e03f9c087a6fa107d30084a0ad3f98f79753a737c0a0d5f373243ae1cf447b525ca294f7d2016b34bfdb",
+        "dest": "bun-cache/tslib@2.8.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://registry.npmjs.org/tw-animate-css/-/tw-animate-css-1.4.0.tgz",
         "sha512": "edbce23a546a1f4849c7cd21ff799b89c2d6ee8f2a2ec1f9f9168b476b7e3873370f426558638340a4387316caed696f994c69723e8a82ee842aa8eb1857b741",
         "dest": "bun-cache/tw-animate-css@1.4.0@@@1"
@@ -838,9 +1174,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/undici-types/-/undici-types-8.12.3.tgz",
-        "sha512": "117138c9d2f74bbe9d15bdbb5058cd5591d3caffd32dd0138ff2947b6f69b5d720eaa5cbe3c276b59df5dba1399080a3e639fbf35391f979551f537a333f236c",
-        "dest": "bun-cache/undici-types@8.12.3@@@1"
+        "url": "https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz",
+        "sha512": "2930f2453617f2c5a629702290f1c74b273adc244f11331cb728ca16ea5c0ba3812d74f7c6c3747bd685ee6fa6217bad156a545ee79db68c06ee22cece9d2442",
+        "dest": "bun-cache/undici-types@8.9.0@@@1"
     },
     {
         "type": "archive",
@@ -852,9 +1188,51 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/vite/-/vite-8.3.5.tgz",
-        "sha512": "cf56298e2789f60d1e6d3990a4b06ffe8abd13717d10894e7beecb6a15bc4ab1372d3886dee7414545d03a56173fd6fe202daada9847795c63f711a5c37e0e11",
-        "dest": "bun-cache/vite@8.3.5@@@1"
+        "url": "https://registry.npmjs.org/vite/-/vite-8.3.8.tgz",
+        "sha512": "2f33a7de1f6b1bfd2f84b757ad5e3227840503d784a2a0a5f98c7e90625deda07dc3a9df3605472926302cf6541ebcf86466beb7e9178d5f62b6f7070cb428b8",
+        "dest": "bun-cache/vite@8.3.8@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/webrtc-adapter/-/webrtc-adapter-9.0.6.tgz",
+        "sha512": "0876e5d9941bc71d7ae08816460cc99e8e215ad338b456d16a6d507c8dd8c61b37c3f0efaa5b95c5559e5ecde82f9fdf6c691234b2a8d13cb932051671e361a2",
+        "dest": "bun-cache/webrtc-adapter@9.0.6@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/which-module/-/which-module-2.0.1.tgz",
+        "sha512": "881759e7b443be7391f4018184c2f6bc565fee1f2f9818e1a1a66a3832411561d5b4a90398ab876a2ddcc793e054cad7e580cda76ec0a1f61b03072d492faf85",
+        "dest": "bun-cache/which-module@2.0.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-6.2.0.tgz",
+        "sha512": "afa94f7011b1657948732984bbb227c43321756d0a0f1a4b82814b720b9ab3109a27f48e219c0835ab4af4a63fb5ff99ae5cb038a5345038f70135d405fc495c",
+        "dest": "bun-cache/wrap-ansi@6.2.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/y18n/-/y18n-4.0.3.tgz",
+        "sha512": "24a86a4cec12aea340d4d639952ced2751ab06252874b326219b8b88368c449fa2b4577e001544f170633af2162fead2a8d0c2ef82c24859a56ff538519e2125",
+        "dest": "bun-cache/y18n@4.0.3@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/yargs/-/yargs-15.4.1.tgz",
+        "sha512": "69e3dbc4399c616fbe3daa81b09f8761417009dbf82d5bdd9e1072efc139ecf228afcfce56f84cac00c51440e1f031c3151bff3bd8b794f86c10d8ceed05f4f8",
+        "dest": "bun-cache/yargs@15.4.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/yargs-parser/-/yargs-parser-18.1.3.tgz",
+        "sha512": "a39d23d09793a32ff82ba39971a4265ba9725d72a1abb72c4445dc0f0936a2614f244c1434e56d24abe60ebf442357c025953265c445ee4c460569915ee76b09",
+        "dest": "bun-cache/yargs-parser@18.1.3@@@1"
     },
     {
         "type": "archive",
@@ -866,16 +1244,23 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@babel/runtime/-/runtime-7.29.10.tgz",
-        "sha512": "369ba04f36ca806acd7b8e548b7d9c37cbc214533156d3fff6bb5fc2fd273f91510c08ef601c4970b569600f66af58f13fa727213ef1f4b533b834db59860d44",
-        "dest": "bun-cache/@babel/runtime@7.29.10@@@1"
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.9.1.tgz",
+        "sha512": "6b8531f552ae20c1ec392ec435b12aea12b66466084f6ed1b65d04e1e0fd2aac3184a89078c644ffdc5bdc8758c166923b220140b1318508170d3628882c6758",
+        "dest": "bun-cache/tslib@2.9.1@@@1"
     },
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lightningcss/-/lightningcss-1.32.0.tgz",
-        "sha512": "357601ce29cdadb95fada3c6cab6cfa03d7d0b587d95f23fd66ce0598bd75137b8d781b3fd7d450f65c165264ceeb453acc03c24bdceb4068689fac82a1439c9",
-        "dest": "bun-cache/lightningcss@1.32.0@@@1"
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.9.1.tgz",
+        "sha512": "6b8531f552ae20c1ec392ec435b12aea12b66466084f6ed1b65d04e1e0fd2aac3184a89078c644ffdc5bdc8758c166923b220140b1318508170d3628882c6758",
+        "dest": "bun-cache/tslib@2.9.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.9.1.tgz",
+        "sha512": "6b8531f552ae20c1ec392ec435b12aea12b66466084f6ed1b65d04e1e0fd2aac3184a89078c644ffdc5bdc8758c166923b220140b1318508170d3628882c6758",
+        "dest": "bun-cache/tslib@2.9.1@@@1"
     },
     {
         "type": "archive",
@@ -901,70 +1286,9 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.2.3.tgz",
-        "sha512": "50c76e31ba8ee6ce7317636435a70c4ffc8ae58e5088abd6af6fb9d1bcc8231143c15276878f5bfa8ca368218f849c5ddbf802db1dfd107bff80756ebb7eb1d9",
-        "dest": "bun-cache/@napi-rs/wasm-runtime@1.2.3@@@1"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.3.tgz",
-        "sha512": "1777e8d4c62b44960bdf3111d0e50e9a4bad8ebd55a76de6eceb12829ee7ab848fe8ea97e82ff9e971483c09796eddf3681463996ed21b3deeffa2f016961c3a",
-        "dest": "bun-cache/@tybys/wasm-util@0.10.3@@@1"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz",
-        "sha512": "a0916ef781d06fe29576e49440bef09e99aa9df98bb0e03f9c087a6fa107d30084a0ad3f98f79753a737c0a0d5f373243ae1cf447b525ca294f7d2016b34bfdb",
-        "dest": "bun-cache/tslib@2.8.1@@@1"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz",
-        "sha512": "2930f2453617f2c5a629702290f1c74b273adc244f11331cb728ca16ea5c0ba3812d74f7c6c3747bd685ee6fa6217bad156a545ee79db68c06ee22cece9d2442",
-        "dest": "bun-cache/undici-types@8.9.0@@@1"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lightningcss-linux-arm64-gnu/-/lightningcss-linux-arm64-gnu-1.32.0.tgz",
-        "sha512": "d279ccca8c8e2d12577db30e8a569245c2c7dc9c39cfd1c33467d3fe0c023e06838e7c748bcc3bbc1cc52c54757fa08c2ca17c8156de6e69143777dafe4409a5",
-        "dest": "bun-cache/lightningcss-linux-arm64-gnu@1.32.0@@@1",
-        "only-arches": [
-            "aarch64"
-        ]
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lightningcss-linux-arm64-musl/-/lightningcss-linux-arm64-musl-1.32.0.tgz",
-        "sha512": "529424a1e9ebe14244ce054862923cd250c5bd198f560ea8a9ba0d1dfa07e024087cd03e1cead9ecca3b2993f4d9d0ba2e38213d025e06cbd7849a1dff09c806",
-        "dest": "bun-cache/lightningcss-linux-arm64-musl@1.32.0@@@1",
-        "only-arches": [
-            "aarch64"
-        ]
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lightningcss-linux-x64-gnu/-/lightningcss-linux-x64-gnu-1.32.0.tgz",
-        "sha512": "57b42be7622166674a3d5afe56dc3ca3e58bb1025809377c96821fa4368c45619465f04e60425ec89224a862033193f03f1db8a5431fc12c7123ca61aff31b38",
-        "dest": "bun-cache/lightningcss-linux-x64-gnu@1.32.0@@@1",
-        "only-arches": [
-            "x86_64"
-        ]
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://registry.npmjs.org/lightningcss-linux-x64-musl/-/lightningcss-linux-x64-musl-1.32.0.tgz",
-        "sha512": "6d870ba7e55bd1ac2c89783ff34b8245ecc2607360d7f9779add20cc79d657d5cfd56e6c29ae7f4c274659a47fcc13363de17f1dbb10bff8f651134e895bb15a",
-        "dest": "bun-cache/lightningcss-linux-x64-musl@1.32.0@@@1",
-        "only-arches": [
-            "x86_64"
-        ]
+        "url": "https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-1.2.6.tgz",
+        "sha512": "991c83984c3dfdf0835c219f2f5b1b808c3f1942b43d5c515b863080f37ad45dcb43e7d2ca80456ab255ce01b2845ea447311067415e8c3aa6e162d749ea909b",
+        "dest": "bun-cache/@napi-rs/wasm-runtime@1.2.6@@@1"
     },
     {
         "type": "archive",
@@ -972,5 +1296,33 @@
         "url": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.4.tgz",
         "sha512": "5b77388118a0152d13fcc6b8a88605dc60c07390107476f5c8be739c94f566fd58683f4a8adc7ae7ac018efaf5f6a6e2a2c9994fc9560cce4110cca752a5fae4",
         "dest": "bun-cache/@tybys/wasm-util@0.10.4@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.9.1.tgz",
+        "sha512": "6b8531f552ae20c1ec392ec435b12aea12b66466084f6ed1b65d04e1e0fd2aac3184a89078c644ffdc5bdc8758c166923b220140b1318508170d3628882c6758",
+        "dest": "bun-cache/tslib@2.9.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/tslib/-/tslib-2.9.1.tgz",
+        "sha512": "6b8531f552ae20c1ec392ec435b12aea12b66466084f6ed1b65d04e1e0fd2aac3184a89078c644ffdc5bdc8758c166923b220140b1318508170d3628882c6758",
+        "dest": "bun-cache/tslib@2.9.1@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/pngjs/-/pngjs-5.0.0.tgz",
+        "sha512": "e34416e586a504d7d0a39c916268b0ed8cfa4ca295af787af7bd01d9813eddf429b1672b6e3d4fcc9831789d7d0d142384c6ca3c8b8c63cac569773c9a8a2557",
+        "dest": "bun-cache/pngjs@5.0.0@@@1"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://registry.npmjs.org/@tybys/wasm-util/-/wasm-util-0.10.5.tgz",
+        "sha512": "74e18e3f195a355f86d38ea667337ef42d1d01c41979229c5e255a3344d8cbf2cce2db539a04810f161fa2f71823c126dfe7806e2018a6f58b3aff3e65544928",
+        "dest": "bun-cache/@tybys/wasm-util@0.10.5@@@1"
     }
 ]

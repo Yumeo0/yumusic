@@ -97,7 +97,7 @@ import {
 	type LibraryPlaylist,
 	type TrackMeta,
 } from "./lib/youtube/youtube-client";
-import ArtistPage from "./pages/artist";
+import ArtistPage, { ArtistCategoryPage } from "./pages/artist";
 import HomePage from "./pages/home";
 import ListenTogetherPage from "./pages/listen-together";
 import { NowPlayingPage } from "./pages/now-playing";
@@ -983,6 +983,10 @@ function AppShell({
 									<Route element={<PlaylistsPage />} path="/playlists" />
 									<Route element={<PlaylistDetails />} path="/playlists/:id" />
 									<Route element={<ArtistPage />} path="/artist/:id" />
+									<Route
+										element={<ArtistCategoryPage />}
+										path="/artist/:id/category/:category"
+									/>
 									<Route
 										element={
 											<SettingsPage

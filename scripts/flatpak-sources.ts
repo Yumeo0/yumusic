@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -140,38 +140,67 @@ try {
 	await cp(`${root}/bun.lock`, `${scratch}/bun.lock`);
 	await cp(`${root}/patches`, `${scratch}/patches`, { recursive: true });
 	await $`bun install --cwd ${scratch} --frozen-lockfile --ignore-scripts --os linux --cpu '*' --cache-dir ${scratch}/cache`;
+
 	const caches = new Map<string, string>();
-	for (const path of [
-		...new Glob("*/package.json").scanSync(`${scratch}/cache`),
-		...new Glob("@*/*/package.json").scanSync(`${scratch}/cache`),
-	]) {
-		const metadata = await file(`${scratch}/cache/${path}`).json();
-		const directory = path.slice(0, -"/package.json".length);
-		// Ignore Bun's version index and patched variants; it applies patches on install.
-		if (directory.includes("@@@1") && !directory.includes("_patch_hash=")) {
-			caches.set(`${metadata.name}@${metadata.version}`, directory);
+	async function readCacheDirectories() {
+		for (const path of [
+			...new Glob("*/package.json").scanSync(`${scratch}/cache`),
+			...new Glob("@*/*/package.json").scanSync(`${scratch}/cache`),
+		]) {
+			const directory = path.slice(0, -"/package.json".length);
+			// Patched variants are built from the original archive during install.
+			if (directory.includes("@@@1") && !directory.includes("_patch_hash=")) {
+				const metadata = await file(`${scratch}/cache/${path}`).json();
+				caches.set(`${metadata.name}@${metadata.version}`, directory);
+			}
 		}
 	}
-	const bunSources = [];
-	for (const entry of Object.values(lock.packages)) {
-		const [resolved, registry, platform, integrity] = entry;
-		const matches = (value: string | string[] | undefined, allowed: string[]) =>
-			!value ||
-			(Array.isArray(value) ? value : [value]).some((v) => allowed.includes(v));
-		if (
-			!matches(platform.os, ["linux"]) ||
-			!matches(platform.cpu, ["x64", "arm64"])
-		)
-			continue;
+
+	const matches = (value: string | string[] | undefined, allowed: string[]) =>
+		!value ||
+		(Array.isArray(value) ? value : [value]).some((v) => allowed.includes(v));
+	const linuxPackages = Object.values(lock.packages).filter(
+		([, , platform]) =>
+			matches(platform.os, ["linux"]) &&
+			matches(platform.cpu, ["x64", "arm64"]),
+	);
+	function cacheDirectory(resolved: string) {
+		const version = resolved.slice(resolved.lastIndexOf("@") + 1);
+		return (
+			caches.get(resolved) ??
+			(/^\d+\.\d+\.\d+$/.test(version) ? `${resolved}@@@1` : undefined)
+		);
+	}
+
+	await readCacheDirectories();
+	const uncachedPrereleases = new Set<string>();
+	for (const [resolved, registry, , integrity] of linuxPackages) {
 		if (registry !== "" || !integrity?.startsWith("sha512-"))
 			throw new Error(`Unsupported npm source: ${resolved}`);
+		if (!cacheDirectory(resolved)) uncachedPrereleases.add(resolved);
+	}
+	if (uncachedPrereleases.size) {
+		// Bun skips unreachable optional packages in the lockfile. Install those
+		// prereleases in a scratch project to discover their hashed cache paths.
+		const warm = join(scratch, "prereleases");
+		await mkdir(warm);
+		const dependencies = Object.fromEntries(
+			[...uncachedPrereleases].map((resolved, index) => [
+				`flatpak-source-${index}`,
+				`npm:${resolved}`,
+			]),
+		);
+		await write(join(warm, "package.json"), JSON.stringify({ dependencies }));
+		await $`bun install --cwd ${warm} --ignore-scripts --os linux --cpu '*' --cache-dir ${scratch}/cache`;
+		await readCacheDirectories();
+	}
+
+	const bunSources = [];
+	for (const [resolved, , platform, integrity] of linuxPackages) {
 		const split = resolved.lastIndexOf("@");
 		const name = resolved.slice(0, split);
 		const version = resolved.slice(split + 1);
-		// Lockfiles also contain unreachable optional subtrees, which Bun does not warm.
-		const cache =
-			caches.get(resolved) ??
-			(/^\d+\.\d+\.\d+$/.test(version) ? `${resolved}@@@1` : undefined);
+		const cache = cacheDirectory(resolved);
 		if (!cache) throw new Error(`Bun did not cache ${resolved}`);
 		const architectures = platform.cpu
 			? (Array.isArray(platform.cpu) ? platform.cpu : [platform.cpu])

@@ -60,7 +60,7 @@ export function RoomPlaybackBridge() {
 						await p.addToQueue(action.songs, action.songs[0]?.addedBy);
 						break;
 					case "playNext":
-						p.playNext(action.song, action.song.addedBy);
+						await p.playNext(action.song, action.song.addedBy);
 						break;
 					case "next":
 						await p.next();

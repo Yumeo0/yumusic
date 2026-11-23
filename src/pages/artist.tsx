@@ -2,6 +2,7 @@ import {
 	ArrowLeftIcon,
 	ArrowUpRight,
 	AudioLines,
+	ChevronRight,
 	Loader2,
 	Music2,
 	Play,
@@ -9,20 +10,22 @@ import {
 	Share2,
 	Shuffle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
+import { VirtualTrackList } from "@/components/playlist/virtual-track-list";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
 import { ArtistLinks } from "@/components/song/artist-link";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
+import { Alert, AlertAction, AlertTitle } from "@/components/ui/alert";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { shareLink } from "@/lib/services/share";
-import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { LruCache } from "@/lib/utils/lru-cache";
@@ -30,39 +33,34 @@ import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
 import {
+	type ArtistShelfItem,
+	artistShelfItems,
+	loadArtistCategoryItems,
+} from "@/lib/youtube/artist-category";
+import {
 	channelCardShelves,
 	channelProfileThumbnail,
 	channelVideos,
 } from "@/lib/youtube/channel-data";
-import { songRatingEntry } from "@/lib/youtube/playlist-data";
-import {
-	artistListOf,
-	artistNames,
-	videoIdOf,
-} from "@/lib/youtube/youtube.utils";
 import {
 	artistMixSource,
 	getMixSongs,
 	getYoutubeClient,
 	type MixSource,
-	type SongRating,
 } from "@/lib/youtube/youtube-client";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-interface ShelfItem {
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-	song?: Song;
-	/** Route of a browsable entry (album, single, playlist, artist). */
-	link?: string;
-}
-
 interface ArtistShelf {
 	title: string;
-	items: ShelfItem[];
+	items: ArtistShelfItem[];
+	category?: string;
+}
+
+interface ArtistCategory {
+	title: string;
+	endpoint: YTNodes.NavigationEndpoint;
 }
 
 interface ArtistView {
@@ -71,8 +69,10 @@ interface ArtistView {
 	description: string | null;
 	thumbnail: string | null;
 	songsTitle: string;
+	songsCategory?: string;
 	songs: Song[];
 	shelves: ArtistShelf[];
+	categories: Map<string, ArtistCategory>;
 	/** Context for the header's "Mix" (radio) action, when the artist has one. */
 	mix: MixSource | null;
 }
@@ -81,51 +81,6 @@ const artistCache = new LruCache<
 	string,
 	{ timestamp: number; data: ArtistView }
 >(12);
-
-function toSong(item: YTNodes.MusicResponsiveListItem): Song {
-	return {
-		id: videoIdOf(item),
-		title: item.title ?? "Unknown Title",
-		artist: artistNames(item),
-		artists: artistListOf(item),
-		thumbnail: hiResThumb(biggestThumb(item.thumbnail?.contents)?.url),
-		duration: item.duration?.text,
-	};
-}
-
-/**
- * MusicTwoRowItem is used for the artist's "Videos" carousel (no music shelf),
- * e.g. a VTuber channel that only uploads videos. These are still playable —
- * the id is the video id — so build a Song, crediting the channel.
- */
-function toSongFromTwoRow(
-	item: YTNodes.MusicTwoRowItem,
-	artistName: string,
-	artistId?: string,
-): Song {
-	return {
-		id: videoIdOf(item),
-		title: item.title?.text || "Unknown Title",
-		artist: artistName,
-		artistId,
-		artists: artistName ? [{ name: artistName, id: artistId }] : undefined,
-		thumbnail: hiResThumb(biggestThumb(item.thumbnail)?.url),
-	};
-}
-
-/** Route of a browsable carousel entry: album/single, playlist or artist. */
-function collectionLink(item: YTNodes.MusicTwoRowItem): string | undefined {
-	if (!item.id) return undefined;
-	switch (item.item_type) {
-		case "album":
-		case "playlist":
-			return `/playlists/${item.id}`;
-		case "artist":
-			return `/artist/${item.id}`;
-		default:
-			return undefined;
-	}
-}
 
 async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	const cached = artistCache.get(id);
@@ -149,6 +104,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 			songsTitle: "Videos",
 			songs: channelVideos(uploads.videos, name, id),
 			shelves: [],
+			categories: new Map(),
 			mix: null,
 		};
 		artistCache.set(id, { timestamp: Date.now(), data: view });
@@ -180,73 +136,52 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 	const shelves: ArtistShelf[] = channelCardShelves(
 		artist.page.contents_memo?.getType(YTNodes.MusicCardShelf) ?? [],
 	);
-	const ratings: Array<{ id: string; rating: SongRating }> = [];
+	const categories = new Map<string, ArtistCategory>();
 	let songs: Song[] = [];
 	let songsTitle = "Songs";
+	let songsCategory: string | undefined;
 
-	for (const section of artist.sections ?? []) {
-		if (section.is(YTNodes.MusicShelf)) {
-			const shelfTitle = section.title?.text || "";
-			const shelfSongs: Song[] = [];
-			for (const item of section.contents ?? []) {
-				if (item.is(YTNodes.MusicResponsiveListItem)) {
-					const rating = songRatingEntry(item);
-					if (rating) ratings.push(rating);
-					const song = toSong(item);
-					if (song.id) shelfSongs.push(song);
-				}
-			}
-			if (/songs?/i.test(shelfTitle) && songs.length === 0) {
-				songs = shelfSongs;
-				songsTitle = shelfTitle;
-			} else if (shelfSongs.length > 0) {
-				shelves.push({
-					title: shelfTitle,
-					items: shelfSongs.map((s) => ({
-						title: s.title,
-						subtitle: s.artist,
-						thumbnail: s.thumbnail,
-						song: s,
-					})),
-				});
-			}
-		} else if (section.is(YTNodes.MusicCarouselShelf)) {
-			const title = section.header?.title?.text || "";
-			const items: ShelfItem[] = [];
-			for (const item of section.contents ?? []) {
-				if (item.is(YTNodes.MusicResponsiveListItem)) {
-					const rating = songRatingEntry(item);
-					if (rating) ratings.push(rating);
-					const song = toSong(item);
-					if (!song.id) continue;
-					items.push({
-						title: song.title,
-						subtitle: song.artist,
-						thumbnail: song.thumbnail,
-						song,
-					});
-				} else if (item.is(YTNodes.MusicTwoRowItem)) {
-					const twoRowSong =
-						item.item_type === "video"
-							? toSongFromTwoRow(item, name, id)
-							: undefined;
-					items.push({
-						title: item.title?.text || "Unknown Title",
-						subtitle: item.subtitle?.text || "",
-						thumbnail: hiResThumb(biggestThumb(item.thumbnail)?.url),
-						song: twoRowSong?.id ? twoRowSong : undefined,
-						link: twoRowSong ? undefined : collectionLink(item),
-					});
-				}
-			}
-			if (items.length > 0) {
-				shelves.push({ title, items });
-			}
+	function registerCategory(
+		title: string,
+		endpoint: YTNodes.NavigationEndpoint | undefined,
+	) {
+		if (!endpoint || typeof endpoint.payload?.browseId !== "string") return;
+		const slug =
+			title
+				.toLowerCase()
+				.replace(/&/g, " and ")
+				.replace(/[^\p{L}\p{N}]+/gu, "-")
+				.replace(/^-|-$/g, "") || "items";
+		let key = slug;
+		for (let suffix = 2; categories.has(key); suffix++) {
+			key = `${slug}-${suffix}`;
 		}
+		categories.set(key, { endpoint, title: title || "Items" });
+		return key;
 	}
 
-	// The artist page response carries the account's rating for every row.
-	seedSongRatings(ratings);
+	for (const section of artist.sections ?? []) {
+		const carousel = section.is(YTNodes.MusicCarouselShelf);
+		const title =
+			(carousel ? section.header?.title?.text : section.title?.text) || "";
+		const endpoint = carousel
+			? section.header?.more_content?.endpoint
+			: (section.endpoint ?? section.bottom_button?.endpoint);
+		const category = registerCategory(title, endpoint);
+		const items = artistShelfItems(section.contents ?? [], name, id);
+		if (!carousel && /songs?/i.test(title) && songs.length === 0) {
+			const shelfSongs = items.flatMap((item) =>
+				item.song ? [item.song] : [],
+			);
+			if (shelfSongs.length > 0) {
+				songs = shelfSongs;
+				songsTitle = title;
+				songsCategory = category;
+				continue;
+			}
+		}
+		if (items.length || category) shelves.push({ title, items, category });
+	}
 
 	const view: ArtistView = {
 		name,
@@ -254,8 +189,10 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 		description,
 		thumbnail,
 		songsTitle,
+		songsCategory,
 		songs,
 		shelves,
+		categories,
 		mix,
 	};
 	if (!songs.length && !shelves.length) return fetchChannel();
@@ -266,10 +203,7 @@ async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const { play, playQueue, addToQueue, currentSong } = usePlayer();
-	const { isPlaying } = usePlayerControls();
-	// Video entries already resolved to their song version while playing.
-	const versions = useSongVersionReplacements();
+	const { play, playQueue } = usePlayer();
 	const [artist, setArtist] = useState<ArtistView | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -447,180 +381,396 @@ export default function ArtistPage() {
 				</div>
 			</header>
 
-			{/* Songs */}
 			{artist.songs.length > 0 && (
-				<div className="mt-10">
-					<div className="mb-4 flex items-center gap-2">
-						<h2 className="text-sm font-medium text-muted-foreground">
-							{artist.songsTitle}
-						</h2>
-						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
-					</div>
-					<div className="space-y-0.5">
-						{artist.songs.map((source, index) => {
-							// Show the album track when the video was resolved.
-							const song = versions.get(source.id) ?? source;
-							const isCurrent = currentSong?.id === song.id;
-							return (
-								<SongContextMenu
-									// biome-ignore lint/suspicious/noArrayIndexKey: song list may contain duplicate video ids
-									key={`${song.id ?? "artist-song"}-${index}`}
-									song={song}
-								>
-									<SwipeToQueue onQueue={() => addToQueue([song])} song={song}>
-										<SongRowHover songId={song.id}>
-											<div
-												className={cn(
-													"flex items-center gap-3 rounded-lg px-2.5 py-2",
-													isCurrent && "bg-primary/[0.08]",
-												)}
-											>
-												<button
-													className="grid min-w-0 flex-1 grid-cols-[2rem_2.5rem_1fr] items-center gap-3 text-left"
-													onClick={() => playQueue(artist.songs, index)}
-													type="button"
-												>
-													<span className="relative grid place-items-center">
-														{isCurrent ? (
-															<EqualizerBars
-																className="size-3.5 text-primary"
-																playing={isPlaying}
-															/>
-														) : (
-															<>
-																<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
-																	{index + 1}
-																</span>
-																<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
-															</>
-														)}
-													</span>
-													{song.thumbnail ? (
-														<img
-															alt={song.title}
-															className="size-10 rounded-md border border-foreground/10 object-cover"
-															loading="lazy"
-															src={proxiedImageUrl(song.thumbnail)}
-														/>
-													) : (
-														<div className="size-10 rounded-md bg-muted" />
-													)}
-													<div className="min-w-0">
-														<h3
-															className={cn(
-																"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
-																isCurrent && "text-primary",
-															)}
-														>
-															<SongTitle
-																artist={song.artist}
-																keepTitle={song.upload}
-																title={song.title}
-															/>
-														</h3>
-														<p className="truncate text-xs text-muted-foreground">
-															<ArtistLinks showType song={song} />
-														</p>
-													</div>
-												</button>
-												<div className="flex shrink-0 items-center gap-2 pr-2">
-													<DownloadedBadge songId={song.id} />
-													<SongRowRating songId={song.id} />
-													<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
-														{song.duration}
-													</span>
-												</div>
-											</div>
-										</SongRowHover>
-									</SwipeToQueue>
-								</SongContextMenu>
-							);
-						})}
-					</div>
-				</div>
+				<section className="mt-10">
+					<ArtistShelfHeading
+						artistId={id}
+						category={artist.songsCategory}
+						title={artist.songsTitle}
+					/>
+					<ArtistSongRows songs={artist.songs} />
+				</section>
 			)}
 
-			{/* Other shelves */}
-			{artist.shelves.map((shelf) => (
-				<section className="mt-10" key={`shelf-${shelf.title}`}>
-					<div className="mb-4 flex items-center gap-2">
-						<h2 className="text-sm font-medium text-muted-foreground">
-							{shelf.title}
-						</h2>
-						<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
-					</div>
-					<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
-						{shelf.items.map((item, i) => (
-							<SongContextMenu
-								// biome-ignore lint/suspicious/noArrayIndexKey: shelf items may repeat titles
-								key={`${item.title}-${i}`}
-								song={
-									item.song
-										? (versions.get(item.song.id) ?? item.song)
-										: item.song
-								}
+			{artist.shelves.map((shelf, index) => (
+				<section
+					className="mt-10"
+					key={shelf.category ?? `${shelf.title}-${index}`}
+				>
+					<ArtistShelfHeading
+						artistId={id}
+						category={shelf.category}
+						title={shelf.title}
+					/>
+					<ArtistShelfCards items={shelf.items} />
+				</section>
+			))}
+		</div>
+	);
+}
+
+type CategoryState =
+	| { status: "loading" | "unavailable" | "error" }
+	| {
+			status: "ready";
+			title: string;
+			artistName: string;
+			items: ArtistShelfItem[];
+	  };
+
+export function ArtistCategoryPage() {
+	const { id = "", category = "" } = useParams();
+	const navigate = useNavigate();
+	const location = useLocation();
+	const page = useRef<HTMLDivElement>(null);
+	const [state, setState] = useState<CategoryState>({ status: "loading" });
+	const [attempt, setAttempt] = useState(0);
+
+	useEffect(() => {
+		page.current
+			?.closest<HTMLElement>("[data-slot=scroll-area-viewport]")
+			?.scrollTo(0, 0);
+	}, []);
+
+	useEffect(() => {
+		const controller = new AbortController();
+		const { signal } = controller;
+
+		async function loadCategory() {
+			try {
+				const artist = await fetchArtistView(id, attempt > 0);
+				signal.throwIfAborted();
+				const source = artist.categories.get(category);
+				if (!source) {
+					setState({ status: "unavailable" });
+					return;
+				}
+				const client = await getYoutubeClient();
+				signal.throwIfAborted();
+				const items = await loadArtistCategoryItems(
+					client.actions,
+					source.endpoint,
+					artist.name,
+					id,
+					signal,
+				);
+				if (!signal.aborted) {
+					setState({
+						status: "ready",
+						title: source.title,
+						artistName: artist.name,
+						items,
+					});
+				}
+			} catch (error) {
+				if (signal.aborted) return;
+				console.error("Error fetching artist category:", error);
+				setState({ status: "error" });
+			}
+		}
+
+		void loadCategory();
+		return () => controller.abort();
+	}, [id, category, attempt]);
+
+	const onBack = () => {
+		if (location.state?.fromArtist) {
+			navigate(-1);
+		} else {
+			navigate(`/artist/${encodeURIComponent(id)}`, { replace: true });
+		}
+	};
+	const songs =
+		state.status === "ready"
+			? state.items.flatMap((item) => (item.song ? [item.song] : []))
+			: [];
+
+	return (
+		<div
+			className="mx-auto w-full max-w-5xl px-6 pt-10 pb-8 sm:px-10"
+			ref={page}
+		>
+			<BackButton onClick={onBack} />
+			<div className="mt-8">
+				{state.status === "loading" && (
+					<p
+						className="flex items-center gap-2 text-sm text-muted-foreground"
+						role="status"
+					>
+						<Loader2
+							aria-hidden="true"
+							className="size-4 animate-spin motion-reduce:animate-none"
+						/>
+						Loading category…
+					</p>
+				)}
+				{state.status === "unavailable" && (
+					<p className="text-sm text-muted-foreground">
+						This category is unavailable.
+					</p>
+				)}
+				{state.status === "error" && (
+					<Alert variant="destructive">
+						<AlertTitle>Couldn’t load this category.</AlertTitle>
+						<AlertAction>
+							<Button
+								onClick={() => {
+									setState({ status: "loading" });
+									setAttempt((value) => value + 1);
+								}}
+								size="xs"
+								variant="outline"
 							>
-								<button
-									className="group w-44 shrink-0 text-left disabled:cursor-default"
-									onClick={() => {
-										if (item.song) {
-											const song = versions.get(item.song.id) ?? item.song;
-											play(
-												song,
-												shelf.items
-													.slice(i + 1)
-													.map((shelfItem) => shelfItem.song)
-													.filter((s): s is Song => Boolean(s)),
-											);
-										} else if (item.link) {
-											navigate(item.link);
-										}
-									}}
-									type="button"
-								>
-									<div className="relative aspect-square overflow-hidden rounded-xl border border-foreground/8 bg-card">
-										{item.thumbnail ? (
-											<img
-												alt={item.title}
-												className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
-												loading="lazy"
-												src={proxiedImageUrl(item.thumbnail)}
-											/>
-										) : (
-											<div className="grid size-full place-items-center text-muted-foreground">
-												<Music2 className="size-8" />
-											</div>
-										)}
-										{item.song && (
-											<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
-												<Play className="size-4 translate-x-[1px] fill-current" />
+								Retry
+							</Button>
+						</AlertAction>
+					</Alert>
+				)}
+				{state.status === "ready" && (
+					<>
+						<h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+							{state.title}
+						</h1>
+						<p className="mt-2 text-sm text-muted-foreground">
+							{formatArtistName(state.artistName)}
+						</p>
+						<div className="mt-6">
+							{state.items.length === 0 ? (
+								<p className="text-sm text-muted-foreground">No items found.</p>
+							) : songs.length === state.items.length ? (
+								<ArtistSongRows songs={songs} virtual />
+							) : (
+								<ArtistShelfCards grid items={state.items} />
+							)}
+						</div>
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
+function ArtistShelfHeading({
+	artistId,
+	category,
+	title,
+}: {
+	artistId?: string;
+	category?: string;
+	title: string;
+}) {
+	return (
+		<div className="mb-4 flex items-center gap-3">
+			<h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+			<span className="h-px flex-1 bg-gradient-to-r from-border to-transparent" />
+			{artistId && category && (
+				<Link
+					aria-label={`See all ${title || "items"}`}
+					className={buttonVariants({ size: "sm", variant: "outline" })}
+					state={{ fromArtist: true }}
+					to={`/artist/${encodeURIComponent(artistId)}/category/${encodeURIComponent(category)}`}
+				>
+					See all
+					<ChevronRight data-icon="inline-end" />
+				</Link>
+			)}
+		</div>
+	);
+}
+
+function ArtistSongRows({
+	songs,
+	virtual = false,
+}: {
+	songs: Song[];
+	virtual?: boolean;
+}) {
+	const { playQueue, addToQueue, currentSong } = usePlayer();
+	const { isPlaying } = usePlayerControls();
+	const versions = useSongVersionReplacements();
+
+	function renderSong(index: number) {
+		const source = songs[index];
+		// Show the album track when the video was resolved.
+		const song = versions.get(source.id) ?? source;
+		const isCurrent = currentSong?.id === song.id;
+		return (
+			<SongContextMenu key={`${song.id ?? "artist-song"}-${index}`} song={song}>
+				<SwipeToQueue onQueue={() => addToQueue([song])} song={song}>
+					<SongRowHover songId={song.id}>
+						<div
+							className={cn(
+								"flex items-center gap-3 rounded-lg px-2.5 py-2",
+								isCurrent && "bg-primary/[0.08]",
+							)}
+						>
+							<button
+								className="grid min-w-0 flex-1 grid-cols-[2rem_2.5rem_1fr] items-center gap-3 text-left"
+								onClick={() => playQueue(songs, index)}
+								type="button"
+							>
+								<span className="relative grid place-items-center">
+									{isCurrent ? (
+										<EqualizerBars
+											className="size-3.5 text-primary"
+											playing={isPlaying}
+										/>
+									) : (
+										<>
+											<span className="font-mono text-xs text-muted-foreground/60 transition-opacity duration-150 group-hover:opacity-0">
+												{index + 1}
 											</span>
+											<Play className="absolute size-3.5 fill-current scale-75 text-foreground opacity-0 transition-all duration-150 group-hover:scale-100 group-hover:opacity-100" />
+										</>
+									)}
+								</span>
+								{song.thumbnail ? (
+									<img
+										alt={song.title}
+										className="size-10 rounded-md border border-foreground/10 object-cover"
+										loading="lazy"
+										src={proxiedImageUrl(song.thumbnail)}
+									/>
+								) : (
+									<div className="size-10 rounded-md bg-muted" />
+								)}
+								<div className="min-w-0">
+									<h3
+										className={cn(
+											"truncate text-sm font-medium transition-colors duration-150 group-hover:text-primary",
+											isCurrent && "text-primary",
 										)}
-										{!item.song && (
-											<span className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-all duration-200 group-hover:opacity-100">
-												<ArrowUpRight className="size-3.5" />
-											</span>
-										)}
-									</div>
-									<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
+									>
 										<SongTitle
-											artist={item.song?.artist}
-											keepTitle={item.song?.upload}
-											title={item.title}
+											artist={song.artist}
+											keepTitle={song.upload}
+											title={song.title}
 										/>
 									</h3>
-									<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-										{item.song ? (
-											<ArtistLinks showType song={item.song} />
-										) : (
-											item.subtitle
-										)}
+									<p className="truncate text-xs text-muted-foreground">
+										<ArtistLinks showType song={song} />
 									</p>
-								</button>
-							</SongContextMenu>
-						))}
-					</div>
-				</section>
+								</div>
+							</button>
+							<div className="flex shrink-0 items-center gap-2 pr-2">
+								<DownloadedBadge songId={song.id} />
+								<SongRowRating songId={song.id} />
+								<span className="font-mono text-xs text-muted-foreground/70 tabular-nums">
+									{song.duration}
+								</span>
+							</div>
+						</div>
+					</SongRowHover>
+				</SwipeToQueue>
+			</SongContextMenu>
+		);
+	}
+
+	if (virtual) {
+		return (
+			<VirtualTrackList
+				count={songs.length}
+				getKey={(index) => `${songs[index].id}-${index}`}
+			>
+				{renderSong}
+			</VirtualTrackList>
+		);
+	}
+
+	return (
+		<div className="flex flex-col gap-0.5">
+			{songs.map((_, index) => renderSong(index))}
+		</div>
+	);
+}
+
+function ArtistShelfCards({
+	items,
+	grid = false,
+}: {
+	items: ArtistShelfItem[];
+	grid?: boolean;
+}) {
+	const navigate = useNavigate();
+	const { play } = usePlayer();
+	const versions = useSongVersionReplacements();
+	return (
+		<div
+			className={
+				grid
+					? "grid grid-cols-[repeat(auto-fill,minmax(min(100%,8rem),1fr))] gap-x-4 gap-y-6"
+					: "-mx-1 flex gap-4 overflow-x-auto px-1 pb-2"
+			}
+		>
+			{items.map((item, i) => (
+				<SongContextMenu
+					// biome-ignore lint/suspicious/noArrayIndexKey: shelf items may repeat titles
+					key={`${item.title}-${i}`}
+					song={
+						item.song ? (versions.get(item.song.id) ?? item.song) : item.song
+					}
+				>
+					<button
+						className={cn(
+							"group min-w-0 text-left disabled:cursor-default",
+							grid ? "w-full" : "w-44 shrink-0",
+						)}
+						onClick={() => {
+							if (item.song) {
+								const song = versions.get(item.song.id) ?? item.song;
+								play(
+									song,
+									items
+										.slice(i + 1)
+										.map((shelfItem) => shelfItem.song)
+										.filter((s): s is Song => Boolean(s)),
+								);
+							} else if (item.link) {
+								navigate(item.link);
+							}
+						}}
+						type="button"
+					>
+						<div className="relative aspect-square overflow-hidden rounded-xl border border-foreground/8 bg-card">
+							{item.thumbnail ? (
+								<img
+									alt={item.title}
+									className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+									loading="lazy"
+									src={proxiedImageUrl(item.thumbnail)}
+								/>
+							) : (
+								<div className="grid size-full place-items-center text-muted-foreground">
+									<Music2 className="size-8" />
+								</div>
+							)}
+							{item.song && (
+								<span className="absolute right-2.5 bottom-2.5 grid size-9 translate-y-2 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow-lg transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
+									<Play className="size-4 translate-x-[1px] fill-current" />
+								</span>
+							)}
+							{!item.song && (
+								<span className="absolute top-2.5 right-2.5 grid size-7 place-items-center rounded-full bg-black/55 text-white opacity-0 transition-all duration-200 group-hover:opacity-100">
+									<ArrowUpRight className="size-3.5" />
+								</span>
+							)}
+						</div>
+						<h3 className="mt-2.5 line-clamp-1 text-sm font-medium transition-colors group-hover:text-primary">
+							<SongTitle
+								artist={item.song?.artist}
+								keepTitle={item.song?.upload}
+								title={item.title}
+							/>
+						</h3>
+						<p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+							{item.song ? (
+								<ArtistLinks showType song={item.song} />
+							) : (
+								item.subtitle
+							)}
+						</p>
+					</button>
+				</SongContextMenu>
 			))}
 		</div>
 	);

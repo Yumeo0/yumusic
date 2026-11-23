@@ -1,0 +1,211 @@
+import {
+	type Actions,
+	GridContinuation,
+	type Helpers,
+	type IParsedResponse,
+	MusicPlaylistShelfContinuation,
+	MusicShelfContinuation,
+	ReloadContinuationItemsCommand,
+	SectionListContinuation,
+	YTNodes,
+} from "youtubei.js/web";
+import type { Song } from "@/contexts/player-context";
+import { seedSongRatings } from "@/lib/stores/song-ratings";
+import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
+import { songRatingEntry } from "./playlist-data";
+import { artistListOf, artistNames, videoIdOf } from "./youtube.utils";
+import type { SongRating } from "./youtube-client";
+
+export interface ArtistShelfItem {
+	title: string;
+	subtitle: string;
+	thumbnail: string | null;
+	song?: Song;
+	link?: string;
+}
+
+function collectionLink(type: string | undefined, id: string | undefined) {
+	if (!id) return undefined;
+	switch (type) {
+		case "album":
+		case "playlist":
+			return `/playlists/${encodeURIComponent(id)}`;
+		case "artist":
+		case "library_artist":
+			return `/artist/${encodeURIComponent(id)}`;
+	}
+}
+
+export function artistShelfItems(
+	nodes: Iterable<Helpers.YTNode>,
+	artistName: string,
+	artistId: string,
+): ArtistShelfItem[] {
+	const items: ArtistShelfItem[] = [];
+	const ratings: Array<{ id: string; rating: SongRating }> = [];
+
+	for (const node of nodes) {
+		if (node.is(YTNodes.MusicResponsiveListItem)) {
+			const rating = songRatingEntry(node);
+			if (rating) ratings.push(rating);
+			const id = videoIdOf(node);
+			const title = node.title ?? "Unknown Title";
+			const thumbnail = hiResThumb(biggestThumb(node.thumbnails)?.url);
+			if (id) {
+				const artist = artistNames(node);
+				items.push({
+					title,
+					subtitle: artist,
+					thumbnail,
+					song: {
+						id,
+						title,
+						artist,
+						artists: artistListOf(node),
+						thumbnail,
+						duration: node.duration?.text,
+					},
+				});
+			} else {
+				const link = collectionLink(
+					node.item_type,
+					node.id ?? node.endpoint?.payload?.browseId,
+				);
+				if (link) {
+					items.push({
+						title,
+						subtitle: node.subtitle?.text || "",
+						thumbnail,
+						link,
+					});
+				}
+			}
+		} else if (node.is(YTNodes.MusicTwoRowItem)) {
+			const title = node.title?.text || "Unknown Title";
+			const thumbnail = hiResThumb(biggestThumb(node.thumbnail)?.url);
+			const id = videoIdOf(node);
+			items.push({
+				title,
+				subtitle: node.subtitle?.text || "",
+				thumbnail,
+				link: collectionLink(node.item_type, node.id),
+				song: id
+					? {
+							id,
+							title,
+							artist: artistName,
+							artistId,
+							artists: [{ name: artistName, id: artistId }],
+							thumbnail,
+						}
+					: undefined,
+			});
+		}
+	}
+
+	seedSongRatings(ratings);
+	return items;
+}
+
+function readCategoryPage(page: IParsedResponse) {
+	const memo = page.contents_memo;
+	const sections = memo?.getType(YTNodes.SectionList)[0];
+	const containers: Helpers.YTNode[] = sections
+		? [sections]
+		: (memo?.getType(
+				YTNodes.Grid,
+				YTNodes.MusicShelf,
+				YTNodes.MusicPlaylistShelf,
+				YTNodes.MusicCarouselShelf,
+			) ?? []);
+	const nodes: Helpers.YTNode[] = [];
+	let continuation: YTNodes.NavigationEndpoint | string | undefined;
+
+	function visit(node: Helpers.YTNode) {
+		if (node.is(YTNodes.MusicResponsiveListItem, YTNodes.MusicTwoRowItem)) {
+			nodes.push(node);
+		} else if (node.is(YTNodes.ContinuationItem)) {
+			continuation ??= node.endpoint;
+		} else if (
+			node.is(
+				YTNodes.Grid,
+				YTNodes.SectionList,
+				YTNodes.MusicShelf,
+				YTNodes.MusicPlaylistShelf,
+				GridContinuation,
+				SectionListContinuation,
+				MusicShelfContinuation,
+				MusicPlaylistShelfContinuation,
+			)
+		) {
+			for (const child of node.contents ?? []) visit(child);
+			continuation ??= node.continuation || undefined;
+		} else if (
+			node.is(
+				YTNodes.MusicCarouselShelf,
+				YTNodes.AppendContinuationItemsAction,
+				ReloadContinuationItemsCommand,
+			)
+		) {
+			for (const child of node.contents ?? []) visit(child);
+		}
+	}
+
+	for (const node of containers) visit(node);
+	if (page.continuation_contents) visit(page.continuation_contents);
+	for (const actions of [
+		page.on_response_received_actions,
+		page.on_response_received_endpoints,
+		page.on_response_received_commands,
+	]) {
+		for (const action of actions ?? []) visit(action);
+	}
+	return { nodes, continuation };
+}
+
+export async function loadArtistCategoryItems(
+	actions: Actions,
+	endpoint: YTNodes.NavigationEndpoint,
+	artistName: string,
+	artistId: string,
+	signal: AbortSignal,
+) {
+	const nodes: Helpers.YTNode[] = [];
+	const seen = new Set<string>();
+	let page = await endpoint.call(actions, { client: "YTMUSIC", parse: true });
+
+	for (;;) {
+		signal.throwIfAborted();
+		const { nodes: nextNodes, continuation } = readCategoryPage(page);
+		// Some artist tabs arrive without their contents. Let the user retry
+		// instead of presenting a failed response as an empty category.
+		if (
+			nextNodes.length === 0 &&
+			!continuation &&
+			page.contents_memo
+				?.getType(YTNodes.Tab)
+				.some((tab) => tab.selected && !tab.content)
+		) {
+			throw new Error("YouTube Music returned an unloaded artist tab.");
+		}
+		for (const node of nextNodes) nodes.push(node);
+		if (!continuation) return artistShelfItems(nodes, artistName, artistId);
+
+		const token =
+			typeof continuation === "string"
+				? continuation
+				: continuation.payload?.token;
+		if (typeof token === "string") {
+			if (seen.has(token)) throw new Error("Artist continuation repeated.");
+			seen.add(token);
+		}
+		page =
+			typeof continuation === "string"
+				? await actions.execute("/browse", {
+						client: "YTMUSIC",
+						continuation,
+						parse: true,
+					})
+				: await continuation.call(actions, { client: "YTMUSIC", parse: true });
+	}
+}

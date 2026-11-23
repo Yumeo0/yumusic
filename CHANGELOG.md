@@ -9,6 +9,7 @@
 ### Bug fixes
 
 - Fixed recurring desktop sign-outs by renewing expired sessions directly through YouTube Music in the background.
+- Fixed **Play next** so it starts the selected song when the queue is empty.
 
 ## [1.0.0] - 2026-11-19
 

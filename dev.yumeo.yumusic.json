@@ -39,7 +39,7 @@
                 {
                     "type": "git",
                     "url": "https://git.yumeo.dev/Yumeo/YuMusic.git",
-                    "commit": "dac1247507183cab147d9d70035a5cf58a2ac89b"
+                    "commit": "c4bfa2765613c2ce7a53372a496aa774b3123e14"
                 },
                 {
                     "type": "patch",

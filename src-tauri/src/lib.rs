@@ -346,7 +346,7 @@ pub fn run() {
 				use webview2_com::Microsoft::Web::WebView2::Win32::{
 					ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
 				};
-				use windows_core::Interface;
+				use windows::core::Interface;
 				if let Some(webview) = _window.app_handle().get_webview_window(_window.label()) {
 					let level = if *focused { 0 } else { 1 };
 					// Release browser caches while inactive without suspending music,

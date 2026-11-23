@@ -128,7 +128,7 @@ interface PlayerContextType {
 	playAutoplayAt: (index: number, addedBy?: string) => void;
 	addToQueue: (songs: Song[], contributor?: string) => void;
 	setQueue: (songs: Song[]) => void;
-	/** Insert a song directly after the current one without starting it. */
+	/** Starts an empty queue or inserts a song directly after the current one. */
 	playNext: (song: Song, contributor?: string) => void;
 	/** Remove the entry at `index`; advances playback when it was current. */
 	removeFromQueueAt: (index: number) => void;
@@ -1738,15 +1738,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 	const playNext = useCallback(
 		(song: Song, contributor?: string) => {
-			const addition = attributeLocal({ ...song, addedBy: contributor });
+			const requested = { ...song, addedBy: contributor };
+			if (!currentSong && queue.length === 0) return play(requested);
+
+			const addition = attributeLocal(requested);
 			const insertAt = currentIndex < 0 ? 0 : currentIndex + 1;
 			setQueueState((prev) => {
 				const next = [...prev];
 				next.splice(insertAt, 0, addition);
 				return next;
 			});
+			showToast("Playing next");
 		},
-		[currentIndex],
+		[currentIndex, currentSong, queue.length, play],
 	);
 
 	const removeFromQueueAt = useCallback(
@@ -1953,13 +1957,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					}),
 				};
 			}),
-			playNext: localControl(
-				(song: Song, contributor?: string) => {
-					playNext(song, contributor);
-					showToast("Playing next");
-				},
-				(song) => ({ type: "playNext", song }),
-			),
+			playNext: localControl(playNext, (song) => ({ type: "playNext", song })),
 			removeFromQueueAt: localControl(removeFromQueueAt, (index) => ({
 				type: "remove",
 				index,
