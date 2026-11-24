@@ -91,6 +91,7 @@ import {
 import { cn } from "./lib/utils/utils";
 import { restoreSession } from "./lib/youtube/restore-session";
 import {
+	getArtistAvatar,
 	getTrackMeta,
 	getUserProfile,
 	getYoutubeClient,
@@ -106,9 +107,9 @@ import SettingsPage from "./pages/settings";
 
 /**
  * Mirrors the current song into Discord rich presence while enabled:
- * cover art + album tooltip (linked), clickable song title and artist,
- * plus playback timestamps that freeze while paused. Paused presence expires
- * after 15 minutes and returns when playback resumes.
+ * cover art + album tooltip (linked), artist avatar, clickable song title and
+ * artist, plus playback timestamps that freeze while paused. Paused presence
+ * expires after 15 minutes and returns when playback resumes.
  */
 function DiscordPresenceSync() {
 	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
@@ -147,6 +148,28 @@ function DiscordPresenceSync() {
 		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
 	const discordEnabled = settings.discordRpc;
 	const [discordIdle, setDiscordIdle] = useState(false);
+	const [artistAvatar, setArtistAvatar] = useState<{
+		artistId: string;
+		url: string;
+	} | null>(null);
+	const artistAvatarUrl =
+		artistAvatar && artistAvatar.artistId === artistId
+			? artistAvatar.url
+			: null;
+
+	useEffect(() => {
+		if (!discordEnabled || !artistId) return;
+		let cancelled = false;
+		void getArtistAvatar(artistId).then((url) => {
+			// Discord fetches the avatar directly and limits image URLs to 300 characters.
+			if (!cancelled && url && url.length <= 300 && /^https?:\/\//.test(url)) {
+				setArtistAvatar({ artistId, url });
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [discordEnabled, artistId]);
 
 	// Metadata refreshes, seeks and the presence retry must not restart this
 	// countdown. Only resuming playback or toggling the feature resets it.
@@ -212,6 +235,7 @@ function DiscordPresenceSync() {
 					album: meta?.album?.name ?? null,
 					coverUrl:
 						discordCover.source === cover ? discordCover.url || null : null,
+					artistAvatarUrl,
 					songUrl: `https://music.youtube.com/watch?v=${songId}`,
 					artistUrl: artistId
 						? `https://music.youtube.com/channel/${artistId}`
@@ -242,6 +266,7 @@ function DiscordPresenceSync() {
 		cover,
 		discordCover,
 		artistId,
+		artistAvatarUrl,
 		isPlaying,
 		durationSecs,
 		meta,

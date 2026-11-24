@@ -38,8 +38,8 @@ object DiscordPresence {
     fun optional(key: String) = if (track.isNull(key)) "" else track.optString(key)
     nativeUpdate(payload.getString("applicationId").toLong(),
       track.getString("title"), track.getString("artist"), optional("album"),
-      optional("coverUrl"), track.getString("songUrl"), optional("artistUrl"),
-      optional("albumUrl"), track.getBoolean("playing"),
+      optional("coverUrl"), optional("artistAvatarUrl"), track.getString("songUrl"),
+      optional("artistUrl"), optional("albumUrl"), track.getBoolean("playing"),
       track.getDouble("elapsedSecs"), track.getDouble("durationSecs"))
   }
 
@@ -54,8 +54,8 @@ object DiscordPresence {
   fun shutdown() = clear()
 
   private external fun nativeUpdate(appId: Long, title: String, artist: String,
-    album: String, cover: String, songUrl: String, artistUrl: String, albumUrl: String,
-    playing: Boolean, elapsed: Double, duration: Double)
+    album: String, cover: String, artistAvatar: String, songUrl: String, artistUrl: String,
+    albumUrl: String, playing: Boolean, elapsed: Double, duration: Double)
   private external fun nativeClear()
   private external fun nativeRunCallbacks()
   private external fun nativeShutdown()

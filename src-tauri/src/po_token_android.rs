@@ -11,7 +11,7 @@ use tauri_runtime_wry::wry::prelude::{
 };
 use tokio::sync::oneshot;
 
-use super::PoToken;
+use super::{PoToken, MINT_SCRIPT};
 
 /// A second Android WebView owns attestation; the Tauri playback view stays put.
 pub async fn mint(binding: String) -> Result<PoToken, String> {
@@ -23,7 +23,7 @@ pub async fn mint(binding: String) -> Result<PoToken, String> {
 		let result = (|| {
 			let id = env.new_string(request_id)?;
 			let binding = env.new_string(binding)?;
-			let script = env.new_string(include_str!("po_token_bridge.js"))?;
+			let script = env.new_string(MINT_SCRIPT)?;
 			env.call_method(
 				activity,
 				"beginPoToken",

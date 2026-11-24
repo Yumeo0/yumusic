@@ -4,7 +4,11 @@
 
 ### Features
 
+- Added artist images to Discord Rich Presence, with the artist name shown on hover.
+
 ### Improvements
+
+- Reduced RAM usage on desktop and Android by using BGUtils to generate playback tokens without rendering a full YouTube page.
 
 ### Bug fixes
 

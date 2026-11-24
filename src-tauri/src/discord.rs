@@ -28,6 +28,7 @@ pub struct TrackPresence {
 	pub artist: String,
 	pub album: Option<String>,
 	pub cover_url: Option<String>,
+	pub artist_avatar_url: Option<String>,
 	pub song_url: String,
 	pub artist_url: Option<String>,
 	pub album_url: Option<String>,
@@ -89,6 +90,7 @@ fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 
 	let client = connect(state, DEFAULT_APP_ID)?;
 
+	let artist_name = clamp(&track.artist, 128);
 	let mut assets = activity::Assets::new();
 	if let Some(cover) = &track.cover_url {
 		// The cover doubles as the album link; its tooltip shows the album
@@ -101,6 +103,14 @@ fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 		assets = assets.large_image(cover.clone()).large_text(large_text);
 		if let Some(album_url) = &track.album_url {
 			assets = assets.large_url(album_url.clone());
+		}
+	}
+	if let Some(avatar) = &track.artist_avatar_url {
+		assets = assets
+			.small_image(avatar.as_str())
+			.small_text(artist_name.as_str());
+		if let Some(artist_url) = &track.artist_url {
+			assets = assets.small_url(artist_url.as_str());
 		}
 	}
 
@@ -135,7 +145,7 @@ fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 	let mut act = activity::Activity::new()
 		.activity_type(activity::ActivityType::Listening)
 		.details(clamp(&track.title, 128))
-		.state(clamp(&track.artist, 128))
+		.state(artist_name.as_str())
 		.details_url(&track.song_url)
 		.assets(assets)
 		.timestamps(timestamps)

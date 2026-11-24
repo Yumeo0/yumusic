@@ -42,7 +42,7 @@ std::string clipped(std::string text) {
 extern "C" JNIEXPORT void JNICALL
 Java_dev_yumeo_yumusic_DiscordPresence_nativeUpdate(JNIEnv* env, jobject,
     jlong appId, jstring title, jstring artist, jstring album, jstring cover,
-    jstring songUrl, jstring artistUrl, jstring albumUrl,
+    jstring artistAvatar, jstring songUrl, jstring artistUrl, jstring albumUrl,
     jboolean playing, jdouble elapsed, jdouble duration) {
     if (!client || applicationId != static_cast<uint64_t>(appId)) {
         client = std::make_unique<discordpp::Client>();
@@ -54,7 +54,8 @@ Java_dev_yumeo_yumusic_DiscordPresence_nativeUpdate(JNIEnv* env, jobject,
     activity.SetStatusDisplayType(discordpp::StatusDisplayTypes::Name);
     activity.SetType(discordpp::ActivityTypes::Listening);
     activity.SetDetails(clipped(utf8(env, title)));
-    activity.SetState(clipped(utf8(env, artist)));
+    auto artistName = clipped(utf8(env, artist));
+    activity.SetState(artistName);
     activity.SetDetailsUrl(utf8(env, songUrl));
     auto artistLink = utf8(env, artistUrl);
     if (!artistLink.empty()) activity.SetStateUrl(artistLink);
@@ -67,6 +68,12 @@ Java_dev_yumeo_yumusic_DiscordPresence_nativeUpdate(JNIEnv* env, jobject,
         auto albumName = utf8(env, album);
         assets.SetLargeText(playing ? clipped(albumName.empty() ? utf8(env, title) : albumName) : "Paused");
         if (!albumLink.empty()) assets.SetLargeUrl(albumLink);
+    }
+    auto avatar = utf8(env, artistAvatar);
+    if (!avatar.empty()) {
+        assets.SetSmallImage(avatar);
+        assets.SetSmallText(artistName);
+        if (!artistLink.empty()) assets.SetSmallUrl(artistLink);
     }
     activity.SetAssets(assets);
 

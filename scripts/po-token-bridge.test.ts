@@ -101,3 +101,54 @@ test("native readiness failures are reported without a fallback token", async ()
 	expect(response.error).toBeDefined();
 	expect(response.token).toBeUndefined();
 });
+
+test("lightweight minter returns its proof with the WebView user agent", async () => {
+	const result = Promise.withResolvers<Record<string, unknown>>();
+	const window = {
+		__yumusicBgutilsMinter: async (binding: string) => ({
+			token: `proof-${binding}`,
+			context: { client: { visitorData: "visitor" } },
+			accountIndex: 1,
+		}),
+		location: {
+			set href(url: string) {
+				result.resolve(
+					JSON.parse(new URL(url).searchParams.get("payload") ?? "null"),
+				);
+			},
+		},
+		__yumusicMintPoToken: (_id: string, _binding: string) => undefined,
+	};
+	runInNewContext(source, { window, navigator: { userAgent: "mint-agent" } });
+	window.__yumusicMintPoToken("request", "video-a");
+	expect(await result.promise).toEqual({
+		id: "request",
+		token: "proof-video-a",
+		context: { client: { visitorData: "visitor", userAgent: "mint-agent" } },
+		accountIndex: 1,
+	});
+});
+
+test.each([
+	["desktop", undefined],
+	["Android", "/watch?v=video-a&autoplay=0&hl=en&app=desktop"],
+] as const)(
+	"lightweight failures open the %s fallback page",
+	async (_, fallbackPath) => {
+		const navigation = Promise.withResolvers<string>();
+		const window = {
+			__yumusicBgutilsMinter: async () => {
+				throw new Error("YouTube challenge unavailable");
+			},
+			location: { replace: navigation.resolve },
+			__yumusicMintPoToken: (
+				_id: string,
+				_binding: string,
+				_fallbackPath?: string,
+			) => undefined,
+		};
+		runInNewContext(source, { window });
+		window.__yumusicMintPoToken("request", "video-a", fallbackPath);
+		expect(await navigation.promise).toBe(fallbackPath ?? "/?hl=en");
+	},
+);

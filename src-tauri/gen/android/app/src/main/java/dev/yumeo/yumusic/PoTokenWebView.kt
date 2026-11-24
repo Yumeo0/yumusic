@@ -17,15 +17,13 @@ import android.webkit.WebViewClient
 import dev.yumeo.yumusic.audio.BackgroundAudioWebView
 import org.json.JSONObject
 
-/** A separate view runs YouTube's ready minter without navigating the music UI. */
+/** A separate view mints playback tokens without navigating the music UI. */
 class PoTokenWebView(private val activity: Activity) {
   private val handler = Handler(Looper.getMainLooper())
   private val results = mutableMapOf<String, String>()
   private var webView: BackgroundAudioWebView? = null
   private var consent: Dialog? = null
   private var requestId: String? = null
-  private var binding = ""
-  private var script = ""
   private var tick: Runnable? = null
   private var timeout: Runnable? = null
 
@@ -33,8 +31,16 @@ class PoTokenWebView(private val activity: Activity) {
     check(Looper.myLooper() == Looper.getMainLooper())
     requestId?.let { finish(JSONObject().put("id", it).put("error", "PO request superseded")) }
     requestId = id
-    binding = contentBinding
-    script = bridgeScript
+    // On Android, the watch page initializes the native minter used as a fallback.
+    val fallbackPath = Uri.parse("/watch").buildUpon()
+      .appendQueryParameter("v", contentBinding)
+      .appendQueryParameter("autoplay", "0")
+      .appendQueryParameter("hl", "en")
+      .appendQueryParameter("app", "desktop")
+      .build().toString()
+    val mintArguments = listOf(id, contentBinding, fallbackPath).joinToString(", ") { JSONObject.quote(it) }
+    val mintScript = "if (!window.__yumusicMintPoToken) {$bridgeScript}\n" +
+      "window.__yumusicMintPoToken?.($mintArguments);"
     if (webView == null) webView = createWebView()
     // A new track can need attestation while the activity's window is hidden.
     webView?.setAudioActive(true)
@@ -44,11 +50,7 @@ class PoTokenWebView(private val activity: Activity) {
         val view = webView ?: return
         if (requestId != id) return
         if (isYouTube(Uri.parse(view.url ?: ""))) {
-          view.evaluateJavascript(
-            "if (!window.__yumusicMintPoToken) {$script}\n" +
-              "window.__yumusicMintPoToken?.(${JSONObject.quote(id)}, ${JSONObject.quote(binding)});",
-            null
-          )
+          view.evaluateJavascript(mintScript, null)
         }
         handler.postDelayed(this, 250)
       }
@@ -94,7 +96,7 @@ class PoTokenWebView(private val activity: Activity) {
     view.settings.mediaPlaybackRequiresUserGesture = true
     view.settings.allowFileAccess = false
     view.settings.allowContentAccess = false
-    // Load the same desktop YouTube minter API as the verified desktop flow.
+    // Request the same YouTube client configuration as the desktop flow.
     val architecture = System.getProperty("os.arch") ?: "aarch64"
     view.settings.userAgentString = "Mozilla/5.0 (X11; Linux $architecture) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
@@ -135,14 +137,7 @@ class PoTokenWebView(private val activity: Activity) {
       }
     }
     attachBehindApp(view)
-    // A fresh mobile WebView does not initialize the shared minter on Home.
-    // Loading the player's page initializes it; autoplay stays gesture-gated.
-    view.loadUrl(Uri.parse("https://www.youtube.com/watch").buildUpon()
-      .appendQueryParameter("v", binding)
-      .appendQueryParameter("autoplay", "0")
-      .appendQueryParameter("hl", "en")
-      .appendQueryParameter("app", "desktop")
-      .build().toString())
+    view.loadUrl("https://www.youtube.com/robots.txt")
     return view
   }
 
