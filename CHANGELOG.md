@@ -4,6 +4,14 @@
 
 ### Features
 
+### Improvements
+
+### Bug fixes
+
+## [1.2.0] - 2026-11-26
+
+### Features
+
 - Added artist images to Discord Rich Presence, with the artist name shown on hover.
 - Added download quality options with file size estimates and a setting for how many songs download at once.
 - Added a Stop button for in-progress playlist downloads.
