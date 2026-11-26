@@ -28,7 +28,9 @@ test("player attestation is video-bound and uses the minter's visitor context", 
 	expect(client.session.context.client.userAgent).toBe("native-agent");
 	expect(service.playbackCookie).toBe("VISITOR_INFO1_LIVE=native-visitor");
 	expect(service.playbackUserAgent).toBe("native-agent");
-	expect(await service.mintToken("video-b")).toBe("native-video-b");
+	expect((await service.getPlaybackProof("video-b")).token).toBe(
+		"native-video-b",
+	);
 	expect(bindings).toEqual(["video-a", "video-b"]);
 });
 
@@ -36,7 +38,7 @@ test("attestation failure is surfaced instead of returning a cold-start token", 
 	const service = new BotguardService(async () => {
 		throw new Error("minter unavailable");
 	});
-	await expect(service.mintToken("video-a")).rejects.toThrow(
+	await expect(service.getPlaybackProof("video-a")).rejects.toThrow(
 		"minter unavailable",
 	);
 	expect(service.playbackCookie).toBeUndefined();
@@ -47,7 +49,32 @@ test("incomplete native proofs are rejected", async () => {
 		...proof(binding),
 		token: "",
 	}));
-	await expect(service.mintToken("video-a")).rejects.toThrow(
+	await expect(service.getPlaybackProof("video-a")).rejects.toThrow(
 		"ready playback attestation",
 	);
+});
+
+test("playback goes ahead of waiting download mints and cancelled work is skipped", async () => {
+	const firstMint = Promise.withResolvers<PlaybackProof>();
+	const bindings: string[] = [];
+	const service = new BotguardService(async (binding) => {
+		bindings.push(binding);
+		return binding === "active-download" ? firstMint.promise : proof(binding);
+	});
+	const controller = new AbortController();
+	const active = service.getPlaybackProof("active-download", undefined, true);
+	const waiting = service.getPlaybackProof("waiting-download", undefined, true);
+	const cancelled = service
+		.getPlaybackProof("cancelled-download", controller.signal, true)
+		.catch((error: unknown) => error);
+	const playback = service.getPlaybackProof("playing-song");
+	controller.abort();
+	expect(await cancelled).toBe(controller.signal.reason);
+	firstMint.resolve(proof("active-download"));
+	await Promise.all([active, waiting, playback]);
+	expect(bindings).toEqual([
+		"active-download",
+		"playing-song",
+		"waiting-download",
+	]);
 });

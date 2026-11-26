@@ -1,4 +1,4 @@
-import { unsubscribeDownloadedPlaylist } from "../downloads/downloads";
+import { stopPlaylistDownload } from "../downloads/downloads";
 import type { PlaylistTrack } from "../music/playlist";
 import type { Song } from "../music/song";
 import { reconcilePinnedPlaylists, unpinPlaylist } from "../stores/pinned";
@@ -38,6 +38,14 @@ export async function createPlaylistWithTrack(title: string, song: Song) {
 
 const activeTrackEdits = new Set<string>();
 
+export function hasActivePlaylistTrackEdit(id: string): boolean {
+	const prefix = `${canonicalPlaylistId(id)}:`;
+	for (const key of activeTrackEdits) {
+		if (key.startsWith(prefix)) return true;
+	}
+	return false;
+}
+
 async function editPlaylistTrack(
 	id: string,
 	videoId: string,
@@ -68,7 +76,7 @@ export async function removePlaylistTrack(
 
 export async function deleteLibraryPlaylist(id: string) {
 	await deletePlaylist(id);
-	unsubscribeDownloadedPlaylist(id);
+	stopPlaylistDownload(id);
 	unpinPlaylist(id);
 	removePlaylistFromCaches(id);
 	removeHomeFeedPlaylist(id);

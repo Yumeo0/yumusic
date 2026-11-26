@@ -386,14 +386,19 @@ const CONTINUATION_BACKOFF_MS = 400;
  * otherwise leave long playlists stuck half-loaded (and their cache marked
  * incomplete), so retry a couple of times with a small backoff.
  */
-export async function loadPlaylistContinuation(playlist: Playlist) {
+export async function loadPlaylistContinuation(
+	playlist: Playlist,
+	signal?: AbortSignal,
+) {
 	if (!playlist.has_continuation) {
 		return null;
 	}
 	for (let attempt = 1; attempt <= CONTINUATION_ATTEMPTS; attempt++) {
+		signal?.throwIfAborted();
 		try {
 			return await playlist.getContinuation();
 		} catch (error) {
+			signal?.throwIfAborted();
 			if (attempt === CONTINUATION_ATTEMPTS) {
 				console.error("Failed to load playlist continuation:", error);
 				return null;

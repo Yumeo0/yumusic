@@ -15,6 +15,7 @@ interface PlaybackStream {
 export async function getSongStream(
 	videoId: string,
 	signal?: AbortSignal,
+	background = false,
 ): Promise<PlaybackStream> {
 	signal?.throwIfAborted();
 	const client = await getYoutubeClient();
@@ -22,7 +23,12 @@ export async function getSongStream(
 
 	// Both /player and SABR need tokens bound to this video's ID. The native
 	// minter also supplies the visitor context used to attest the request.
-	const poToken = await botguardService.preparePlayback(client, videoId);
+	const poToken = await botguardService.preparePlayback(
+		client,
+		videoId,
+		signal,
+		background,
+	);
 	signal?.throwIfAborted();
 
 	const playerResponse = await client.actions.execute("/player", {
@@ -57,6 +63,7 @@ export async function getSongStream(
 export async function getPlaybackStream(
 	videoId: string,
 	signal?: AbortSignal,
+	background = false,
 ): Promise<PlaybackStream> {
 	signal?.throwIfAborted();
 	const version = getSongVersion(videoId);
@@ -64,7 +71,7 @@ export async function getPlaybackStream(
 	const fallbackSignal = signal
 		? AbortSignal.any([signal, fallbackController.signal])
 		: fallbackController.signal;
-	const fallback = getSongStream(videoId, fallbackSignal).then(
+	const fallback = getSongStream(videoId, fallbackSignal, background).then(
 		(value) => ({ value }),
 		(error: unknown) => ({ error }),
 	);
@@ -73,7 +80,7 @@ export async function getPlaybackStream(
 		signal?.throwIfAborted();
 		if (songVersion && songVersion.id !== videoId) {
 			try {
-				const result = await getSongStream(songVersion.id, signal);
+				const result = await getSongStream(songVersion.id, signal, background);
 				if (result.videoInfo.streaming_data) return { ...result, songVersion };
 				console.warn(
 					"[YuMusic] song version has no stream, playing the original video",

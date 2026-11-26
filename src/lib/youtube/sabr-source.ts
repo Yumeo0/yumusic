@@ -2,6 +2,10 @@ import { SabrStream } from "googlevideo/sabr-stream";
 import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
 import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
+import {
+	type DownloadQuality,
+	selectDownloadAudioFormat,
+} from "../downloads/download-quality";
 import { botguardService } from "./botguard-service";
 import { youtubeFetch } from "./youtube-fetch";
 
@@ -10,23 +14,32 @@ export async function createSabrAudioSource(
 	videoInfo: YT.VideoInfo,
 	innertube: Innertube,
 	signal: AbortSignal,
+	{
+		background = false,
+		downloadQuality,
+	}: { background?: boolean; downloadQuality?: DownloadQuality } = {},
 ) {
 	signal.throwIfAborted();
 	const streaming = videoInfo.streaming_data;
 	if (!videoId || !streaming) throw new Error("Streaming data is missing");
-	const client = innertube.session.context.client;
 	const serverAbrStreamingUrl = await innertube.session.player?.decipher(
 		streaming.server_abr_streaming_url,
 	);
 	signal.throwIfAborted();
 	if (!serverAbrStreamingUrl) throw new Error("SABR streaming URL is missing");
-	const poToken = await botguardService.mintToken(videoId);
+	const proof = await botguardService.getPlaybackProof(
+		videoId,
+		signal,
+		background,
+	);
 	signal.throwIfAborted();
+	const client = proof.context.client;
 	const config = {
 		videoId,
-		fetchFunction: youtubeFetch as typeof fetch,
+		fetchFunction: ((input, init) =>
+			youtubeFetch(input, init, proof)) as typeof fetch,
 		serverAbrStreamingUrl,
-		poToken,
+		poToken: proof.token,
 		videoPlaybackUstreamerConfig:
 			videoInfo.player_config?.media_common_config
 				.media_ustreamer_request_config?.video_playback_ustreamer_config ?? "",
@@ -50,6 +63,9 @@ export async function createSabrAudioSource(
 		try {
 			const { audioStream, selectedFormats } = stream.start({
 				enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
+				audioFormat: downloadQuality
+					? (formats) => selectDownloadAudioFormat(formats, downloadQuality)
+					: undefined,
 				audioPreferences: {},
 				isPostLiveDvr: false,
 				startTimeMs,

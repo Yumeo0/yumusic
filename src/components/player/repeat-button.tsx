@@ -18,11 +18,7 @@ export function RepeatButton({ className }: { className?: string }) {
 		<Button
 			aria-label={LABELS[repeatMode]}
 			aria-pressed={repeatMode !== "off"}
-			className={cn(
-				"player-ctl relative",
-				repeatMode !== "off" && "text-primary",
-				className,
-			)}
+			className={cn("player-ctl relative text-muted-foreground", className)}
 			onClick={(event) => {
 				event.stopPropagation();
 				setRepeatMode(nextMode);
@@ -33,7 +29,7 @@ export function RepeatButton({ className }: { className?: string }) {
 		>
 			<Icon />
 			{repeatMode !== "off" && (
-				<span className="absolute bottom-1 size-1 rounded-full bg-current" />
+				<span className="absolute bottom-1 size-1 rounded-full bg-primary" />
 			)}
 		</Button>
 	);

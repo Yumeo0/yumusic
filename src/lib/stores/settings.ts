@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+	DEFAULT_DOWNLOAD_QUALITY,
+	type DownloadQuality,
+	normalizeDownloadQuality,
+} from "../downloads/download-quality";
+import {
 	DEFAULT_LYRICS_PROVIDER_ORDER,
 	type LyricsProviderId,
 	normalizeProviderOrder,
@@ -13,6 +18,8 @@ import { normalizeHiddenHomeSections } from "./home-sections";
 export const CROSSFADE_MIN_SECONDS = 1;
 export const CROSSFADE_MAX_SECONDS = 12;
 export const CROSSFADE_DEFAULT_SECONDS = 3;
+export const MAX_PARALLEL_DOWNLOADS = 8;
+const DEFAULT_PARALLEL_DOWNLOADS = 4;
 
 /** Keeps a stored crossfade length usable even if localStorage was edited. */
 export function clampCrossfadeSeconds(value: unknown): number {
@@ -51,6 +58,8 @@ export interface Settings {
 	 * are not stored yet are queued automatically.
 	 */
 	downloadedPlaylists: string[];
+	parallelDownloads: number;
+	downloadQuality: DownloadQuality;
 	/** Report played songs (with progress) to the YouTube watch history. */
 	watchHistory: boolean;
 	/** Show extra debug/copy actions in song context menus. */
@@ -75,6 +84,8 @@ const DEFAULTS: Settings = {
 	crossfade: true,
 	crossfadeSeconds: CROSSFADE_DEFAULT_SECONDS,
 	downloadedPlaylists: [],
+	parallelDownloads: DEFAULT_PARALLEL_DOWNLOADS,
+	downloadQuality: DEFAULT_DOWNLOAD_QUALITY,
 	watchHistory: true,
 	developerMode: false,
 };
@@ -98,6 +109,17 @@ export function getSettings(): Settings {
 			),
 			lyricsProviderOrder: normalizeProviderOrder(parsed.lyricsProviderOrder),
 			crossfadeSeconds: clampCrossfadeSeconds(parsed.crossfadeSeconds),
+			downloadQuality: normalizeDownloadQuality(stored.downloadQuality),
+			parallelDownloads:
+				typeof stored.parallelDownloads === "number" &&
+				Number.isFinite(stored.parallelDownloads)
+					? Math.round(
+							Math.min(
+								MAX_PARALLEL_DOWNLOADS,
+								Math.max(1, stored.parallelDownloads),
+							),
+						)
+					: DEFAULT_PARALLEL_DOWNLOADS,
 			downloadedPlaylists: Array.isArray(parsed.downloadedPlaylists)
 				? parsed.downloadedPlaylists.filter(
 						(id): id is string => typeof id === "string",
@@ -129,19 +151,20 @@ export function updateSettings(patch: Partial<Settings>): Settings {
 	return next;
 }
 
+export function subscribeToSettings(listener: () => void) {
+	window.addEventListener(SETTINGS_EVENT, listener);
+	window.addEventListener("storage", listener);
+	return () => {
+		window.removeEventListener(SETTINGS_EVENT, listener);
+		window.removeEventListener("storage", listener);
+	};
+}
+
 /** Reactive settings bound to localStorage. */
 export function useSettings(): [Settings, (patch: Partial<Settings>) => void] {
 	const [settings, setSettings] = useState<Settings>(getSettings);
 
-	useEffect(() => {
-		const refresh = () => setSettings(getSettings());
-		window.addEventListener(SETTINGS_EVENT, refresh);
-		window.addEventListener("storage", refresh);
-		return () => {
-			window.removeEventListener(SETTINGS_EVENT, refresh);
-			window.removeEventListener("storage", refresh);
-		};
-	}, []);
+	useEffect(() => subscribeToSettings(() => setSettings(getSettings())), []);
 
 	return [settings, updateSettings];
 }

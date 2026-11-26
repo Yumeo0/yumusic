@@ -16,7 +16,7 @@ function percent(progress: number | null): string | null {
 }
 
 /**
- * Download queue: a trigger that opens a popover with the running track, the
+ * Download queue: a trigger that opens a popover with the running tracks, the
  * waiting ones and any failures (with retry/dismiss). Progress lives here
  * instead of in per-track toasts; finished songs leave the queue and a button
  * opens the storage manager right on the current page.
@@ -38,11 +38,10 @@ export function DownloadQueueButton({
 	const downloads = useDownloads();
 	const [storageOpen, setStorageOpen] = useState(false);
 	const { tasks, failed } = downloads;
-	const running = tasks.find((task) => task.phase === "downloading");
 	const busy = tasks.length + failed.length;
 	if (compact && busy === 0) return null;
 
-	const progress = percent(running?.progress ?? null);
+	const progress = busy === 1 ? percent(tasks[0]?.progress ?? null) : null;
 
 	return (
 		<Popover.Root>

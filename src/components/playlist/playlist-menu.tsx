@@ -6,12 +6,15 @@ import {
 	Pin,
 	Share2,
 	Shuffle,
+	Square,
 	Trash2,
 } from "lucide-react";
 import { type ComponentType, type ReactNode, useState } from "react";
 import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import { usePlayer } from "@/contexts/player-context";
 import {
+	playlistDownloadLabel,
+	stopPlaylistDownload,
 	togglePlaylistDownload,
 	usePlaylistDownloaded,
 	usePlaylistDownloadJob,
@@ -69,6 +72,7 @@ export function PlaylistContextMenu({
 	onTogglePinned,
 	onEdit,
 	songs,
+	songsComplete,
 	highlight = true,
 	className = "contents",
 	allowDelete = true,
@@ -79,6 +83,7 @@ export function PlaylistContextMenu({
 	onTogglePinned: () => void;
 	onEdit?: () => void;
 	songs?: Song[];
+	songsComplete?: boolean;
 	highlight?: boolean;
 	className?: string;
 	children: ReactNode;
@@ -161,24 +166,25 @@ export function PlaylistContextMenu({
 								onClick={shufflePlay}
 							/>
 							{downloadJob ? (
-								<MenuItem
-									disabled
-									icon={Loader2}
-									iconClassName="animate-spin"
-									label={
-										downloadJob.total > 0
-											? `Downloading ${downloadJob.done}/${downloadJob.total}`
-											: "Preparing download…"
-									}
-									onClick={() => undefined}
-								/>
+								<>
+									<MenuItem
+										disabled
+										icon={Loader2}
+										iconClassName="motion-safe:animate-spin"
+										label={playlistDownloadLabel(downloadJob)}
+										onClick={() => undefined}
+									/>
+									<MenuItem
+										icon={Square}
+										label="Stop download"
+										onClick={() => stopPlaylistDownload(playlist.id)}
+									/>
+								</>
 							) : downloaded ? (
 								<MenuItem
 									icon={PlaylistDownloadOffIcon}
 									label={`Stop downloading ${isAlbumId(playlist.id) ? "album" : "playlist"}`}
-									onClick={() =>
-										togglePlaylistDownload(playlist.id, playlist.title, songs)
-									}
+									onClick={() => stopPlaylistDownload(playlist.id)}
 								/>
 							) : (
 								<MenuItem
@@ -189,7 +195,12 @@ export function PlaylistContextMenu({
 											: "Download playlist"
 									}
 									onClick={() =>
-										togglePlaylistDownload(playlist.id, playlist.title, songs)
+										togglePlaylistDownload(
+											playlist.id,
+											playlist.title,
+											songs,
+											songsComplete,
+										)
 									}
 								/>
 							)}

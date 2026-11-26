@@ -6,7 +6,6 @@ import {
 	Check,
 	Download,
 	Ellipsis,
-	Loader2,
 	Music2,
 	Pencil,
 	Pin,
@@ -15,6 +14,7 @@ import {
 	Search,
 	Share2,
 	Shuffle,
+	Square,
 	Trash2,
 	X,
 } from "lucide-react";
@@ -32,9 +32,12 @@ import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import {
+	playlistDownloadLabel,
+	stopPlaylistDownload,
 	togglePlaylistDownload,
 	usePlaylistDownloaded,
 	usePlaylistDownloadJob,
@@ -273,6 +276,7 @@ function PlaylistDetailsView({
 	const activeSort =
 		PLAYLIST_SORTS.find((option) => option.value === sort)?.label ??
 		"Newest first";
+	const updating = refreshing || loadingMore;
 
 	return (
 		<div className="mx-auto w-full max-w-7xl px-6 pt-6 sm:px-10 sm:pt-10">
@@ -280,18 +284,21 @@ function PlaylistDetailsView({
 				<BackButton onClick={onBack} />
 				<div className="flex items-center gap-1">
 					{downloadJob ? (
-						<button
-							className="grid size-9 place-items-center rounded-full text-muted-foreground"
-							disabled
-							title={
-								downloadJob.total > 0
-									? `Downloading ${downloadJob.done}/${downloadJob.total}`
-									: "Preparing download…"
-							}
+						<Button
+							aria-label="Stop download"
+							className="text-muted-foreground"
+							onClick={() => stopPlaylistDownload(id)}
+							title={`Stop download · ${playlistDownloadLabel(downloadJob)}`}
 							type="button"
+							variant="secondary"
 						>
-							<Loader2 className="size-4 animate-spin" />
-						</button>
+							<Square
+								aria-hidden
+								className="fill-current"
+								data-icon="inline-start"
+							/>
+							Stop
+						</Button>
 					) : (
 						<button
 							className={cn(
@@ -302,7 +309,8 @@ function PlaylistDetailsView({
 								togglePlaylistDownload(
 									id ?? "",
 									playlist.title,
-									loadingMore ? undefined : songs,
+									songs,
+									playlist.complete,
 								)
 							}
 							title={
@@ -321,15 +329,24 @@ function PlaylistDetailsView({
 							)}
 						</button>
 					)}
-					<button
-						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
-						disabled={refreshing}
+					<Button
+						aria-busy={updating}
+						aria-label={updating ? undefined : "Refresh playlist"}
+						className="text-muted-foreground"
+						disabled={updating}
 						onClick={() => void refresh(true)}
-						title="Refresh playlist"
+						size={updating ? "default" : "icon"}
+						title={updating ? undefined : "Refresh playlist"}
 						type="button"
+						variant={updating ? "secondary" : "ghost"}
 					>
-						<RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
-					</button>
+						<RefreshCw
+							aria-hidden
+							className={updating ? "motion-safe:animate-spin" : undefined}
+							data-icon={updating ? "inline-start" : undefined}
+						/>
+						{updating && (refreshing ? "Refreshing…" : "Loading…")}
+					</Button>
 				</div>
 			</div>
 
@@ -351,6 +368,7 @@ function PlaylistDetailsView({
 					title: playlist.title,
 				}}
 				songs={songs}
+				songsComplete={playlist.complete}
 			>
 				<header className="animate-track-in mt-4 text-center sm:mt-6">
 					{playlist.thumbnail ? (
@@ -551,12 +569,6 @@ function PlaylistDetailsView({
 
 			{/* Tracklist — edge-to-edge on mobile */}
 			<div className="mt-8 space-y-0.5 pb-4 -mx-6 sm:mx-0">
-				{loadingMore && (
-					<p className="mb-2 flex items-center gap-2 px-4 py-1 text-xs text-muted-foreground sm:px-0">
-						<EqualizerBars className="size-3 text-primary" />
-						Loading more…
-					</p>
-				)}
 				<VirtualTrackList count={visible.length} getKey={getRowKey}>
 					{(i) => {
 						const { song, index, key } = visible[i];

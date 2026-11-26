@@ -1,6 +1,6 @@
 import { bytesToBase64 } from "../utils/base64";
 import { buildProxyUrl, NEEDS_BODY_HEADER } from "../utils/tauri";
-import { botguardService } from "./botguard-service";
+import { botguardService, type PlaybackProof } from "./botguard-service";
 
 /** Base64-encodes a request body for transport inside an HTTP header. */
 async function bodyToBase64(body: BodyInit): Promise<string | null> {
@@ -22,6 +22,7 @@ async function bodyToBase64(body: BodyInit): Promise<string | null> {
 export async function youtubeFetch(
 	input: RequestInfo | URL,
 	init?: RequestInit,
+	proof?: PlaybackProof,
 ): Promise<Response> {
 	const urlStr =
 		typeof input === "string"
@@ -48,16 +49,20 @@ export async function youtubeFetch(
 	// dedicated desktop YouTube view rather than the music view's mobile UA.
 	const isYoutube =
 		url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com");
+	const playbackUserAgent = proof
+		? proof.context.client.userAgent
+		: botguardService.playbackUserAgent;
 	if (
 		(isYoutube || url.hostname.endsWith(".googlevideo.com")) &&
-		botguardService.playbackUserAgent &&
+		playbackUserAgent &&
 		!headersObj["User-Agent"] &&
 		!headersObj["user-agent"]
 	) {
-		headersObj["User-Agent"] = botguardService.playbackUserAgent;
+		headersObj["User-Agent"] = playbackUserAgent;
 	}
 	const cookie = isYoutube
-		? (await window.electron.getCookie()) || botguardService.playbackCookie
+		? (await window.electron.getCookie()) ||
+			(proof?.cookie ?? botguardService.playbackCookie)
 		: undefined;
 	if (cookie && !headersObj.cookie && !headersObj.Cookie) {
 		headersObj.Cookie = cookie;

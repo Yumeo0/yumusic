@@ -84,40 +84,59 @@ function sameSong(a: PlaylistTrack, b: PlaylistTrack): boolean {
 	);
 }
 
-/**
- * Reconciles a freshly fetched tracklist with the one already on screen.
- * Entries that still exist keep their previous object (matched by id per
- * occurrence, so duplicates line up) unless something about them changed;
- * removed tracks are dropped and new ones added, all in fetched (server)
- * order.
- */
-export function mergePlaylistSongs(
-	previous: PlaylistTrack[],
-	fetched: PlaylistTrack[],
-): PlaylistTrack[] {
-	if (previous.length === 0) return fetched;
-	const byId = new Map<string, PlaylistTrack[]>();
-	for (const song of previous) {
+/** Reconciles pages in server order, retaining cached track details and identity. */
+export function createPlaylistPageMerge(previous: PlaylistTrack[]) {
+	const byId = new Map<string, number[]>();
+	previous.forEach((song, index) => {
 		const key = song.entryId ? `entry:${song.entryId}` : song.id;
 		const bucket = byId.get(key);
-		if (bucket) bucket.push(song);
-		else byId.set(key, [song]);
-	}
-	return fetched.map((song) => {
-		const candidate = song.entryId
-			? (byId.get(`entry:${song.entryId}`)?.shift() ??
-				byId.get(song.id)?.shift())
-			: byId.get(song.id)?.shift();
-		if (!candidate) return song;
-		// A description-enriched entry keeps its credits across a refresh: the
-		// fresh row has no description, so reapply the previous one to it
-		// instead of losing the parsed title/artist.
-		const enriched = applySongEnrichment(song, {
-			description: candidate.description,
-			upload: candidate.upload || undefined,
-		});
-		return sameSong(candidate, enriched) ? candidate : enriched;
+		if (bucket) bucket.push(index);
+		else byId.set(key, [index]);
 	});
+	const fetched: PlaylistTrack[] = [];
+	const matched = new Set<number>();
+	let boundary = -1;
+	let reordered = false;
+	const takeByVideoId = (id: string) => {
+		const bucket = byId.get(id);
+		if (!bucket) return;
+		// With legacy duplicate rows, prefer the next occurrence beyond the
+		// last match so an earlier removal does not look like a reorder.
+		const next = bucket.findIndex((index) => index > boundary);
+		return bucket.splice(Math.max(0, next), 1)[0];
+	};
+	return {
+		append(batch: PlaylistTrack[]) {
+			for (const song of batch) {
+				const index = song.entryId
+					? (byId.get(`entry:${song.entryId}`)?.shift() ??
+						takeByVideoId(song.id))
+					: takeByVideoId(song.id);
+				if (index === undefined) {
+					fetched.push(song);
+					continue;
+				}
+				matched.add(index);
+				reordered ||= index < boundary;
+				boundary = Math.max(boundary, index);
+				const candidate = previous[index];
+				const enriched = applySongEnrichment(song, {
+					description: candidate.description,
+					upload: candidate.upload || undefined,
+				});
+				fetched.push(sameSong(candidate, enriched) ? candidate : enriched);
+			}
+		},
+		snapshot(complete: boolean): PlaylistTrack[] {
+			if (complete) return [...fetched];
+			// In server order, the last overlap marks how far the refresh has reached.
+			// If cached tracks moved, retain the unmatched rows until all pages arrive.
+			const tail = reordered
+				? previous.filter((_, index) => !matched.has(index))
+				: previous.slice(boundary + 1);
+			return [...fetched, ...tail];
+		},
+	};
 }
 
 /** Removes the redundant "Playlist" prefix from YouTube subtitles. */
@@ -256,7 +275,7 @@ export async function fetchPlaylistEditMeta(
 interface PlaylistLoadOptions {
 	signal?: AbortSignal;
 	onFirstPage?: (view: PlaylistView) => void;
-	onContinuation?: (batch: Song[]) => void;
+	onContinuation?: (batch: PlaylistTrack[]) => void;
 }
 
 /** Resolves the best available snapshot; complete is false if continuation failed. */
@@ -294,7 +313,7 @@ export async function loadPlaylistView(
 	const songs = [...firstSongs];
 	while (current?.has_continuation) {
 		signal?.throwIfAborted();
-		const continuation = await loadPlaylistContinuation(current);
+		const continuation = await loadPlaylistContinuation(current, signal);
 		signal?.throwIfAborted();
 		if (!continuation) return { ...view, songs };
 		current = continuation;

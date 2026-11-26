@@ -3,7 +3,10 @@ import type { PlaylistView } from "../music/playlist";
 import * as youtubeSession from "../youtube/client-session";
 import * as playlistApi from "../youtube/playlist-api";
 import { loadPlaylistLibrary } from "../youtube/playlist-library";
-import { removePlaylistTrack } from "../youtube/playlist-mutations";
+import {
+	hasActivePlaylistTrackEdit,
+	removePlaylistTrack,
+} from "../youtube/playlist-mutations";
 import {
 	addSongToCachedPlaylist,
 	invalidateLibraryCache,
@@ -208,9 +211,11 @@ test("a refused remote removal leaves the cached track intact", async () => {
 		client,
 	);
 	try {
-		await expect(removePlaylistTrack("PLtest", selected, 0)).rejects.toThrow(
-			"Playlist edit failed",
-		);
+		const removal = removePlaylistTrack("PLtest", selected, 0);
+		expect(hasActivePlaylistTrackEdit("VLPLtest")).toBe(true);
+		expect(hasActivePlaylistTrackEdit("PLother")).toBe(false);
+		await expect(removal).rejects.toThrow("Playlist edit failed");
+		expect(hasActivePlaylistTrackEdit("PLtest")).toBe(false);
 		expect(requestedId).toBe("selected");
 		expect(readPlaylistView("PLtest")?.data.songs).toEqual([selected]);
 	} finally {

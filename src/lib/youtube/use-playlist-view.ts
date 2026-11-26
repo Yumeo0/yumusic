@@ -17,8 +17,11 @@ import {
 	writePlaylistView,
 } from "../stores/playlist-cache";
 import { showToast } from "../stores/toast";
-import { loadPlaylistView, mergePlaylistSongs } from "./playlist-data";
-import { removePlaylistTrack } from "./playlist-mutations";
+import { createPlaylistPageMerge, loadPlaylistView } from "./playlist-data";
+import {
+	hasActivePlaylistTrackEdit,
+	removePlaylistTrack,
+} from "./playlist-mutations";
 import { enrichSongRows } from "./song-description";
 import { isAlbumId } from "./youtube.utils";
 
@@ -113,24 +116,38 @@ export function usePlaylistView(
 			}
 
 			if (!displayed.current && cached) publish(forRoute(cached.data, id));
-			const hasContent = displayed.current !== null;
+			const previous = displayed.current;
+			const hasContent = previous !== null;
 			setLoading(!hasContent);
 			setRefreshing(hasContent);
 			const request = new AbortController();
 			const { signal } = request;
 			requestRef.current = request;
 			const revision = playlistRevision(id);
+			const hasLocalChanges = () =>
+				playlistRevision(id) !== revision || hasActivePlaylistTrackEdit(id);
+			const merge = previous && createPlaylistPageMerge(previous.songs);
+			let firstPage: PlaylistView | undefined;
+			const publishPage = (view: PlaylistView, batch: PlaylistTrack[]) => {
+				merge?.append(batch);
+				if (merge && !hasLocalChanges()) {
+					publish({ ...view, songs: merge.snapshot(view.complete) });
+				}
+			};
 			try {
 				const view = await loadPlaylistView(id, {
 					signal,
 					onFirstPage(first) {
-						if (!hasContent) publish(first);
+						firstPage = first;
+						if (merge) publishPage(first, first.songs);
+						else publish(first);
 						setLoading(false);
 						setLoadingMore(!first.complete);
 					},
 					onContinuation(batch) {
 						const current = displayed.current;
-						if (current && !hasContent)
+						if (merge && firstPage) publishPage(firstPage, batch);
+						else if (current)
 							publish({ ...current, songs: [...current.songs, ...batch] });
 					},
 				});
@@ -150,21 +167,20 @@ export function usePlaylistView(
 				}
 				const edited = playlistRevision(id) !== revision;
 				// A refresh started before an edit can still return the old playlist.
-				if (hasContent && current && edited) {
+				if (hasContent && current && hasLocalChanges()) {
 					publishLoaded(current);
 					return;
 				}
-				if (current?.complete && !view.complete) {
+				if (hasContent && current && !view.complete) {
 					showToast("Could not refresh playlist");
 					publishLoaded(current);
 					return;
 				}
-				const next =
-					hasContent && current
-						? { ...view, songs: mergePlaylistSongs(current.songs, view.songs) }
-						: current && edited
-							? { ...current, complete: view.complete }
-							: view;
+				const next = merge
+					? { ...view, songs: merge.snapshot(view.complete) }
+					: current && edited
+						? { ...current, complete: view.complete }
+						: view;
 				writePlaylistView(id, next, { keepComplete: true });
 				publishLoaded(next);
 			} catch (error) {

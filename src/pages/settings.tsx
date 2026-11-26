@@ -1,3 +1,5 @@
+import { Toggle } from "@base-ui/react/toggle";
+import { ToggleGroup } from "@base-ui/react/toggle-group";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
 	ChevronDown,
@@ -15,6 +17,11 @@ import { UpdatesSection } from "@/components/app/updates";
 import { StorageManagerDialog } from "@/components/settings/storage-manager-dialog";
 import { SyncSection } from "@/components/settings/sync-section";
 import { Input } from "@/components/ui/input";
+import {
+	DOWNLOAD_QUALITY_LABELS,
+	DOWNLOAD_QUALITY_TARGET_BITRATES,
+	type DownloadQuality,
+} from "@/lib/downloads/download-quality";
 import { useDownloads } from "@/lib/downloads/downloads";
 import {
 	LYRICS_KIND_LABELS,
@@ -28,12 +35,22 @@ import {
 	CROSSFADE_MAX_SECONDS,
 	CROSSFADE_MIN_SECONDS,
 	clampCrossfadeSeconds,
+	MAX_PARALLEL_DOWNLOADS,
 	useSettings,
 } from "@/lib/stores/settings";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { cn, formatBytes } from "@/lib/utils/utils";
+import { cn, formatBytes, formatDuration } from "@/lib/utils/utils";
 
 const LISTENBRAINZ_TOKEN_URL = "https://listenbrainz.org/settings/#auth-token";
+// https://music.youtube.com/watch?v=lQJQvEsVfZ0
+const DOWNLOAD_EXAMPLE_SONG = {
+	title: "1% Battery Girl (feat. ChiliChill)",
+	durationSeconds: 209,
+};
+const EXAMPLE_ORIGINAL_BITRATE = 256_000;
+const DOWNLOAD_QUALITY_OPTIONS = Object.keys(
+	DOWNLOAD_QUALITY_LABELS,
+) as DownloadQuality[];
 
 interface SettingsPageProps {
 	isLoggedIn: boolean;
@@ -814,6 +831,92 @@ export default function SettingsPage({
 								? ` · ${formatBytes(downloads.totalBytes)}`
 								: ""}
 						</button>
+					</div>
+					<div className="p-4">
+						<p className="text-sm font-medium" id="download-quality-label">
+							Download quality
+						</p>
+						<ToggleGroup<DownloadQuality>
+							aria-describedby="download-quality-description"
+							aria-labelledby="download-quality-label"
+							className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+							onValueChange={([quality]) => {
+								if (quality) update({ downloadQuality: quality });
+							}}
+							value={[settings.downloadQuality]}
+						>
+							{DOWNLOAD_QUALITY_OPTIONS.map((quality) => {
+								const original = quality === "original";
+								const bitrate = original
+									? EXAMPLE_ORIGINAL_BITRATE
+									: DOWNLOAD_QUALITY_TARGET_BITRATES[quality];
+								const size = formatBytes(
+									(bitrate * DOWNLOAD_EXAMPLE_SONG.durationSeconds) / 8,
+								);
+								return (
+									<Toggle
+										className="flex flex-col items-start gap-0.5 rounded-xl bg-foreground/5 px-3 py-2 text-sm text-muted-foreground hover:bg-foreground/10 data-pressed:bg-primary/15 data-pressed:text-primary"
+										key={quality}
+										value={quality}
+									>
+										<span className="font-medium">
+											{DOWNLOAD_QUALITY_LABELS[quality]}
+										</span>
+										<span className="text-xs tabular-nums">
+											{original ? "e.g." : "≈"} {size}
+										</span>
+									</Toggle>
+								);
+							})}
+						</ToggleGroup>
+						<p
+							className="mt-2 text-xs text-muted-foreground"
+							id="download-quality-description"
+						>
+							Estimates for “{DOWNLOAD_EXAMPLE_SONG.title}” (
+							{formatDuration(DOWNLOAD_EXAMPLE_SONG.durationSeconds)}). Actual
+							sizes vary by source. The Original example uses{" "}
+							{EXAMPLE_ORIGINAL_BITRATE / 1000} kbps.
+						</p>
+					</div>
+					<div className="p-4">
+						<div className="flex items-center justify-between gap-6">
+							<label
+								className="text-sm font-medium"
+								htmlFor="parallel-downloads"
+							>
+								Parallel downloads
+							</label>
+							<span className="font-mono text-xs text-muted-foreground tabular-nums">
+								{settings.parallelDownloads}
+							</span>
+						</div>
+						<input
+							aria-describedby="parallel-downloads-description"
+							className="range-fx mt-3 w-full"
+							id="parallel-downloads"
+							max={MAX_PARALLEL_DOWNLOADS}
+							min={1}
+							onChange={(event) =>
+								update({ parallelDownloads: event.currentTarget.valueAsNumber })
+							}
+							step={1}
+							style={
+								{
+									"--vol":
+										(settings.parallelDownloads - 1) /
+										(MAX_PARALLEL_DOWNLOADS - 1),
+								} as CSSProperties
+							}
+							type="range"
+							value={settings.parallelDownloads}
+						/>
+						<p
+							className="mt-2 text-xs text-muted-foreground"
+							id="parallel-downloads-description"
+						>
+							Maximum songs to download at once on this device.
+						</p>
 					</div>
 				</div>
 			</section>
