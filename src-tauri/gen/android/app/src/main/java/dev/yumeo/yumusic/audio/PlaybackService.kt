@@ -16,9 +16,11 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import dev.yumeo.yumusic.MainActivity
@@ -43,6 +45,7 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
     val from: Int,
     val to: Int,
     var durationMs: Long,
+    var incomingAudioStarted: Boolean = false,
     var startPositionMs: Long? = null,
     var progress: Double = 0.0,
   )
@@ -67,6 +70,14 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
         setAudioSessionId(audioSession)
         setHandleAudioBecomingNoisy(true)
         setWakeMode(C.WAKE_MODE_LOCAL)
+        addAnalyticsListener(object : AnalyticsListener {
+          override fun onAudioPositionAdvancing(eventTime: AnalyticsListener.EventTime, playoutStartSystemTimeMs: Long) {
+            val fade = crossfade ?: return
+            if (fade.to != index || eventTime.timeline.isEmpty) return
+            val item = eventTime.timeline.getWindow(eventTime.windowIndex, Timeline.Window()).mediaItem
+            if (item.mediaId == decks[index].id) fade.incomingAudioStarted = true
+          }
+        })
         addListener(object : Player.Listener {
           override fun onEvents(player: Player, events: Player.Events) {
             // Keep frequent gain changes out of JS playback-clock updates.
@@ -205,7 +216,8 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
       clearCrossfade(fade.from)
       return
     }
-    if (incoming.isPlaying && (outgoing.isPlaying || ended)) {
+    // Media3 reports isPlaying before the audio output starts advancing.
+    if (fade.incomingAudioStarted && incoming.isPlaying && (outgoing.isPlaying || ended)) {
       val position = outgoing.currentPosition
       val start = fade.startPositionMs ?: position.also {
         fade.startPositionMs = it

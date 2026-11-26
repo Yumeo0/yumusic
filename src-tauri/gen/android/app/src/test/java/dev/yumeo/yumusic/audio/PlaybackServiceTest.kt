@@ -66,6 +66,12 @@ class PlaybackServiceTest {
       service.command(JSONObject().put("op", "load").put("deck", 1).put("id", "incoming")
         .put("path", file.absolutePath).put("duration", 20).put("volume", 0.25))
       startFade("incoming")
+      awaitPlayback { incoming.isPlaying }
+      val playingPosition = outgoing.currentPosition
+      awaitPlayback { outgoing.currentPosition >= playingPosition + 400 }
+      assertEquals("Keep the outgoing volume until audio output starts", 0.8f, outgoing.volume, 0f)
+      assertEquals(0f, incoming.volume, 0f)
+      incoming.analyticsCollector.onAudioPositionAdvancing(System.currentTimeMillis())
       awaitPlayback { outgoing.volume in 0.2f..0.6f }
       assertSame(outgoing, session.player)
       assertEquals(0.64f, outgoing.volume * outgoing.volume + incoming.volume * incoming.volume, 0.0001f)
@@ -90,6 +96,8 @@ class PlaybackServiceTest {
       service.command(JSONObject().put("op", "seek").put("deck", 1).put("id", "incoming").put("value", 20))
       awaitPlayback { incoming.playbackState == Player.STATE_ENDED }
       service.command(handover)
+      awaitPlayback { natural.isPlaying }
+      natural.analyticsCollector.onAudioPositionAdvancing(System.currentTimeMillis())
       awaitPlayback { natural.isPlaying && natural.volume == 0.8f }
       service.command(JSONObject().put("op", "stop").put("deck", 1).put("id", "incoming"))
       assertEquals("natural", session.player.currentMediaItem!!.mediaId)

@@ -5,12 +5,18 @@
 ### Features
 
 - Added artist images to Discord Rich Presence, with the artist name shown on hover.
+- Added download quality options with file size estimates and a setting for how many songs download at once.
+- Added a Stop button for in-progress playlist downloads.
 
 ### Improvements
 
 - Reduced RAM usage on desktop and Android by using BGUtils to generate playback tokens without rendering a full YouTube page.
+- Improved startup, navigation, and playback loading times.
+- Playlist tracks update as new pages load during a refresh.
 
 ### Bug fixes
+
+- Fixed sudden volume dips at the start of Android crossfades.
 
 ## [1.1.0] - 2026-11-23
 
