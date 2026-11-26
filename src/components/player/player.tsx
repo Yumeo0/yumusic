@@ -25,13 +25,11 @@ import {
 	toggleQueue,
 	useQueueOpen,
 } from "@/lib/player/player-ui";
-import {
-	useMediaQuery,
-	useMediaTime,
-	useSystemVolume,
-} from "@/lib/utils/hooks";
+import { useMediaTime } from "@/lib/player/use-media-time";
+import { useSystemVolume } from "@/lib/player/use-system-volume";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
+import { MOBILE_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 import { AlbumLink } from "../song/album-link";
 import { ArtistLinks } from "../song/artist-link";
 import { DeviceButton } from "./device-picker";
@@ -39,7 +37,7 @@ import { ProgressBar } from "./waveform";
 
 export function Player() {
 	const systemVolume = useSystemVolume();
-	const compact = useMediaQuery("(max-width: 767.98px)");
+	const compact = useMediaQuery(MOBILE_QUERY);
 	const {
 		currentSong,
 		currentAlbum,

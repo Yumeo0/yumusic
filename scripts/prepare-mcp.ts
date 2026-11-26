@@ -25,7 +25,15 @@ export async function prepareMcp(
 	const patchText = (await file(patch).text()).replace(/\r\n/g, "\n");
 	const fingerprint = `${revision}:${hash(patchText)}`;
 	const marker = file(join(destination, ".prepared"));
-	if ((await marker.exists()) && (await marker.text()) === fingerprint) return;
+	const prepared = async () => {
+		try {
+			return (await marker.text()) === fingerprint;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+			throw error;
+		}
+	};
+	if (await prepared()) return;
 	await mkdir(cache, { recursive: true });
 	const staging = await mkdtemp(join(cache, "mcp-prepare-"));
 	try {
@@ -36,15 +44,35 @@ export async function prepareMcp(
 		await shell`git apply --directory=${relativeStaging} ${stagedPatch}`;
 		await rm(stagedPatch);
 		await write(join(staging, ".prepared"), fingerprint);
+		if (await prepared()) return;
+		const backup = join(cache, `mcp-previous-${crypto.randomUUID()}`);
+		let movedOld = false;
 		try {
-			await rename(
-				destination,
-				`${destination}.previous-${crypto.randomUUID()}`,
-			);
+			await rename(destination, backup);
+			movedOld = true;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 		}
-		await rename(staging, destination);
+		try {
+			await rename(staging, destination);
+		} catch (error) {
+			if (await prepared()) {
+				if (movedOld) await rm(backup, { recursive: true, force: true });
+				return;
+			}
+			if (movedOld) {
+				try {
+					await rename(backup, destination);
+				} catch (restoreError) {
+					throw new AggregateError(
+						[error, restoreError],
+						`Could not install the prepared MCP bridge. The previous copy is at ${backup}.`,
+					);
+				}
+			}
+			throw error;
+		}
+		if (movedOld) await rm(backup, { recursive: true, force: true });
 	} finally {
 		await rm(staging, { recursive: true, force: true });
 	}

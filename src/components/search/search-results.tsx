@@ -11,8 +11,9 @@ import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
+import { shuffleFrom } from "@/lib/player/shuffle";
 import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
@@ -20,15 +21,12 @@ import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
 import { channelSearchEntries } from "@/lib/youtube/channel-data";
-import {
-	artistListOf,
-	isVideoId,
-	videoIdOf,
-} from "../../lib/youtube/youtube.utils";
+import { songFromMusicRow } from "@/lib/youtube/music-row";
+import { getYoutubeClient } from "../../lib/youtube/client-session";
+import { isVideoId, videoIdOf } from "../../lib/youtube/youtube.utils";
 import {
 	getArtistMixSongs,
 	getTrackDurations,
-	getYoutubeClient,
 } from "../../lib/youtube/youtube-client";
 
 interface SearchResultsPageProps {
@@ -102,14 +100,6 @@ function cardArtist(
 	const name = section.title?.toString().trim();
 	if (!id?.startsWith("UC") || !name) return null;
 	return { name, id };
-}
-
-/** Whether parsed credits name a real artist, not the unknown placeholder. */
-function hasArtistCredit(artists: Array<{ name: string }>): boolean {
-	return artists.some((artist) => {
-		const name = artist.name?.trim();
-		return !!name && !/^unknown artist$/i.test(name);
-	});
 }
 
 /** Dedupe key of an entry: an entity can appear in several search layouts. */
@@ -247,24 +237,6 @@ function pageType(item: YTNodes.MusicResponsiveListItem): string {
 	);
 }
 
-function toSong(
-	item: YTNodes.MusicResponsiveListItem,
-	/** Card-level artist for rows whose own credit is missing. */
-	fallback?: { name: string; id?: string } | null,
-): Song {
-	const artists = artistListOf(item);
-	const credit = fallback && !hasArtistCredit(artists) ? [fallback] : artists;
-	return {
-		id: videoIdOf(item),
-		title: item.title ?? "Unknown Title",
-		artist: credit.map((artist) => artist.name).join(", "),
-		artistId: credit.find((artist) => artist.id)?.id,
-		artists: credit,
-		thumbnail: hiResThumb(biggestThumb(item.thumbnail?.contents)?.url),
-		duration: item.duration?.text,
-	};
-}
-
 /**
  * Turns the rows of a search response into renderable entries for the active
  * tab. The filtered tabs only carry their own row type; "All" keeps every row
@@ -299,7 +271,10 @@ function toEntries(search: YTMusic.Search, tab: SearchTab): SearchEntry[] {
 						if (!videoIdOf(item)) continue;
 						const row: SearchEntry = {
 							kind: "playable",
-							song: toSong(item, fallback),
+							song: songFromMusicRow(
+								item,
+								fallback ? { artists: [fallback] } : undefined,
+							),
 						};
 						const key = entryKey(row);
 						if (seen.has(key)) continue;
@@ -320,7 +295,13 @@ function toEntries(search: YTMusic.Search, tab: SearchTab): SearchEntry[] {
 					continue;
 				if (tab === "music" && item.item_type !== "song") continue;
 				if (tab === "video" && item.item_type !== "video") continue;
-				add({ kind: "playable", song: toSong(item, fallback) });
+				add({
+					kind: "playable",
+					song: songFromMusicRow(
+						item,
+						fallback ? { artists: [fallback] } : undefined,
+					),
+				});
 				continue;
 			}
 
@@ -382,11 +363,7 @@ async function fillDurations(entries: SearchEntry[]): Promise<void> {
 
 /** Fisher–Yates shuffle, for the artist card's shuffle action. */
 function shuffledSongs(songs: Song[]): Song[] {
-	const shuffled = [...songs];
-	for (let i = shuffled.length - 1; i > 0; i--) {
-		const j = Math.floor(Math.random() * (i + 1));
-		[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-	}
+	const shuffled = shuffleFrom(songs, 0);
 	return shuffled;
 }
 

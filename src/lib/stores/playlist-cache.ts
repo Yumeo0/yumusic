@@ -1,4 +1,6 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
+import type { LibraryPlaylist, PlaylistView } from "../music/playlist";
+import { canonicalPlaylistId, playlistBrowseId } from "../youtube/playlist-id";
 
 /**
  * Auto-sync policy: fetch on first use, persist to localStorage, then only
@@ -24,19 +26,6 @@ export const LIBRARY_CACHE_KEY = "yumusic:library:v7";
 // "Remove from playlist" (v7 could cache a false negative).
 export const PLAYLIST_CACHE_PREFIX = "yumusic:playlist:v12:";
 
-/** Plain-data snapshot of a playlist (JSON-safe for persistence). */
-export interface PlaylistView {
-	/** Route id the snapshot belongs to; absent in pre-v10 caches. */
-	id?: string;
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-	songs: Song[];
-	complete: boolean;
-	/** The playlist belongs to the user and can be edited. */
-	editable: boolean;
-}
-
 export interface CacheEntry<T> {
 	timestamp: number;
 	data: T;
@@ -59,7 +48,7 @@ export function writeCache<T>(key: string, data: T) {
 	} satisfies CacheEntry<T>);
 	try {
 		localStorage.setItem(key, payload);
-		return;
+		return true;
 	} catch {
 		// Quota exceeded. Playlist caches are the big consumers, so evict the
 		// oldest ones and retry; otherwise the write silently disappears and
@@ -68,12 +57,13 @@ export function writeCache<T>(key: string, data: T) {
 			if (!evictOldestPlaylistCache(key)) break;
 			try {
 				localStorage.setItem(key, payload);
-				return;
+				return true;
 			} catch {
 				// still no room — evict another
 			}
 		}
 		console.warn(`[cache] could not store ${key} (storage full?)`);
+		return false;
 	}
 }
 
@@ -132,29 +122,68 @@ export function pruneStaleCacheVersions() {
  * its first fetch already carries the song.
  */
 export function addSongToCachedPlaylist(id: string, song: Song) {
-	for (const key of playlistKeys(id)) {
-		const cached = readCache<PlaylistView>(key);
-		if (cached)
-			writeCache(key, { ...cached.data, songs: [song, ...cached.data.songs] });
-	}
+	const cached = readPlaylistView(id);
+	if (cached)
+		writePlaylistView(id, {
+			...cached.data,
+			songs: [song, ...cached.data.songs],
+		});
 	emitPlaylistChange({ id, type: "add", song });
 }
 
-const rawPlaylistId = (id: string) => (id.startsWith("VL") ? id.slice(2) : id);
 const playlistKeys = (id: string) => [
-	PLAYLIST_CACHE_PREFIX + rawPlaylistId(id),
-	`${PLAYLIST_CACHE_PREFIX}VL${rawPlaylistId(id)}`,
+	PLAYLIST_CACHE_PREFIX + canonicalPlaylistId(id),
+	PLAYLIST_CACHE_PREFIX + playlistBrowseId(id),
 ];
+
+export function readPlaylistView(id: string) {
+	const [key, alias] = playlistKeys(id);
+	const saved = readCache<PlaylistView>(key);
+	const legacy = readCache<PlaylistView>(alias);
+	if (!saved) return legacy;
+	if (!legacy) return saved;
+	if (saved.data.complete !== legacy.data.complete)
+		return saved.data.complete ? saved : legacy;
+	return saved.timestamp >= legacy.timestamp ? saved : legacy;
+}
+
+export function writePlaylistView(
+	id: string,
+	view: PlaylistView,
+	{ keepComplete = false } = {},
+) {
+	if (keepComplete && !view.complete && readPlaylistView(id)?.data.complete)
+		return;
+	const [key, alias] = playlistKeys(id);
+	if (writeCache(key, { ...view, id: canonicalPlaylistId(id) })) {
+		try {
+			localStorage.removeItem(alias);
+		} catch {
+			// Current entries remain readable even when an old alias cannot be removed.
+		}
+	}
+}
+
+export const readLibraryCache = () =>
+	readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+export const writeLibraryCache = (entries: LibraryPlaylist[]) =>
+	writeCache(LIBRARY_CACHE_KEY, entries);
+
 const PLAYLIST_CHANGED_EVENT = "yumusic:playlist-changed";
 export type PlaylistChange = { id: string } & (
 	| { type: "add"; song: Song }
+	| { type: "remove"; songId: string; index: number }
+	| { type: "delete" }
 	| { type: "metadata"; patch: Pick<PlaylistView, "title" | "thumbnail"> }
 );
 const revisions = new Map<string, number>();
 export const playlistRevision = (id: string) =>
-	revisions.get(rawPlaylistId(id)) ?? 0;
+	revisions.get(canonicalPlaylistId(id)) ?? 0;
 function emitPlaylistChange(change: PlaylistChange) {
-	revisions.set(rawPlaylistId(change.id), playlistRevision(change.id) + 1);
+	revisions.set(
+		canonicalPlaylistId(change.id),
+		playlistRevision(change.id) + 1,
+	);
 	window.dispatchEvent(
 		new CustomEvent(PLAYLIST_CHANGED_EVENT, { detail: change }),
 	);
@@ -165,10 +194,43 @@ export function subscribeToPlaylistChanges(
 ) {
 	const receive = (event: Event) => {
 		const change = (event as CustomEvent<PlaylistChange>).detail;
-		if (rawPlaylistId(change.id) === rawPlaylistId(id)) listener(change);
+		if (canonicalPlaylistId(change.id) === canonicalPlaylistId(id))
+			listener(change);
 	};
 	window.addEventListener(PLAYLIST_CHANGED_EVENT, receive);
 	return () => window.removeEventListener(PLAYLIST_CHANGED_EVENT, receive);
+}
+
+export function applyPlaylistChange(
+	view: PlaylistView,
+	change: Exclude<PlaylistChange, { type: "delete" }>,
+): PlaylistView {
+	switch (change.type) {
+		case "metadata":
+			return { ...view, ...change.patch };
+		case "add":
+			return { ...view, songs: [change.song, ...view.songs] };
+		case "remove": {
+			const index =
+				view.songs[change.index]?.id === change.songId
+					? change.index
+					: view.songs.findIndex((song) => song.id === change.songId);
+			return index < 0
+				? view
+				: { ...view, songs: view.songs.filter((_, i) => i !== index) };
+		}
+	}
+}
+
+export function removeSongFromCachedPlaylist(
+	id: string,
+	songId: string,
+	index: number,
+) {
+	const change = { id, type: "remove", songId, index } as const;
+	const cached = readPlaylistView(id);
+	if (cached) writePlaylistView(id, applyPlaylistChange(cached.data, change));
+	emitPlaylistChange(change);
 }
 
 /** Apply the confirmed edit directly; an immediate browse can still be stale. */
@@ -176,19 +238,13 @@ export function patchCachedPlaylistMetadata(
 	id: string,
 	patch: Pick<PlaylistView, "title" | "thumbnail">,
 ) {
-	for (const key of playlistKeys(id)) {
-		const cached = readCache<PlaylistView>(key);
-		if (cached) writeCache(key, { ...cached.data, ...patch });
-	}
-	const library =
-		readCache<Array<{ id: string; title: string; thumbnail?: string | null }>>(
-			LIBRARY_CACHE_KEY,
-		);
+	const cached = readPlaylistView(id);
+	if (cached) writePlaylistView(id, { ...cached.data, ...patch });
+	const library = readLibraryCache();
 	if (library)
-		writeCache(
-			LIBRARY_CACHE_KEY,
+		writeLibraryCache(
 			library.data.map((item) =>
-				rawPlaylistId(item.id) === rawPlaylistId(id)
+				canonicalPlaylistId(item.id) === canonicalPlaylistId(id)
 					? { ...item, ...patch }
 					: item,
 			),
@@ -199,18 +255,23 @@ export function patchCachedPlaylistMetadata(
 
 /** Drops a deleted playlist from the library list and its track cache. */
 export function removePlaylistFromCaches(id: string) {
-	const cached = readCache<Array<{ id: string }>>(LIBRARY_CACHE_KEY);
-	if (cached) {
-		writeCache(
-			LIBRARY_CACHE_KEY,
-			cached.data.filter((playlist) => playlist.id !== id),
+	const canonicalId = canonicalPlaylistId(id);
+	const cached = readLibraryCache();
+	if (cached)
+		writeLibraryCache(
+			cached.data.filter(
+				(playlist) => canonicalPlaylistId(playlist.id) !== canonicalId,
+			),
 		);
+	for (const key of playlistKeys(id)) {
+		try {
+			localStorage.removeItem(key);
+		} catch {
+			// best-effort
+		}
 	}
-	try {
-		localStorage.removeItem(PLAYLIST_CACHE_PREFIX + id);
-	} catch {
-		// best-effort
-	}
+	emitPlaylistChange({ id, type: "delete" });
+	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
 }
 
 /**
@@ -223,10 +284,9 @@ export function patchCachedPlaylistSongs(
 	updates: ReadonlyMap<string, Song>,
 ) {
 	if (updates.size === 0) return;
-	const key = PLAYLIST_CACHE_PREFIX + id;
-	const cached = readCache<PlaylistView>(key);
+	const cached = readPlaylistView(id);
 	if (!cached) return;
-	writeCache(key, {
+	writePlaylistView(id, {
 		...cached.data,
 		songs: cached.data.songs.map((song) => updates.get(song.id) ?? song),
 	});
@@ -250,22 +310,12 @@ export function subscribeToLibraryChanges(listener: () => void): () => void {
 	return () => window.removeEventListener(LIBRARY_CHANGED_EVENT, listener);
 }
 
-/** Tracks from a playlist-page visit less than a sync interval ago. */
-export function readCachedPlaylistSongs(id: string): Song[] | null {
-	const cached = readCache<PlaylistView>(PLAYLIST_CACHE_PREFIX + id);
-	if (!cached || cached.data.songs.length === 0) return null;
-	if (Date.now() - cached.timestamp >= SYNC_INTERVAL_MS) return null;
-	return cached.data.songs;
-}
-
-/**
- * Replaces the stored tracklist after a fresh fetch, keeping the cached
- * metadata (title, editable flag, …) intact. Playlists never visited are
- * left alone — there is no metadata to keep.
- */
-export function refreshCachedPlaylistSongs(id: string, songs: Song[]) {
-	const key = PLAYLIST_CACHE_PREFIX + id;
-	const cached = readCache<PlaylistView>(key);
-	if (!cached) return;
-	writeCache(key, { ...cached.data, songs, complete: true });
+export function readFreshPlaylistView(id: string) {
+	const cached = readPlaylistView(id);
+	if (
+		!cached?.data.complete ||
+		Date.now() - cached.timestamp >= SYNC_INTERVAL_MS
+	)
+		return null;
+	return cached.data;
 }

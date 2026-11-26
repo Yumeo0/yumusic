@@ -2,8 +2,8 @@ import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
 import { Headphones } from "lucide-react";
 import { useListenRoom } from "@/lib/listen-together/room";
-import { useMediaQuery } from "@/lib/utils/hooks";
 import { cn } from "@/lib/utils/utils";
+import { DESKTOP_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 
 export const ROOM_DESKTOP_QUERY = "(min-width: 768px)";
 /** Player triggers share the responsive app-wide room surface. */
@@ -11,7 +11,7 @@ export const roomDialogHandle = Dialog.createHandle();
 export const roomPopoverHandle = Popover.createHandle();
 
 export function RoomButton() {
-	const desktop = useMediaQuery(ROOM_DESKTOP_QUERY);
+	const desktop = useMediaQuery(DESKTOP_QUERY);
 	const room = useListenRoom();
 	const requests = room.pending.length + room.requests.length;
 	const trigger = (

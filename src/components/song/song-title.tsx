@@ -3,8 +3,8 @@ import {
 	joinArtists,
 	remixAuthors,
 	type TitleTag,
-	useFormatTitle,
 } from "@/lib/utils/title";
+import { useFormatTitle } from "@/lib/utils/use-song-title";
 
 const GENERIC_TAG_PATTERNS: Record<string, RegExp> = {
 	cover: /\bcover(?:ed|s)?\b|[歌弾踊叩]ってみた/i,

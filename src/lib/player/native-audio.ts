@@ -227,9 +227,12 @@ export class NativeAudioElement extends EventTarget {
 	}
 	load() {
 		if (this.src) return;
-		void this.command("stop").catch(this.failed);
+		void this.command("stop").catch((error) =>
+			console.warn("[audio] Could not stop the previous track:", error),
+		);
 		this.id = "";
 		this.crossfade = null;
+		this.error = null;
 		this.readyState = 0;
 		this.paused = true;
 	}

@@ -1,22 +1,6 @@
 import { proxiedFetch, USER_AGENT } from "../utils/tauri";
 import { cleanSearchTitle } from "../utils/title";
-
-export interface LrcLine {
-	/** Start time in seconds */
-	time: number;
-	text: string;
-	/** Word/syllable timings, when the provider offers them. */
-	words?: LrcWord[];
-}
-
-/** A word/syllable timing within a synced line (karaoke highlighting). */
-export interface LrcWord {
-	/** Start time in seconds. */
-	time: number;
-	/** End time in seconds, when the provider knows it. */
-	end?: number;
-	text: string;
-}
+import type { LrcLine } from "./lyrics";
 
 const TIME_TOKEN = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
 

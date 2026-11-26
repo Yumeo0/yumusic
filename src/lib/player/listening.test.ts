@@ -32,7 +32,7 @@ describe("listeningSession", () => {
 		listeningSession.start("repeated-track", 60);
 		listeningSession.tick(30);
 		listeningSession.reset();
-		expect(listeningSession.elapsed).toBe(0);
+
 		listeningSession.start("repeated-track", 60);
 		listeningSession.tick(30);
 		expect(events).toEqual([
@@ -66,21 +66,27 @@ describe("listeningSession", () => {
 	});
 
 	test("re-arming the same track keeps its accumulated listening", () => {
+		const { events, stop } = recordEvents();
 		listeningSession.start("track-c", 200);
-		for (let i = 0; i < 30; i++) listeningSession.tick();
+		listeningSession.tick(30);
 		listeningSession.start("track-c", 200);
-		expect(listeningSession.elapsed).toBe(30);
+		listeningSession.tick(69);
+		expect(events).toEqual(["established"]);
+		listeningSession.tick();
+		expect(events).toEqual(["established", "scrobbled"]);
+		stop();
 	});
 
 	test("a new track resets progress and events", () => {
 		const { events, stop } = recordEvents();
 		listeningSession.start("track-d", 200);
 		for (let i = 0; i < 30; i++) listeningSession.tick();
-		expect(listeningSession.elapsed).toBe(30);
+
 		listeningSession.start("track-e", 200);
-		expect(listeningSession.elapsed).toBe(0);
-		for (let i = 0; i < 110; i++) listeningSession.tick();
-		// The second "established" proves the new track re-armed the session.
+
+		listeningSession.tick(99);
+		expect(events).toEqual(["established", "established"]);
+		listeningSession.tick();
 		expect(events).toEqual(["established", "established", "scrobbled"]);
 		stop();
 	});

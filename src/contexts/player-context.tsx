@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
 	createContext,
 	type ReactNode,
@@ -10,14 +9,11 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { Constants } from "youtubei.js";
 import type { Innertube, YT } from "youtubei.js/web";
-import {
-	type DownloadEntry,
-	getDownloadEntry,
-} from "@/lib/downloads/downloads";
+import type { DownloadEntry } from "@/lib/downloads/downloads";
 import {
 	actionCategory,
+	queueKey,
 	type RoomAction,
 } from "@/lib/listen-together/guest-permissions";
 import {
@@ -28,12 +24,30 @@ import {
 	useRoomRole,
 	useRoomUsername,
 } from "@/lib/listen-together/room";
+import type { Song } from "@/lib/music/song";
 import { LISTEN_GRACE_SECONDS, listeningSession } from "@/lib/player/listening";
 import { NativeAudioElement, nativeAudio } from "@/lib/player/native-audio";
+import {
+	type Deck,
+	type LoadedStream,
+	mountLocalDeck,
+	mountStreamDeck,
+	resetDeck,
+	waitForDeckData,
+} from "@/lib/player/playback-deck";
 import { nextQueueIndex, type RepeatMode } from "@/lib/player/repeat";
-import { mountSabrAudio } from "@/lib/player/sabr-audio";
+import {
+	SHARED_AUTOPLAY_LIMIT,
+	SHARED_QUEUE_LIMIT,
+	sharedQueueWindow,
+} from "@/lib/player/shared-playback";
 import { shuffleFrom } from "@/lib/player/shuffle";
 import { sleepTimer, useSleepTimer } from "@/lib/player/sleep-timer";
+import {
+	findDownloadedTrack,
+	resolveStreamTrack,
+} from "@/lib/player/track-source";
+import { useSystemVolume } from "@/lib/player/use-system-volume";
 import {
 	DEFAULT_VOLUME,
 	MAX_VOLUME,
@@ -44,13 +58,9 @@ import {
 	getSettings,
 	useSettings,
 } from "@/lib/stores/settings";
-import {
-	rememberSongVersion,
-	songVersionReplacement,
-} from "@/lib/stores/song-versions";
+import { songVersionReplacement } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { applySongDescription } from "@/lib/utils/description";
-import { useSystemVolume } from "@/lib/utils/hooks";
 import { IS_ANDROID } from "@/lib/utils/tauri";
 import {
 	biggestThumb,
@@ -59,46 +69,17 @@ import {
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
 import { applyArtistCredits } from "@/lib/youtube/artist-credits";
-import { rememberSongDescription } from "@/lib/youtube/song-description";
-import { applySongVersion } from "@/lib/youtube/song-version";
+import {
+	reportPlayback,
+	reportWatchTime,
+	WATCHTIME_PING_MS,
+} from "@/lib/youtube/watch-history";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	getAutoplaySongs,
-	getPlaybackStream,
-	getSongStream,
-	getSongVersion,
 	getTrackMeta,
 	type TrackMeta,
 } from "@/lib/youtube/youtube-client";
-
-export interface Song {
-	id: string;
-	title: string;
-	artist: string;
-	/** Room username that added this particular queue entry. */
-	addedBy?: string;
-	/** Channel id (UC…) of the primary artist, when known */
-	artistId?: string;
-	/** All artists with their channel ids, when known */
-	artists?: Array<{ name: string; id?: string }>;
-	thumbnail: string;
-	duration?: string;
-	/** Uploader description; its credits refine the title and artist. */
-	description?: string;
-	/**
-	 * Uploader video without a music release behind it (no album). Its title
-	 * is the uploader's own string — e.g. "かめりあ - Towards the Horizon" —
-	 * and is shown as-is instead of being read as an original/translation
-	 * pair. Undefined means "not checked" (normal parsing).
-	 */
-	upload?: boolean;
-	/**
-	 * Channel ids for credited names from the description ("Vocal：湊あくあ"
-	 * next to a channel link), so featured performers link their artist page
-	 * like the primary artist does.
-	 */
-	creditIds?: Array<{ name: string; id: string }>;
-}
 
 /**
  * Playback state/actions. Deliberately does NOT contain the rapidly-changing
@@ -114,8 +95,7 @@ interface PlayerContextType {
 	play: (song: Song, queue?: Song[]) => void;
 	/** Replaces the queue with `songs` and starts playing at `index`. */
 	playQueue: (songs: Song[], index: number) => void;
-	videoInfo: YT.VideoInfo | null;
-	innertube: Innertube | null;
+	playingVideoId: string | null;
 	queue: Song[];
 	currentIndex: number;
 	/** Upcoming radio tracks shown below the queue's "Autoplay" separator. */
@@ -140,7 +120,6 @@ interface PlayerContextType {
 	previous: () => void;
 	hasNext: boolean;
 	hasPrevious: boolean;
-	videoContainerRef: RefObject<HTMLDivElement | null> | null;
 	videoElementRef: RefObject<HTMLVideoElement | null> | null;
 	/**
 	 * Authoritative track length in seconds from YouTube metadata (0 when
@@ -178,68 +157,6 @@ const PlayerVolumeContext = createContext<PlayerVolumeContextType | undefined>(
 	undefined,
 );
 
-/** How often playback reports its watched range to YouTube's stats endpoint. */
-const WATCHTIME_PING_MS = 15_000;
-
-// The stats endpoints identify the client that played the song. Report as the
-// YouTube Music web player (WEB_REMIX), not plain YouTube, and post to the
-// music host — matching music.youtube.com's own playback pings.
-const STATS_CLIENT = {
-	client_name: Constants.CLIENTS.YTMUSIC.NAME,
-	client_version: Constants.CLIENTS.YTMUSIC.VERSION,
-};
-
-function musicStatsUrl(url: string): string {
-	return url.replace(/^https:\/\/s\.youtube\.com/, "https://music.youtube.com");
-}
-
-/**
- * Registers the play with YouTube's playback stats — the same ping the web
- * player sends — so the song lands in the account's watch history.
- */
-function reportPlayback(videoInfo: YT.VideoInfo) {
-	const tracking = videoInfo.page[0]?.playback_tracking;
-	if (!tracking?.videostats_playback_url) return;
-	void videoInfo.actions
-		.stats(musicStatsUrl(tracking.videostats_playback_url), STATS_CLIENT, {
-			cpn: videoInfo.cpn,
-			c: STATS_CLIENT.client_name,
-			fmt: "251",
-			rtn: "0",
-			rt: "0",
-		})
-		.catch((error) => {
-			console.warn("[YuMusic] playback ping failed:", error);
-		});
-}
-
-/**
- * Reports a watched media segment (`[start, end]`) to YouTube's watch-time
- * endpoint — the periodic ping the web player sends so the history entry
- * keeps its resume position. `final` closes the playback session.
- */
-function reportWatchTime(
-	videoInfo: YT.VideoInfo,
-	start: number,
-	end: number,
-	final: boolean,
-) {
-	const tracking = videoInfo.page[0]?.playback_tracking;
-	if (!tracking?.videostats_watchtime_url) return;
-	void videoInfo.actions
-		.stats(musicStatsUrl(tracking.videostats_watchtime_url), STATS_CLIENT, {
-			cpn: videoInfo.cpn,
-			c: STATS_CLIENT.client_name,
-			st: start.toFixed(3),
-			et: end.toFixed(3),
-			cmt: end.toFixed(3),
-			final: final ? "1" : "0",
-		})
-		.catch((error) => {
-			console.warn("[YuMusic] watch-time ping failed:", error);
-		});
-}
-
 /**
  * Seconds before the end of a track at which the next one starts buffering
  * on the idle deck. Generous enough for the metadata request, PoToken and
@@ -247,39 +164,6 @@ function reportWatchTime(
  * still not ready when the track ends falls back to the normal load path.
  */
 const CROSSFADE_PRELOAD_LEAD_SECONDS = 15;
-
-/**
- * One of the two hidden media elements the player renders and swaps between.
- * The idle deck buffers the next track so a crossfade can overlap the two.
- */
-interface Deck {
-	/** The hidden media element this deck outputs through. */
-	ref: RefObject<HTMLVideoElement | null>;
-	/**
-	 * Video id mounted on the element (a load in progress counts). Null while
-	 * idle; the guard that keeps a crossfade promotion from re-loading the
-	 * track that is already mounted.
-	 */
-	videoId: string | null;
-	/** True once audio chunks have been appended and the deck can play. */
-	ready: boolean;
-	/** Aborts this deck's reader and tears down its MediaSource. */
-	stop: (() => void) | null;
-	/** Invalidates async work after a teardown or a newer load. */
-	generation: number;
-}
-
-interface LoadedStream {
-	videoInfo: YT.VideoInfo;
-	innertube: Innertube;
-}
-
-interface MountOptions {
-	/** Start playback as soon as the first chunks land (normal loads). */
-	autoPlay: boolean;
-	/** Called once the deck is buffered enough to play (crossfade preloads). */
-	onReady?: () => void;
-}
 
 /** Crossfade runtime state; null while no crossfade is in flight. */
 interface CrossfadeState {
@@ -360,12 +244,8 @@ function localControl<T extends unknown[]>(
 	};
 }
 function selectionAction(songs: Song[], index: number): RoomAction {
-	const start = Math.max(0, index - 100);
-	return {
-		type: "playQueue",
-		songs: songs.slice(start, start + 300),
-		index: index - start,
-	};
+	const window = sharedQueueWindow(songs, index);
+	return { type: "playQueue", songs: window.queue, index: window.index };
 }
 
 function attributeLocal(song: Song): Song {
@@ -439,7 +319,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const [autoplayTracks, setAutoplayTracks] = useState<Song[]>([]);
 	const [history, setHistory] = useState<Song[]>([]);
 	const queueSheetRef = useRef<HTMLElement | null>(null);
-	const [videoContainerRef] = useState<RefObject<HTMLDivElement> | null>(null);
 	const deckARef = useRef<HTMLVideoElement | null>(null);
 	const deckBRef = useRef<HTMLVideoElement | null>(null);
 	const endedHandlerRef = useRef<(index: number) => void>(() => undefined);
@@ -454,8 +333,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const decksRef = useRef<Deck[]>([]);
 	if (decksRef.current.length === 0) {
 		decksRef.current = [
-			{ ref: deckARef, videoId: null, ready: false, stop: null, generation: 0 },
-			{ ref: deckBRef, videoId: null, ready: false, stop: null, generation: 0 },
+			{ ref: deckARef, videoId: null, ready: false, mount: null },
+			{ ref: deckBRef, videoId: null, ready: false, mount: null },
 		];
 	}
 	const crossfadeRef = useRef<CrossfadeState | null>(null);
@@ -477,6 +356,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const volume = volumeForDevice(preferredVolume, systemVolume);
 
 	/** Read by the fade loop so volume changes mid-fade stay respected. */
+	const getVolume = useCallback(() => volumeRef.current, []);
 	const volumeRef = useRef(volume);
 	volumeRef.current = volume;
 
@@ -503,188 +383,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		}
 	}, []);
 
-	/** Aborts a deck's stream and detaches its media element. Idempotent. */
-	const teardownDeck = useCallback((deck: Deck) => {
-		deck.generation += 1;
-		deck.videoId = null;
-		deck.ready = false;
-		deck.stop?.();
-		deck.stop = null;
-		const videoEl = deck.ref.current;
-		if (videoEl) {
-			// Native load() sends stop. A separate pause would undo a completed fade.
-			if (!nativeAudio(videoEl)) videoEl.pause();
-			if (videoEl.src) {
-				videoEl.removeAttribute("src");
-				videoEl.load();
-			}
-		}
-	}, []);
-
-	/**
-	 * googlevideo's SabrStream manages the SABR session. Its audio is fed
-	 * straight into a MediaSource — the app is audio-only, so there's no
-	 * manifest and no Shaka. Buffering is limited to a short window and seeks
-	 * outside that window restart SABR at the requested position.
-	 *
-	 * Mounts onto either deck so the idle one can buffer the next track for
-	 * a crossfade while the active one keeps playing.
-	 */
-	const mountTrack = useCallback(
-		async (deck: Deck, result: LoadedStream, options: MountOptions) => {
-			const { videoInfo, innertube } = result;
-			const videoEl = deck.ref.current;
-			const videoId = videoInfo.basic_info.id;
-			if (!videoEl || !videoId || !videoInfo.streaming_data) return;
-			if (videoInfo.basic_info.is_live || videoInfo.basic_info.is_post_live_dvr)
-				return;
-			teardownDeck(deck);
-			deck.videoId = videoId;
-			const generation = deck.generation;
-			const controller = new AbortController();
-			deck.stop = () => controller.abort();
-			if (deck === decksRef.current[activeDeckRef.current])
-				videoElementRef.current = videoEl;
-			try {
-				await mountSabrAudio(videoEl, videoInfo, innertube, {
-					signal: controller.signal,
-					autoPlay: options.autoPlay,
-					onReady: () => {
-						deck.ready = true;
-						if (options.autoPlay) {
-							videoEl.volume = volumeRef.current;
-							void videoEl.play().catch((error) => {
-								if (error.name !== "AbortError")
-									console.error("[PlayerContext] Auto-playback failed:", error);
-							});
-						}
-						options.onReady?.();
-					},
-				});
-			} catch (error) {
-				if (!controller.signal.aborted && deck.generation === generation) {
-					console.error("[PlayerContext] Load video error:", error);
-					deck.videoId = null;
-					deck.ready = false;
-				}
-			}
-		},
-		[teardownDeck],
-	);
-
-	/**
-	 * Mounts a downloaded audio file onto a deck. Resolves `true` once the
-	 * file has metadata (preloads) or playback began (normal loads), and
-	 * `false` when the stored file cannot be read, so callers can fall back
-	 * to streaming it instead.
-	 */
-	const mountLocalTrack = useCallback(
-		(
-			deck: Deck,
-			song: Song,
-			entry: DownloadEntry,
-			options: MountOptions,
-		): Promise<boolean> => {
-			const videoEl = deck.ref.current;
-			if (!videoEl) return Promise.resolve(false);
-			const native = nativeAudio(videoEl);
-			if (native) {
-				teardownDeck(deck);
-				const controller = new AbortController();
-				deck.stop = () => controller.abort();
-				deck.videoId = song.id;
-				return native
-					.mountFile(
-						entry.path,
-						parseDuration(song.duration),
-						controller.signal,
-						options.autoPlay,
-					)
-					.then(() => {
-						if (controller.signal.aborted) return true;
-						deck.ready = true;
-						options.onReady?.();
-						if (options.autoPlay) {
-							native.volume = volumeRef.current;
-							void native.play().catch(() => undefined);
-						}
-						return true;
-					})
-					.catch((error: unknown) => {
-						if (controller.signal.aborted) return true;
-						console.warn(
-							"[PlayerContext] Native downloaded playback failed:",
-							error,
-						);
-						return false;
-					});
-			}
-
-			teardownDeck(deck);
-			deck.generation += 1;
-			const generation = deck.generation;
-			deck.videoId = song.id;
-			if (deck === decksRef.current[activeDeckRef.current]) {
-				videoElementRef.current = videoEl;
-			}
-
-			return new Promise<boolean>((resolve) => {
-				let settled = false;
-				const finish = (mounted: boolean) => {
-					if (settled) return;
-					settled = true;
-					videoEl.removeEventListener("error", onError);
-					resolve(mounted);
-				};
-				const onError = () => {
-					const mediaError = videoEl.error;
-					console.warn(
-						"[PlayerContext] Downloaded file failed to play; keeping it for a later retry:",
-						entry.path,
-						videoEl.src,
-						mediaError
-							? `media error code ${mediaError.code}`
-							: "no media error",
-					);
-					if (deck.generation === generation) {
-						deck.videoId = null;
-						deck.ready = false;
-					}
-					finish(false);
-				};
-
-				videoEl.addEventListener("error", onError, { once: true });
-
-				const onLoaded = () => {
-					if (deck.generation !== generation) return;
-					deck.ready = true;
-					options.onReady?.();
-				};
-				if (videoEl.readyState >= 1) onLoaded();
-				else
-					videoEl.addEventListener("loadedmetadata", onLoaded, { once: true });
-
-				videoEl.volume = volumeRef.current;
-				videoEl.src = convertFileSrc(entry.path);
-				videoEl.load();
-				if (options.autoPlay) {
-					videoEl
-						.play()
-						.then(() => finish(true))
-						.catch((error) => {
-							// Pauses and newer loads interrupt play(); only real
-							// media failures should trigger the streaming fallback.
-							if ((error as Error).name === "AbortError") finish(true);
-							else onError();
-						});
-				} else {
-					finish(true);
-				}
-			});
-		},
-		[teardownDeck],
-	);
-
 	// Load the current track onto the active deck whenever playback state
 	// points at a track that deck does not already have mounted. A crossfade
 	// promotion mounted its track on the inactive deck beforehand, so this
@@ -693,12 +391,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		if (!videoInfo || !innertube) return;
 		const deck = decksRef.current[activeDeckRef.current];
 		if (!deck || deck.videoId === videoInfo.basic_info.id) return;
-		void mountTrack(
+		void mountStreamDeck(
 			deck,
 			{ videoInfo, innertube },
-			{ autoPlay: isPlaying && listenRoom.getSnapshot().role !== "guest" },
+			{
+				autoPlay: isPlaying && listenRoom.getSnapshot().role !== "guest",
+				volume: getVolume,
+			},
 		);
-	}, [videoInfo, innertube, isPlaying, mountTrack]);
+	}, [videoInfo, innertube, isPlaying, getVolume]);
 
 	/** Stops any in-flight crossfade and frees the preloaded deck. */
 	const abortCrossfade = useCallback(() => {
@@ -712,8 +413,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		// The fade may have dimmed the still-playing deck; restore its level.
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
 		if (activeEl) activeEl.volume = volumeRef.current;
-		teardownDeck(decksRef.current[state.deckIndex]);
-	}, [teardownDeck]);
+		resetDeck(decksRef.current[state.deckIndex]);
+	}, []);
 
 	const stopForSleepTimer = useCallback(
 		(endedAt?: number) => {
@@ -806,15 +507,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setIsPlaying(true);
 
 			// The old track is done; free its stream and media element.
-			teardownDeck(oldDeck);
+			resetDeck(oldDeck);
 		},
-		[
-			abortCrossfade,
-			currentIndex,
-			queue.length,
-			stopForSleepTimer,
-			teardownDeck,
-		],
+		[abortCrossfade, currentIndex, queue.length, stopForSleepTimer],
 	);
 
 	/**
@@ -848,7 +543,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					}
 					// Let the normal end handler load the next track if the overlap failed.
 					state.phase = "failed";
-					teardownDeck(decksRef.current[state.deckIndex]);
+					resetDeck(decksRef.current[state.deckIndex]);
 					if (currentNative.ended)
 						endedHandlerRef.current(activeDeckRef.current);
 				});
@@ -895,7 +590,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			state.advance = advance;
 			advance();
 		},
-		[abortCrossfade, commitCrossfade, teardownDeck],
+		[abortCrossfade, commitCrossfade],
 	);
 
 	/**
@@ -903,16 +598,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	 * copy on screen; such titles are the uploader's own string and are shown
 	 * as-is. Resolves to the marked song for the caller's own copy.
 	 */
-	const markUpload = useCallback(async (song: Song): Promise<Song> => {
-		const meta = await getTrackMeta(song.id).catch(() => null);
-		if (!meta || meta.album) return song;
-		const mark = (entry: Song): Song =>
-			entry.id === song.id ? { ...entry, upload: true } : entry;
-		setCurrentSong((prev) => (prev ? mark(prev) : prev));
-		setQueueState((prev) => prev.map(mark));
-		setAutoplayTracks((prev) => prev.map(mark));
-		return { ...song, upload: true };
-	}, []);
+	const markUpload = useCallback(
+		async (song: Song, isCurrent: () => boolean): Promise<Song> => {
+			const meta = await getTrackMeta(song.id).catch(() => null);
+			if (!isCurrent() || !meta || meta.album) return song;
+			const mark = (entry: Song): Song =>
+				entry.id === song.id ? { ...entry, upload: true } : entry;
+			setCurrentSong((prev) => (prev ? mark(prev) : prev));
+			setQueueState((prev) => prev.map(mark));
+			setAutoplayTracks((prev) => prev.map(mark));
+			return { ...song, upload: true };
+		},
+		[],
+	);
 
 	/**
 	 * Buffers `nextSong` on the idle deck so it is ready to fade in. Called
@@ -931,8 +629,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			const deckIndex = activeDeckRef.current === 0 ? 1 : 0;
 			const deck = decksRef.current[deckIndex];
 			if (!deck) return;
-			// Stored files skip the stream session entirely.
-			const localEntry = getDownloadEntry(nextSong.id) ?? null;
+			const local = findDownloadedTrack(nextSong);
+			const localEntry = local?.entry ?? null;
 			if (!localEntry && !isVideoId(nextSong.id)) return;
 
 			const state: CrossfadeState = {
@@ -940,10 +638,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				deckIndex,
 				fromSong,
 				localEntry,
-				// A stored file carries the description saved with the download.
-				nextSong: localEntry?.description
-					? applySongDescription(nextSong, localEntry.description)
-					: nextSong,
+				nextSong: local?.song ?? nextSong,
 				originalId: nextSong.id,
 				phase: "preload",
 				promote,
@@ -956,44 +651,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			if (localEntry) {
 				// The idle deck just needs the file's metadata; the scheduler
 				// starts the fade once the window opens.
-				void mountLocalTrack(deck, state.nextSong, localEntry, {
+				void mountLocalDeck(deck, state.nextSong, localEntry, {
 					autoPlay: false,
+					volume: getVolume,
 					onReady: () => updateCrossfadeRef.current(),
 				});
 				return;
 			}
 
 			try {
-				const result = await getPlaybackStream(state.nextSong.id);
-				if (crossfadeRef.current !== state) return;
-				// The stream may be the album track of a music video: the
-				// incoming track becomes that song before the handover.
-				if (result.videoId !== state.nextSong.id) {
-					const version = await getSongVersion(state.nextSong.id);
-					if (crossfadeRef.current !== state) return;
-					if (version) {
-						const played = applySongVersion(state.nextSong, version);
-						rememberSongVersion(state.nextSong, played);
-						state.nextSong = played;
-					}
-				}
-				// The player response carries the uploader description; keep it
-				// and let its credits refine the title/artist before the handover.
-				const description =
-					result.videoInfo.basic_info.short_description?.trim();
-				if (description) {
-					rememberSongDescription(state.nextSong.id, description);
-					state.nextSong = applySongDescription(state.nextSong, description);
-				}
-				// Uploader videos without a release keep their raw titles.
-				state.nextSong = await markUpload(state.nextSong);
-				if (crossfadeRef.current !== state) return;
-				state.result = {
-					videoInfo: result.videoInfo,
-					innertube: result.innertube,
-				};
-				await mountTrack(deck, state.result, {
+				const isCurrent = () => crossfadeRef.current === state;
+				const { stream, song } = await resolveStreamTrack(nextSong, {
+					isCurrent,
+				});
+				state.nextSong = await markUpload(song, isCurrent);
+				if (!isCurrent()) return;
+				state.result = stream;
+				await mountStreamDeck(deck, state.result, {
 					autoPlay: false,
+					volume: getVolume,
 					onReady: () => updateCrossfadeRef.current(),
 				});
 				// If the track is already inside the fade window, start now;
@@ -1003,10 +679,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				// Leave the state in place on failure: the scheduler then
 				// stops retrying the same fetch on every timeupdate, and the
 				// track's end falls back to the normal load path.
-				console.error("[PlayerContext] Crossfade preload failed:", error);
+				if (crossfadeRef.current === state)
+					console.error("[PlayerContext] Crossfade preload failed:", error);
 			}
 		},
-		[markUpload, mountLocalTrack, mountTrack],
+		[markUpload, getVolume],
 	);
 
 	const nextTransitionTrack = useCallback(
@@ -1272,27 +949,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			abortCrossfade();
 			const request = ++loadRequestRef.current;
 			const oldDeck = decksRef.current[activeDeckRef.current];
-			if (oldDeck) teardownDeck(oldDeck);
+			if (oldDeck) resetDeck(oldDeck);
 			setIsPlaying(false);
 			// A stored file carries the description saved with the download.
-			const localEntry = getDownloadEntry(song.id);
-			if (localEntry?.description) {
-				song = applySongDescription(song, localEntry.description);
-			}
+			const isCurrent = () => request === loadRequestRef.current;
+			const local = findDownloadedTrack(song);
+			if (local) song = local.song;
 			setCurrentSong(song);
 			setVideoInfo(null);
 			setInnertube(null);
 
 			// A stored file plays straight from disk — no stream session, and
 			// no watch-history pings (there is no playback tracker for it).
-			if (localEntry) {
+			if (local) {
 				const deck = decksRef.current[activeDeckRef.current];
 				const mounted = deck
-					? await mountLocalTrack(deck, song, localEntry, { autoPlay: !exact })
+					? await mountLocalDeck(deck, song, local.entry, {
+							autoPlay: !exact,
+							volume: getVolume,
+						})
 					: false;
 				if (request !== loadRequestRef.current) return;
-				if (mounted) {
-					setIsPlaying(!exact);
+				if (mounted && deck) {
+					if (exact) await waitForDeckData(deck);
+					if (isCurrent()) setIsPlaying(!exact);
 					return;
 				}
 				// Stream this play instead. The stored file is deliberately
@@ -1302,82 +982,48 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			}
 
 			try {
-				if (!isVideoId(song.id)) {
-					throw new Error(
-						`Invalid video id "${song.id}" for "${song.title}" — cannot play`,
-					);
+				const {
+					stream,
+					song: played,
+					description,
+				} = await resolveStreamTrack(song, { exact, isCurrent });
+				if (!isCurrent()) return;
+
+				if (played.id !== song.id || description) {
+					const enrich = (entry: Song) => {
+						if (entry.id === song.id && played.id !== song.id)
+							return { ...played, addedBy: entry.addedBy };
+						if (description && entry.id === played.id)
+							return applySongDescription(entry, description);
+						return entry;
+					};
+					setQueueState((previous) => previous.map(enrich));
+					setAutoplayTracks((previous) => previous.map(enrich));
 				}
-				const result = exact
-					? { ...(await getSongStream(song.id)), videoId: song.id }
-					: await getPlaybackStream(song.id);
-				// A newer play request superseded this one while it loaded.
-				if (request !== loadRequestRef.current) return;
-				if (exact && !result.videoInfo.streaming_data)
-					throw new Error("This track is unavailable on this device.");
-				if (result) {
-					// The stream may be the album track of a music video: the
-					// track *is* that song, so adopt its entry everywhere.
-					let played = song;
-					if (result.videoId !== song.id) {
-						const version = await getSongVersion(song.id);
-						if (request !== loadRequestRef.current) return;
-						if (version) {
-							played = applySongVersion(song, version);
-							rememberSongVersion(song, played);
-							const replace = (entry: Song) =>
-								entry.id === song.id
-									? { ...played, addedBy: entry.addedBy }
-									: entry;
-							setCurrentSong((prev) =>
-								prev && prev.id === song.id ? played : prev,
-							);
-							setQueueState((prev) => prev.map(replace));
-							setAutoplayTracks((prev) => prev.map(replace));
-						}
-					}
-					setVideoInfo(result.videoInfo);
-					setInnertube(result.innertube);
-					setIsPlaying(!exact);
-
-					// Store the uploader description and apply its credits to
-					// every copy of the track on screen (player, queue, radio).
-					const basic = result.videoInfo.basic_info;
-					const description = basic.short_description?.trim();
-					if (description) {
-						rememberSongDescription(played.id, description);
-						setCurrentSong((prev) =>
-							prev && prev.id === played.id
-								? applySongDescription(prev, description)
-								: prev,
-						);
-						setQueueState((prev) =>
-							prev.map((entry) =>
-								entry.id === played.id
-									? applySongDescription(entry, description)
-									: entry,
-							),
-						);
-						setAutoplayTracks((prev) =>
-							prev.map((entry) =>
-								entry.id === played.id
-									? applySongDescription(entry, description)
-									: entry,
-							),
-						);
-					}
-
-					// Upgrade the artwork from the player response (see pickArtwork).
-					const thumbnail = pickArtwork(played, basic);
-					if (thumbnail) {
-						setCurrentSong((prev) =>
-							prev && prev.id === played.id ? { ...prev, thumbnail } : prev,
-						);
-					}
-
-					// Uploader videos without a release keep their raw titles.
-					void markUpload(played);
+				const thumbnail = pickArtwork(played, stream.videoInfo.basic_info);
+				setCurrentSong((previous) => {
+					const current =
+						previous?.id === played.id
+							? description
+								? applySongDescription(previous, description)
+								: previous
+							: played;
+					return thumbnail ? { ...current, thumbnail } : current;
+				});
+				setVideoInfo(stream.videoInfo);
+				setInnertube(stream.innertube);
+				setIsPlaying(!exact);
+				void markUpload(played, isCurrent);
+				if (exact) {
+					const deck = decksRef.current[activeDeckRef.current];
+					void mountStreamDeck(deck, stream, {
+						autoPlay: false,
+						volume: getVolume,
+					});
+					await waitForDeckData(deck);
 				}
 			} catch (error) {
+				if (!isCurrent()) return;
 				console.error(
 					"[PlayerContext] Failed to play song:",
 					error,
@@ -1386,7 +1032,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				if (exact) throw error;
 			}
 		},
-		[abortCrossfade, markUpload, mountLocalTrack, teardownDeck],
+		[abortCrossfade, getVolume, markUpload],
 	);
 
 	// Feed the shared listening-session tracker: one tick per second while
@@ -1673,9 +1319,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	useEffect(() => {
 		return () => {
 			abortCrossfade();
-			for (const deck of decksRef.current) teardownDeck(deck);
+			for (const deck of decksRef.current) resetDeck(deck);
 		};
-	}, [abortCrossfade, teardownDeck]);
+	}, [abortCrossfade]);
 
 	const previous = useCallback(async () => {
 		// Try to go back in queue first
@@ -1767,7 +1413,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					setVideoInfo(null);
 					setInnertube(null);
 					const deck = decksRef.current[activeDeckRef.current];
-					if (deck) teardownDeck(deck);
+					if (deck) resetDeck(deck);
 					setCurrentIndex(-1);
 				} else {
 					const nextIndex = Math.min(currentIndex, nextQueue.length - 1);
@@ -1778,7 +1424,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setCurrentIndex(currentIndex - 1);
 			}
 		},
-		[queue, currentIndex, playSong, teardownDeck],
+		[queue, currentIndex, playSong],
 	);
 
 	const shuffleQueue = useCallback(() => {
@@ -1851,7 +1497,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		(song: Song | null, songs: Song[], index: number) => {
 			loadRequestRef.current++;
 			abortCrossfade();
-			teardownDeck(decksRef.current[activeDeckRef.current]);
+			resetDeck(decksRef.current[activeDeckRef.current]);
 			setIsPlaying(false);
 			setVideoInfo(null);
 			setInnertube(null);
@@ -1859,7 +1505,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setQueueState(songs);
 			setCurrentIndex(index);
 		},
-		[abortCrossfade, teardownDeck],
+		[abortCrossfade],
 	);
 	const getPlaybackGeneration = useCallback(() => loadRequestRef.current, []);
 	const applyRoomQueue = useCallback((songs: Song[], index: number) => {
@@ -1921,8 +1567,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				songs ? selectionAction([song, ...songs], 0) : { type: "play", song },
 			),
 			playQueue: localControl(playQueue, selectionAction),
-			videoInfo,
-			innertube,
+			playingVideoId: videoInfo?.basic_info.id ?? null,
 			queue,
 			currentIndex,
 			autoplayTracks,
@@ -1932,13 +1577,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			playAutoplayAt: localControl(playAutoplayAt, (index) => ({
 				type: "autoplay",
 				index,
-				queueKey: JSON.stringify(
-					autoplayTracks.slice(0, 100).map((song) => song.id),
-				),
+				queueKey: queueKey(autoplayTracks.slice(0, SHARED_AUTOPLAY_LIMIT)),
 			})),
 			addToQueue: localControl(enqueue, (songs) => ({
 				type: "add",
-				songs: songs.slice(0, 300),
+				songs: songs.slice(0, SHARED_QUEUE_LIMIT),
 			})),
 			setQueue: localControl(setQueue, (songs) => {
 				const used = new Set<number>();
@@ -1972,7 +1615,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			previous: localControl(previous, () => ({ type: "previous" })),
 			hasNext,
 			hasPrevious,
-			videoContainerRef,
 			videoElementRef,
 			duration,
 			seek,
@@ -1989,7 +1631,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			play,
 			playQueue,
 			videoInfo,
-			innertube,
 			queue,
 			currentIndex,
 			autoplayTracks,
@@ -2008,7 +1649,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			previous,
 			hasNext,
 			hasPrevious,
-			videoContainerRef,
 			duration,
 			seek,
 			prepareRoomTrack,

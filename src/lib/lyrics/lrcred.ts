@@ -1,7 +1,8 @@
 import { proxiedFetch, USER_AGENT } from "../utils/tauri";
 import { cleanSearchTitle, formatTitleParts } from "../utils/title";
-import type { LrcLine, LrcWord } from "./lrclib";
-import { lyricsKind } from "./lyrics-providers";
+import type { LrcLine, LrcWord } from "./lyrics";
+import { lyricsKind } from "./lyrics";
+import { fieldMatches } from "./match";
 
 /**
  * lrc.red — a public lyrics archive with hand-timed and model-word-synced
@@ -254,31 +255,6 @@ async function requestSync(isrc: string): Promise<LrcRedSong | null> {
 		console.warn(`[lrc.red] sync ${isrc} failed:`, error);
 		return null;
 	}
-}
-
-function normalize(value: string): string {
-	return value
-		.toLowerCase()
-		.replace(/[^\p{L}\p{N}]+/gu, " ")
-		.trim();
-}
-
-/** True when one normalized string contains the other, or they overlap enough. */
-function fieldMatches(
-	candidate: string,
-	wanted: string,
-	minCoverage: number,
-): boolean {
-	const c = normalize(candidate);
-	const w = normalize(wanted);
-	if (!c || !w) return false;
-	if (c === w || c.includes(w) || w.includes(c)) return true;
-	const have = new Set(c.split(" ").filter(Boolean));
-	const want = w.split(" ").filter(Boolean);
-	if (want.length === 0) return false;
-	return (
-		want.filter((token) => have.has(token)).length / want.length >= minCoverage
-	);
 }
 
 /** Confirmed (artist+title) matches may drift by this much. */

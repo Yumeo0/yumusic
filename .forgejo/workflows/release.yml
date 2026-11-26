@@ -123,15 +123,7 @@ jobs:
       - name: Stamp release version
         shell: bash
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          export VERSION
-          bun -e "for (const path of ['package.json', 'src-tauri/tauri.conf.json']) {
-              const json = await Bun.file(path).json();
-              json.version = process.env.VERSION;
-              await Bun.write(path, JSON.stringify(json, null, 2) + '\n');
-            }"
-          sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          echo "Building YuMusic $VERSION"
+          bun scripts/stamp-version.ts "${GITHUB_REF#refs/tags/v}"
 
       # The Cargo cache restores earlier runs' bundle directories; drop them so
       # only this release's artifacts are uploaded.
@@ -253,13 +245,7 @@ jobs:
       - name: Stamp release version
         shell: bash
         run: |
-          export VERSION="${GITHUB_REF#refs/tags/v}"
-          bun -e "for (const path of ['package.json', 'src-tauri/tauri.conf.json']) {
-              const json = await Bun.file(path).json();
-              json.version = process.env.VERSION;
-              await Bun.write(path, JSON.stringify(json, null, 2) + '\n');
-            }"
-          sed -i -E "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          bun scripts/stamp-version.ts "${GITHUB_REF#refs/tags/v}"
 
       - name: Build universal APK
         shell: bash

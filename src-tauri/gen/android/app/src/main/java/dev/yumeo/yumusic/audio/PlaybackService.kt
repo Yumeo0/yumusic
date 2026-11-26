@@ -38,7 +38,6 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
       .build()
   })
 
-  companion object { var instance: PlaybackService? = null; private set }
   private data class Deck(val player: ExoPlayer, var id: String = "", var source: SabrMediaSource? = null, var volume: Float = 1f)
   private data class Crossfade(
     val from: Int,
@@ -96,8 +95,7 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
     // lifetime even when no external controller has connected yet.
     addSession(session!!)
     effects(AudioEffect.ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION)
-    instance = this
-    AudioBridge.ready(this)
+    AudioBridge.attachService(this)
     main.post(clock)
   }
 
@@ -359,7 +357,7 @@ class PlaybackService internal constructor(private val createPlayer: (Context) -
 
   override fun onDestroy() {
     AudioBridge.playback(false)
-    instance = null
+    AudioBridge.detachService(this)
     main.removeCallbacksAndMessages(null)
     effects(AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION)
     decks.forEach { it.source?.queue?.restart(); it.player.release() }

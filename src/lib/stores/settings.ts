@@ -5,6 +5,7 @@ import {
 	normalizeProviderOrder,
 } from "../lyrics/lyrics-providers";
 import { normalizeRepeatMode, type RepeatMode } from "../player/repeat";
+import { notifySyncChange } from "../sync/events";
 import { normalizeHiddenHomeSections } from "./home-sections";
 
 export type TitleMode = "both" | "original" | "translation";
@@ -117,6 +118,7 @@ export function updateSettings(patch: Partial<Settings>): Settings {
 		// best-effort
 	}
 	window.dispatchEvent(new Event(SETTINGS_EVENT));
+	notifySyncChange();
 	return next;
 }
 

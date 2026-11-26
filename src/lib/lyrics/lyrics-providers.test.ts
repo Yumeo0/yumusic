@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import type { LrcLine } from "./lrclib";
+import { type LrcLine, lyricsKind } from "./lyrics";
 import {
 	DEFAULT_LYRICS_PROVIDER_ORDER,
-	lyricsKind,
 	normalizeProviderOrder,
 	pickProvider,
 } from "./lyrics-providers";

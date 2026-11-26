@@ -1,12 +1,13 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import {
 	applySongDescription,
 	titleNeedsDescription,
 } from "@/lib/utils/description";
 import { LruCache } from "@/lib/utils/lru-cache";
 import { formatTitleParts, splitDualTitle } from "@/lib/utils/title";
+import { getYoutubeClient } from "./client-session";
 import { isVideoId } from "./youtube.utils";
-import { getTrackMeta, getYoutubeClient } from "./youtube-client";
+import { getTrackMeta } from "./youtube-client";
 
 /**
  * Background song enrichment for list rows. Video descriptions resolve song
@@ -66,13 +67,6 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Whether a description for this video was already fetched this session.
- */
-export function hasSongDescription(videoId: string): boolean {
-	return resolved.has(videoId);
-}
-
-/**
  * Fetches descriptions for the given songs and reports every enriched song
  * through `onUpdate`. Only tracks whose title parsing is ambiguous are
  * fetched (see `titleNeedsDescription`) — a description adds nothing to a
@@ -85,7 +79,7 @@ export function hasSongDescription(videoId: string): boolean {
  * that cancels the remaining fetches (in-flight ones keep running and stay
  * cached).
  */
-export function enrichSongsWithDescriptions(
+function enrichSongsWithDescriptions(
 	songs: Song[],
 	onUpdate: (song: Song) => void,
 	skipIds?: ReadonlySet<string>,
@@ -95,7 +89,7 @@ export function enrichSongsWithDescriptions(
 			isVideoId(song.id) &&
 			!song.description &&
 			!skipIds?.has(song.id) &&
-			(titleNeedsDescription(song) || hasSongDescription(song.id)),
+			(titleNeedsDescription(song) || resolved.has(song.id)),
 	);
 	let cancelled = false;
 	const worker = async () => {
@@ -133,11 +127,9 @@ export function needsUploadCheck(song: Song): boolean {
  * Marks list rows as uploader videos when their track metadata has no release
  * (album) behind it — such titles are the uploader's own string and are shown
  * as-is (see the `upload` field on `Song`). Runs in the background with the
- * same politeness as the description prefetch; `titleNeedsDescription` and
- * this check are mutually exclusive, so the two pipelines never race over one
- * song.
+ * same request pacing as the description prefetch.
  */
-export function enrichSongsWithUploads(
+function enrichSongsWithUploads(
 	songs: Song[],
 	onUpdate: (song: Song) => void,
 ): () => void {
@@ -159,5 +151,33 @@ export function enrichSongsWithUploads(
 	void Promise.all(Array.from({ length: CONCURRENCY }, worker));
 	return () => {
 		cancelled = true;
+	};
+}
+
+// Description and upload requests can finish in either order for the same song.
+export function enrichSongRows(
+	songs: Song[],
+	onUpdate: (song: Song) => void,
+	playingId?: string,
+) {
+	const latest = new Map<string, Song>();
+	const deliver = (song: Song) => {
+		latest.set(song.id, song);
+		onUpdate(song);
+	};
+	const stopDescriptions = enrichSongsWithDescriptions(
+		songs,
+		(song) => {
+			const upload = latest.get(song.id)?.upload ?? song.upload;
+			deliver(upload === undefined ? song : { ...song, upload });
+		},
+		playingId ? new Set([playingId]) : undefined,
+	);
+	const stopUploads = enrichSongsWithUploads(songs, (song) => {
+		deliver({ ...(latest.get(song.id) ?? song), upload: song.upload });
+	});
+	return () => {
+		stopDescriptions();
+		stopUploads();
 	};
 }

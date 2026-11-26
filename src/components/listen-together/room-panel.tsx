@@ -24,7 +24,6 @@ import {
 	RoomQrCode,
 	RoomQrScanner,
 } from "@/components/listen-together/room-qr";
-import type { Song } from "@/contexts/player-context";
 import { actionLabel } from "@/lib/listen-together/guest-permissions";
 import {
 	profileSource,
@@ -34,6 +33,7 @@ import {
 } from "@/lib/listen-together/profile";
 import { parseInvite } from "@/lib/listen-together/protocol";
 import { listenRoom, useListenRoom } from "@/lib/listen-together/room";
+import type { Song } from "@/lib/music/song";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { getUserProfile } from "@/lib/youtube/youtube-client";
 

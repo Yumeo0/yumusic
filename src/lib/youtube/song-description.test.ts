@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { needsUploadCheck } from "./song-description";
 
 function song(overrides: Partial<Song>): Song {

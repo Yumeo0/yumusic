@@ -6,14 +6,6 @@ import {
 	textRect,
 } from "./player-items";
 
-export {
-	mergeTouchHandlers,
-	type QueueGestureCheck,
-	type TouchHandlers,
-	useQueueDragGesture,
-	useQueueSheetGesture,
-} from "./queue-gesture";
-
 /** Where the dismiss morph sends everything, measured at drag start. */
 export interface DismissGeometry {
 	page: HTMLElement | null;

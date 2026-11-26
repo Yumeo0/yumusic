@@ -1,12 +1,17 @@
 import { type RefObject, type TouchEvent, useEffect, useRef } from "react";
 import { getNowPlayingOpen, getQueueOpen } from "@/lib/player/player-ui";
 import { haptic } from "@/lib/utils/haptics";
+import { MOBILE_QUERY } from "../utils/viewport";
 import {
 	createSpring,
 	GestureVelocity,
 	projectMomentum,
 	rubberband,
 } from "./spring";
+import {
+	allowSwipeContextMenu,
+	suppressSwipeContextMenu,
+} from "./swipe-context-menu";
 
 /** Horizontal track changes share axis locking with the vertical player gesture. */
 export function useMiniPlayerTrackSwipe({
@@ -51,7 +56,7 @@ export function useMiniPlayerTrackSwipe({
 		const velocity = cancelled ? 0 : current.velocity.read();
 		const projected = current.distance + projectMomentum(velocity);
 		const node = trackRef.current;
-		if (node) node.dataset.swipeContextUntil = String(performance.now() + 700);
+		suppressSwipeContextMenu(node);
 		spring.animate(0, { velocity, momentum: !cancelled });
 		if (!cancelled && Math.abs(projected) >= 64) {
 			if (projected < 0 && hasNext) {
@@ -72,7 +77,7 @@ export function useMiniPlayerTrackSwipe({
 				event.touches.length !== 1 ||
 				getNowPlayingOpen() ||
 				getQueueOpen() ||
-				!window.matchMedia("(max-width: 767.98px)").matches
+				!window.matchMedia(MOBILE_QUERY).matches
 			)
 				return;
 			if (
@@ -85,7 +90,7 @@ export function useMiniPlayerTrackSwipe({
 			const touch = event.touches[0],
 				node = trackRef.current;
 			if (!node || touch.clientY < node.getBoundingClientRect().top) return;
-			node.dataset.swipeContextUntil = "0";
+			allowSwipeContextMenu(node);
 			const velocity = new GestureVelocity();
 			velocity.add(touch.clientX);
 			gesture.current = {
@@ -120,7 +125,7 @@ export function useMiniPlayerTrackSwipe({
 			}
 			current.distance = dx;
 			const node = trackRef.current;
-			if (node) node.dataset.swipeContextUntil = "Infinity";
+			suppressSwipeContextMenu(node, true);
 			const allowed = dx < 0 ? hasNext : hasPrevious;
 			const distance =
 				allowed && Math.abs(dx) <= 96

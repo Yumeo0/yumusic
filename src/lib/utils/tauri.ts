@@ -17,10 +17,20 @@ if (typeof window !== "undefined") {
 /** The running OS, or null outside a Tauri window (plain browser dev). */
 const OS = isTauri() ? platform() : null;
 
-export const PROXY_ORIGIN =
+const PROXY_ORIGIN =
 	OS === "windows" || OS === "android"
 		? "http://proxy.localhost"
 		: "proxy://localhost";
+
+export function buildProxyUrl(target: URL): URL {
+	const proxy = new URL(`${PROXY_ORIGIN}${target.pathname}${target.search}`);
+	// A signed upstream query must survive without URLSearchParams re-encoding.
+	if (proxy.searchParams.has("__host")) proxy.searchParams.delete("__host");
+	const separator = proxy.search ? "&" : "?";
+	return new URL(
+		`${proxy.href}${separator}__host=${encodeURIComponent(target.host)}`,
+	);
+}
 
 /** App identity for third-party APIs that ask for a descriptive User-Agent. */
 export const USER_AGENT = `YuMusic v${packageJson.version} (https://git.yumeo.dev/Yumeo/YuMusic)`;
@@ -40,9 +50,7 @@ export function proxiedFetch(
 ): Promise<Response> {
 	const target = new URL(url);
 	if (!isTauri()) return fetch(url, { ...init, headers });
-	const proxied = new URL(`${PROXY_ORIGIN}${target.pathname}${target.search}`);
-	proxied.searchParams.set("__host", target.host);
-	return fetch(proxied, {
+	return fetch(buildProxyUrl(target), {
 		...init,
 		headers: { "X-Proxy-Headers": JSON.stringify(headers) },
 	});
@@ -94,11 +102,7 @@ export function proxiedImageUrl(
 				.replace(/\/(?:maxresdefault|hq720)\./, "/mqdefault.")
 				.replace(/\/sddefault\./, "/hqdefault.");
 		}
-		const proxied = new URL(
-			`${PROXY_ORIGIN}${parsed.pathname}${parsed.search}`,
-		);
-		proxied.searchParams.set("__host", parsed.host);
-		return proxied.toString();
+		return buildProxyUrl(parsed).toString();
 	} catch {
 		return url;
 	}

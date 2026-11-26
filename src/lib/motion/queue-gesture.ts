@@ -6,10 +6,10 @@ import {
 	setQueueState,
 } from "@/lib/player/player-ui";
 import { haptic } from "@/lib/utils/haptics";
+import { MOBILE_QUERY } from "../utils/viewport";
 import { QUEUE_STAGES, queueReleaseStage } from "./queue-stages";
 import { createSpring, GestureVelocity, rubberband } from "./spring";
 
-const MOBILE_QUERY = "(max-width: 767.98px)";
 export type QueueGestureCheck = (event: React.TouchEvent) => boolean;
 export interface TouchHandlers {
 	onTouchStart: (event: React.TouchEvent) => void;

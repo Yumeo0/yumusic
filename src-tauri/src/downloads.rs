@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 /// A completed download, persisted in `downloads/index.json`.
 #[derive(Clone, Serialize, Deserialize)]
@@ -29,26 +30,31 @@ pub struct DownloadEntry {
 	pub downloaded_at: u64,
 }
 
-/// Metadata the frontend sends when finishing a download.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadMetadata {
-	pub id: String,
-	pub title: String,
-	pub artist: String,
-	pub duration: Option<String>,
-	pub thumbnail: Option<String>,
+	title: String,
+	artist: String,
+	duration: Option<String>,
+	thumbnail: Option<String>,
 	#[serde(default)]
-	pub description: Option<String>,
-	pub ext: String,
+	description: Option<String>,
 }
 
-/// An in-flight download: the temp file that chunks are appended to.
 struct PendingDownload {
+	id: String,
+	ext: String,
 	temp: PathBuf,
 }
 
-static PENDING: Mutex<Option<HashMap<String, PendingDownload>>> = Mutex::new(None);
+#[derive(Default)]
+pub struct DownloadStore(Mutex<HashMap<String, PendingDownload>>);
+
+impl DownloadStore {
+	fn lock(&self) -> Result<MutexGuard<'_, HashMap<String, PendingDownload>>, String> {
+		self.0.lock().map_err(|_| "download state poisoned".into())
+	}
+}
 
 const DOWNLOADS_DIR: &str = "downloads";
 const AUDIO_DIR: &str = "audio";
@@ -72,16 +78,53 @@ fn index_path(root: &Path) -> PathBuf {
 	root.join(INDEX_FILE)
 }
 
-fn read_index(root: &Path) -> Vec<DownloadEntry> {
-	let Ok(raw) = fs::read_to_string(index_path(root)) else {
-		return Vec::new();
-	};
-	serde_json::from_str(&raw).unwrap_or_default()
+// Separate app instances share the same persisted index.
+fn lock_index(root: &Path) -> Result<fs::File, String> {
+	let file = fs::OpenOptions::new()
+		.read(true)
+		.write(true)
+		.create(true)
+		.truncate(false)
+		.open(root.join("index.lock"))
+		.map_err(|error| error.to_string())?;
+	file.lock().map_err(|error| error.to_string())?;
+	Ok(file)
+}
+
+fn read_index(root: &Path) -> Result<Vec<DownloadEntry>, String> {
+	match fs::read_to_string(index_path(root)) {
+		Ok(raw) => serde_json::from_str(&raw).map_err(|error| error.to_string()),
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+		Err(error) => Err(error.to_string()),
+	}
 }
 
 fn write_index(root: &Path, entries: &[DownloadEntry]) -> Result<(), String> {
-	let raw = serde_json::to_string(entries).map_err(|e| e.to_string())?;
-	fs::write(index_path(root), raw).map_err(|e| e.to_string())
+	let raw = serde_json::to_vec(entries).map_err(|e| e.to_string())?;
+	let staging = root
+		.join(TEMP_DIR)
+		.join(format!("index-{}.json", operation_id()));
+	let result = (|| {
+		let mut file = fs::File::create_new(&staging)?;
+		file.write_all(&raw)?;
+		file.sync_all()?;
+		drop(file);
+		fs::rename(&staging, index_path(root))
+	})();
+	if result.is_err() {
+		let _ = fs::remove_file(&staging);
+	}
+	result.map_err(|error: std::io::Error| error.to_string())
+}
+
+fn operation_id() -> String {
+	static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+	format!(
+		"{}-{}-{}",
+		now_ms(),
+		std::process::id(),
+		SEQUENCE.fetch_add(1, Ordering::Relaxed)
+	)
 }
 
 fn now_ms() -> u64 {
@@ -113,14 +156,17 @@ fn safe_ext(ext: &str) -> Result<&str, String> {
 	}
 }
 
-/// Removes leftover temp chunks from interrupted downloads. Active sessions
-/// are always younger than the cutoff, so they are never touched.
-fn cleanup_stale_temp(root: &Path) {
+/// Cleans up temporary files left by an interrupted run.
+fn cleanup_stale_temp(root: &Path, active: &HashMap<String, PendingDownload>) {
 	let Ok(dir) = fs::read_dir(root.join(TEMP_DIR)) else {
 		return;
 	};
 	let now = SystemTime::now();
 	for item in dir.flatten() {
+		let path = item.path();
+		if active.values().any(|pending| pending.temp == path) {
+			continue;
+		}
 		let stale = item
 			.metadata()
 			.and_then(|meta| meta.modified())
@@ -128,125 +174,180 @@ fn cleanup_stale_temp(root: &Path) {
 			.and_then(|modified| now.duration_since(modified).ok())
 			.is_some_and(|age| age > STALE_TEMP_AGE);
 		if stale {
-			let _ = fs::remove_file(item.path());
+			let _ = fs::remove_file(path);
 		}
 	}
 }
 
-/// Starts a download session and returns its token. Chunks are appended to a
-/// temp file and only become visible to the app when `download_finish` runs.
 #[tauri::command]
-pub async fn download_begin(app: AppHandle, song_id: String, ext: String) -> Result<String, String> {
+pub async fn download_begin(
+	app: AppHandle,
+	store: State<'_, DownloadStore>,
+	song_id: String,
+	ext: String,
+) -> Result<String, String> {
 	let id = safe_id(&song_id)?.to_owned();
 	let ext = safe_ext(&ext)?.to_owned();
 	let root = downloads_root(&app)?;
-	cleanup_stale_temp(&root);
-
-	let token = format!("{id}-{}", now_ms());
-	let temp = root.join(TEMP_DIR).join(format!("{token}.{ext}"));
-	let _ = fs::remove_file(&temp);
-	fs::File::create(&temp).map_err(|e| e.to_string())?;
-
-	let mut guard = PENDING.lock().map_err(|_| "download state poisoned")?;
-	guard
-		.get_or_insert_with(HashMap::new)
-		.insert(token.clone(), PendingDownload { temp });
+	let mut sessions = store.lock()?;
+	cleanup_stale_temp(&root, &sessions);
+	let token = operation_id();
+	let temp = root.join(TEMP_DIR).join(format!("{id}-{token}.{ext}"));
+	fs::File::create_new(&temp).map_err(|e| e.to_string())?;
+	sessions.insert(token.clone(), PendingDownload { id, ext, temp });
 	Ok(token)
 }
 
-/// Appends one base64-encoded chunk of audio to the session's temp file.
 #[tauri::command]
-pub async fn download_append(token: String, data: String) -> Result<(), String> {
-	let temp = {
-		let guard = PENDING.lock().map_err(|_| "download state poisoned")?;
-		guard
-			.as_ref()
-			.and_then(|sessions| sessions.get(&token))
-			.map(|session| session.temp.clone())
-			.ok_or_else(|| "unknown download".to_string())?
-	};
+pub async fn download_append(
+	store: State<'_, DownloadStore>,
+	token: String,
+	data: String,
+) -> Result<(), String> {
 	let bytes = base64::engine::general_purpose::STANDARD
 		.decode(data)
 		.map_err(|e| e.to_string())?;
+	let sessions = store.lock()?;
+	let pending = sessions.get(&token).ok_or("unknown download")?;
 	let mut file = fs::OpenOptions::new()
 		.append(true)
-		.open(&temp)
+		.open(&pending.temp)
 		.map_err(|e| e.to_string())?;
 	file.write_all(&bytes).map_err(|e| e.to_string())
 }
 
-/// Finalizes a session: moves the temp file into the audio directory and
-/// records it in the index (replacing any previous file for the same song).
 #[tauri::command]
 pub async fn download_finish(
 	app: AppHandle,
+	store: State<'_, DownloadStore>,
 	token: String,
 	metadata: DownloadMetadata,
 ) -> Result<DownloadEntry, String> {
-	let pending = {
-		let mut guard = PENDING.lock().map_err(|_| "download state poisoned")?;
-		guard
-			.as_mut()
-			.and_then(|sessions| sessions.remove(&token))
-			.ok_or_else(|| "unknown download".to_string())?
-	};
-	let id = safe_id(&metadata.id)?.to_owned();
-	let ext = safe_ext(&metadata.ext)?.to_owned();
 	let root = downloads_root(&app)?;
-	let final_path = root.join(AUDIO_DIR).join(format!("{id}.{ext}"));
-	// A re-download replaces the previous file.
-	let _ = fs::remove_file(&final_path);
-	fs::rename(&pending.temp, &final_path).map_err(|e| e.to_string())?;
+	let mut sessions = store.lock()?;
+	let pending = sessions.get(&token).ok_or("unknown download")?;
+	let _index = lock_index(&root)?;
+	let entry = commit_download(&root, &token, pending, metadata)?;
+	sessions.remove(&token);
+	Ok(entry)
+}
 
-	let size = fs::metadata(&final_path).map_err(|e| e.to_string())?.len();
+fn commit_download(
+	root: &Path,
+	token: &str,
+	pending: &PendingDownload,
+	metadata: DownloadMetadata,
+) -> Result<DownloadEntry, String> {
+	let final_path = root
+		.join(AUDIO_DIR)
+		.join(format!("download-{token}.{}", pending.ext));
+	let size = fs::metadata(&pending.temp)
+		.map_err(|e| e.to_string())?
+		.len();
 	let entry = DownloadEntry {
-		id,
+		id: pending.id.clone(),
 		title: metadata.title,
 		artist: metadata.artist,
 		duration: metadata.duration,
 		thumbnail: metadata.thumbnail,
 		description: metadata.description,
-		ext,
+		ext: pending.ext.clone(),
 		size,
 		path: final_path.to_string_lossy().into_owned(),
 		downloaded_at: now_ms(),
 	};
-
-	let mut entries = read_index(&root);
-	// A re-download may land in a different container; drop the old file.
-	if let Some(previous) = entries.iter().find(|existing| existing.id == entry.id) {
-		if previous.path != entry.path {
-			let _ = fs::remove_file(&previous.path);
-		}
-	}
+	let mut entries = read_index(root)?;
+	let previous = entries
+		.iter()
+		.find(|existing| existing.id == entry.id)
+		.cloned();
 	entries.retain(|existing| existing.id != entry.id);
 	entries.push(entry.clone());
-	write_index(&root, &entries)?;
+
+	// A new path keeps the previously indexed file playable until the commit succeeds.
+	fs::rename(&pending.temp, &final_path).map_err(|e| e.to_string())?;
+	if let Err(error) = write_index(root, &entries) {
+		if let Err(restore) = fs::rename(&final_path, &pending.temp) {
+			return Err(format!(
+				"{error}; could not restore the pending download: {restore}"
+			));
+		}
+		return Err(error);
+	}
+	if let Some(previous) = previous {
+		let path = Path::new(&previous.path);
+		if path.parent() == Some(root.join(AUDIO_DIR).as_path()) {
+			let _ = fs::remove_file(path);
+		}
+	}
 	Ok(entry)
 }
 
-/// Drops an unfinished session and its temp file.
 #[tauri::command]
-pub async fn download_abort(token: String) -> Result<(), String> {
-	let pending = {
-		let mut guard = PENDING.lock().map_err(|_| "download state poisoned")?;
-		guard
-			.as_mut()
-			.and_then(|sessions| sessions.remove(&token))
-	};
-	if let Some(pending) = pending {
-		let _ = fs::remove_file(&pending.temp);
+pub async fn download_abort(store: State<'_, DownloadStore>, token: String) -> Result<(), String> {
+	if let Some(pending) = store.lock()?.remove(&token) {
+		let _ = fs::remove_file(pending.temp);
 	}
 	Ok(())
 }
 
-/// The stored downloads, with sizes refreshed from disk. Entries whose file
-/// disappeared (manual deletion, cleared data) are dropped from the index.
+// A crash during promotion, or a Windows file still in use at replacement,
+// can leave an app-managed media file outside the index.
+fn is_managed_audio(path: &Path) -> bool {
+	let Some(stem) = path.file_stem().and_then(|name| name.to_str()) else {
+		return false;
+	};
+	let Some(token) = stem.strip_prefix("download-") else {
+		return false;
+	};
+	let mut parts = token.split('-');
+	let valid_token = (0..3).all(|_| parts.next().is_some_and(|part| part.parse::<u64>().is_ok()))
+		&& parts.next().is_none();
+	valid_token
+		&& path
+			.extension()
+			.and_then(|ext| ext.to_str())
+			.is_some_and(|ext| safe_ext(ext).is_ok())
+}
+
+fn cleanup_unindexed_audio(root: &Path, entries: &[DownloadEntry]) {
+	let Ok(dir) = fs::read_dir(root.join(AUDIO_DIR)) else {
+		return;
+	};
+	let indexed: std::collections::HashSet<_> =
+		entries.iter().map(|entry| Path::new(&entry.path)).collect();
+	let now = SystemTime::now();
+	for item in dir.flatten() {
+		let path = item.path();
+		if !item.file_type().is_ok_and(|kind| kind.is_file())
+			|| !is_managed_audio(&path)
+			|| indexed.contains(path.as_path())
+		{
+			continue;
+		}
+		let old = item
+			.metadata()
+			.and_then(|metadata| metadata.modified())
+			.ok()
+			.and_then(|modified| now.duration_since(modified).ok())
+			.is_some_and(|age| age > STALE_TEMP_AGE);
+		if old {
+			let _ = fs::remove_file(path);
+		}
+	}
+}
+
+/// Reconciles index entries with on-disk sizes and missing files.
 #[tauri::command]
-pub async fn downloads_list(app: AppHandle) -> Result<Vec<DownloadEntry>, String> {
+pub async fn downloads_list(
+	app: AppHandle,
+	store: State<'_, DownloadStore>,
+) -> Result<Vec<DownloadEntry>, String> {
 	let root = downloads_root(&app)?;
-	cleanup_stale_temp(&root);
-	let mut entries = read_index(&root);
+	let sessions = store.lock()?;
+	cleanup_stale_temp(&root, &sessions);
+	let _index = lock_index(&root)?;
+	let mut entries = read_index(&root)?;
 	let mut changed = false;
 	entries.retain_mut(|entry| match fs::metadata(&entry.path) {
 		Ok(meta) if meta.is_file() => {
@@ -264,24 +365,41 @@ pub async fn downloads_list(app: AppHandle) -> Result<Vec<DownloadEntry>, String
 	if changed {
 		write_index(&root, &entries)?;
 	}
+	cleanup_unindexed_audio(&root, &entries);
 	Ok(entries)
 }
 
-/// Removes the given downloads from disk and the index. Returns the ids that
-/// could not be removed — on Windows a file that the webview is currently
-/// playing cannot be deleted.
+/// Returns ids whose files could not be removed, such as open media on Windows.
 #[tauri::command]
-pub async fn downloads_remove(app: AppHandle, ids: Vec<String>) -> Result<Vec<String>, String> {
+pub async fn downloads_remove(
+	app: AppHandle,
+	store: State<'_, DownloadStore>,
+	ids: Vec<String>,
+) -> Result<Vec<String>, String> {
 	let root = downloads_root(&app)?;
-	let mut entries = read_index(&root);
-	let mut failed: Vec<String> = Vec::new();
+	let mut sessions = store.lock()?;
+	sessions.retain(|_, pending| {
+		if !ids.contains(&pending.id) {
+			return true;
+		}
+		let _ = fs::remove_file(&pending.temp);
+		false
+	});
+	let _index = lock_index(&root)?;
+	let mut entries = read_index(&root)?;
+	let mut staged = Vec::new();
+	let mut failed = Vec::new();
 	for id in &ids {
 		let Some(position) = entries.iter().position(|entry| &entry.id == id) else {
 			continue;
 		};
-		let entry = entries[position].clone();
-		match fs::remove_file(&entry.path) {
+		let path = PathBuf::from(&entries[position].path);
+		let temporary = root
+			.join(TEMP_DIR)
+			.join(format!("removed-{}", operation_id()));
+		match fs::rename(&path, &temporary) {
 			Ok(()) => {
+				staged.push((path, temporary));
 				entries.remove(position);
 			}
 			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -290,7 +408,15 @@ pub async fn downloads_remove(app: AppHandle, ids: Vec<String>) -> Result<Vec<St
 			Err(_) => failed.push(id.clone()),
 		}
 	}
-	write_index(&root, &entries)?;
+	let result = write_index(&root, &entries);
+	for (path, temporary) in staged {
+		if result.is_ok() {
+			let _ = fs::remove_file(temporary);
+		} else if let Err(error) = fs::rename(temporary, path) {
+			log::warn!("Could not restore a staged download: {error}");
+		}
+	}
+	result?;
 	Ok(failed)
 }
 
@@ -343,7 +469,7 @@ mod tests {
 	fn index_round_trips() {
 		let root = test_root("index");
 		write_index(&root, &[entry("abc"), entry("def")]).unwrap();
-		let loaded = read_index(&root);
+		let loaded = read_index(&root).unwrap();
 		assert_eq!(loaded.len(), 2);
 		assert_eq!(loaded[0].id, "abc");
 		assert_eq!(loaded[0].description.as_deref(), Some("Singer: Artist"));
@@ -356,16 +482,50 @@ mod tests {
 		let root = test_root("legacy");
 		let legacy = r#"[{"id":"abc","title":"Song","artist":"Artist","duration":null,"thumbnail":null,"ext":"webm","size":1,"path":"/nonexistent/abc.webm","downloadedAt":1}]"#;
 		fs::write(index_path(&root), legacy).unwrap();
-		let loaded = read_index(&root);
+		let loaded = read_index(&root).unwrap();
 		assert_eq!(loaded.len(), 1);
 		assert_eq!(loaded[0].description, None);
 		let _ = fs::remove_dir_all(&root);
 	}
 
 	#[test]
+	fn committed_replacement_keeps_only_the_new_media_and_index_entry() {
+		let root = test_root("replacement");
+		let old_path = root.join(AUDIO_DIR).join("abc.webm");
+		fs::write(&old_path, b"old").unwrap();
+		let mut old = entry("abc");
+		old.path = old_path.to_string_lossy().into_owned();
+		write_index(&root, &[old]).unwrap();
+
+		let temp = root.join(TEMP_DIR).join("incoming.mp4");
+		fs::write(&temp, b"new media").unwrap();
+		let pending = PendingDownload {
+			id: "abc".into(),
+			ext: "mp4".into(),
+			temp,
+		};
+		let metadata = DownloadMetadata {
+			title: "Updated title".into(),
+			artist: "Artist".into(),
+			duration: None,
+			thumbnail: None,
+			description: None,
+		};
+		let saved = commit_download(&root, &operation_id(), &pending, metadata).unwrap();
+		let entries = read_index(&root).unwrap();
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].path, saved.path);
+		assert!(is_managed_audio(Path::new(&saved.path)));
+		assert_eq!(entries[0].title, "Updated title");
+		assert_eq!(fs::read(&saved.path).unwrap(), b"new media");
+		assert!(!old_path.exists());
+		fs::remove_dir_all(root).unwrap();
+	}
+
+	#[test]
 	fn missing_index_reads_as_empty() {
 		let root = test_root("missing");
-		assert!(read_index(&root).is_empty());
+		assert!(read_index(&root).unwrap().is_empty());
 		let _ = fs::remove_dir_all(&root);
 	}
 }

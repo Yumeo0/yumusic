@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import {
 	cancelDownload,
@@ -25,18 +24,19 @@ import {
 	removeDownloads,
 	useDownloads,
 } from "@/lib/downloads/downloads";
+import type { Song } from "@/lib/music/song";
 import { closeNowPlaying } from "@/lib/player/player-ui";
 import { shareSong } from "@/lib/services/share";
 import { showToast } from "@/lib/stores/toast";
 import { IS_ANDROID, proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
+import { getYoutubeClient } from "@/lib/youtube/client-session";
 import { findYouTubeLink, youTubeLinkRoute } from "@/lib/youtube/entity-links";
 import {
 	INCOMING_LINKS_EVENT,
 	listenForIncomingLinks,
 } from "@/lib/youtube/incoming-links";
 import { getSongPreview, type SongPreview } from "@/lib/youtube/song-info";
-import { getYoutubeClient } from "@/lib/youtube/youtube-client";
 import { AddToPlaylistDialog } from "./add-to-playlist-dialog";
 import { ArtistLinks } from "./artist-link";
 import { SongTitle } from "./song-title";

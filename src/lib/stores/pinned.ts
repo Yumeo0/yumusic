@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { notifySyncChange } from "../sync/events";
+import { canonicalPlaylistId } from "../youtube/playlist-id";
 
 const PINNED_KEY = "yumusic:pinned";
 const PINNED_EVENT = "yumusic:pinned-changed";
@@ -8,10 +10,6 @@ export interface PinnedPlaylist {
 	title: string;
 	thumbnail: string | null;
 }
-
-/** YouTube browse ids add VL to the same id used by playlist share links. */
-export const canonicalPlaylistId = (id: string) =>
-	id.startsWith("VL") ? id.slice(2) : id;
 
 export function getPinnedPlaylists(): PinnedPlaylist[] {
 	try {
@@ -47,13 +45,18 @@ export function getPinnedPlaylists(): PinnedPlaylist[] {
 	}
 }
 
+export function replacePinnedPlaylists(pinned: PinnedPlaylist[]) {
+	localStorage.setItem(PINNED_KEY, JSON.stringify(pinned));
+	window.dispatchEvent(new Event(PINNED_EVENT));
+	notifySyncChange();
+}
+
 function savePinnedPlaylists(pinned: PinnedPlaylist[]) {
 	try {
-		localStorage.setItem(PINNED_KEY, JSON.stringify(pinned));
+		replacePinnedPlaylists(pinned);
 	} catch {
 		// best-effort
 	}
-	window.dispatchEvent(new Event(PINNED_EVENT));
 }
 
 export function togglePinnedPlaylist(playlist: PinnedPlaylist) {
@@ -99,6 +102,14 @@ export function reconcilePinnedPlaylists(
 	if (changed) savePinnedPlaylists(next);
 }
 
+export function unpinPlaylist(id: string) {
+	const current = getPinnedPlaylists();
+	const remaining = current.filter(
+		(playlist) => playlist.id !== canonicalPlaylistId(id),
+	);
+	if (remaining.length !== current.length) savePinnedPlaylists(remaining);
+}
+
 /** Shared reactive state for sidebar-pinned playlists. */
 export function usePinnedPlaylists() {
 	const [pinned, setPinned] = useState<PinnedPlaylist[]>(getPinnedPlaylists);
@@ -118,10 +129,6 @@ export function usePinnedPlaylists() {
 		isPinned: (id: string) =>
 			pinned.some((p) => p.id === canonicalPlaylistId(id)),
 		togglePinned: togglePinnedPlaylist,
-		unpin: (id: string) => {
-			savePinnedPlaylists(
-				getPinnedPlaylists().filter((p) => p.id !== canonicalPlaylistId(id)),
-			);
-		},
+		unpin: unpinPlaylist,
 	};
 }

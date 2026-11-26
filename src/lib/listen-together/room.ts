@@ -1,6 +1,7 @@
 import type { DataConnection, Peer, PeerOptions } from "peerjs";
 import { useSyncExternalStore } from "react";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
+import type { PlaybackSnapshot } from "../player/shared-playback";
 import {
 	type ActionContext,
 	actionCategory,
@@ -36,7 +37,6 @@ import {
 	parseMessage,
 	parseRoomAction,
 	type RoomMessage,
-	type RoomPlayback,
 } from "./protocol";
 import { attributeAction } from "./queue-attribution";
 
@@ -58,7 +58,7 @@ export interface RoomState {
 	requests: RoomRequest[];
 	permissions: GuestPermissions;
 	notice: { id: string; message: string } | null;
-	playback: RoomPlayback | null;
+	playback: PlaybackSnapshot | null;
 	clockOffset: number | null;
 	error: string | null;
 	joinPolicy: JoinPolicy;
@@ -1002,9 +1002,9 @@ export class ListenRoom {
 		);
 	}
 
-	broadcastPlayback(playback: Omit<RoomPlayback, "revision" | "sentAt">) {
+	broadcastPlayback(playback: Omit<PlaybackSnapshot, "revision" | "sentAt">) {
 		if (this.state.role !== "host" || this.state.status !== "hosting") return;
-		const state: RoomPlayback = {
+		const state: PlaybackSnapshot = {
 			...playback,
 			revision: ++this.revision,
 			sentAt: now(),

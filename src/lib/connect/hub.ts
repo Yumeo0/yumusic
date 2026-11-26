@@ -1,5 +1,5 @@
 import type { DataConnection, Peer } from "peerjs";
-import type { RoomPlayback } from "../listen-together/protocol";
+import type { PlaybackSnapshot } from "../player/shared-playback";
 import type { Tables } from "../sync/database.types";
 import {
 	type DeviceCommand,
@@ -11,10 +11,10 @@ import {
 export type PlaybackDevice = Tables<"playback_devices">;
 export interface DeviceAdapter {
 	status(): DeviceStatus;
-	playback(): RoomPlayback | null;
+	playback(): PlaybackSnapshot | null;
 	available(): boolean;
-	prepare(playback: RoomPlayback, valid: () => boolean): Promise<void>;
-	start(playback: RoomPlayback, valid: () => boolean): Promise<void>;
+	prepare(playback: PlaybackSnapshot, valid: () => boolean): Promise<void>;
+	start(playback: PlaybackSnapshot, valid: () => boolean): Promise<void>;
 	pause(): void;
 	cancelTransfer(): void;
 	control(command: DeviceCommand): void;

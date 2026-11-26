@@ -11,8 +11,10 @@ import {
 	useQueueSheetRef,
 } from "@/contexts/player-context";
 import { useRoomRole } from "@/lib/listen-together/room";
-import { useQueueSheetGesture } from "@/lib/motion/queue-drag";
-import { useQueueMotion } from "@/lib/motion/queue-gesture";
+import {
+	useQueueMotion,
+	useQueueSheetGesture,
+} from "@/lib/motion/queue-gesture";
 import { queueScrollOffset } from "@/lib/motion/queue-scroll";
 import { prefersReducedMotion } from "@/lib/motion/spring";
 import {
@@ -21,9 +23,9 @@ import {
 	useQueueState,
 } from "@/lib/player/player-ui";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
-import { useMediaQuery } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
+import { MOBILE_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 import { EqualizerBars } from "../player/waveform";
 import { ArtistLinks } from "../song/artist-link";
 import { SwipeToQueue } from "./swipe-to-queue";
@@ -60,7 +62,7 @@ export function QueuePanel() {
 	const queueState = useQueueState();
 	useQueueMotion(sheetRef, queueState);
 	const open = queueState !== "closed";
-	const compact = useMediaQuery("(max-width: 767.98px)");
+	const compact = useMediaQuery(MOBILE_QUERY);
 	const fullscreen = useNowPlayingOpen();
 	const onClose = () => setQueueOpen(false);
 	useEffect(() => {

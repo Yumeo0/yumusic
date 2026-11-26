@@ -1,8 +1,9 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, formatDuration, hiResThumb } from "@/lib/utils/utils";
+import { getYoutubeClient } from "./client-session";
 import { rememberSongDescription } from "./song-description";
-import { getTrackMeta, getYoutubeClient } from "./youtube-client";
+import { getTrackMeta } from "./youtube-client";
 
 /** A pasted link's song plus the album metadata resolved for it. */
 export interface SongPreview {

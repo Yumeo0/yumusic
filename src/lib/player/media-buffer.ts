@@ -1,6 +1,6 @@
 /** Keep roughly a minute of compressed audio, including a short rewind window. */
-export const AUDIO_BUFFER_AHEAD = 45;
-export const AUDIO_BUFFER_BEHIND = 30;
+const AUDIO_BUFFER_AHEAD = 45;
+const AUDIO_BUFFER_BEHIND = 30;
 
 export function containsTime(ranges: TimeRanges, time: number): boolean {
 	for (let i = 0; i < ranges.length; i++) {

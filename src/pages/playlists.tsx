@@ -23,10 +23,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import { EqualizerBars } from "@/components/player/waveform";
 import { ConfirmDeletePlaylistDialog } from "@/components/playlist/confirm-delete-playlist-dialog";
-import {
-	EditPlaylistDialog,
-	type PlaylistEditResult,
-} from "@/components/playlist/edit-playlist-dialog";
+import { EditPlaylistDialog } from "@/components/playlist/edit-playlist-dialog";
 import { PlaylistContextMenu } from "@/components/playlist/playlist-menu";
 import { VirtualTrackList } from "@/components/playlist/virtual-track-list";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
@@ -36,58 +33,49 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import {
 	syncDownloadedPlaylist,
 	togglePlaylistDownload,
-	useDownloads,
 	usePlaylistDownloaded,
+	usePlaylistDownloadJob,
 } from "@/lib/downloads/downloads";
+import type { LibraryPlaylist, PlaylistView } from "@/lib/music/playlist";
+import type { Song } from "@/lib/music/song";
+import { shuffleFrom } from "@/lib/player/shuffle";
 import { shareLink } from "@/lib/services/share";
 import {
 	reconcilePinnedPlaylists,
 	usePinnedPlaylists,
 } from "@/lib/stores/pinned";
 import {
-	LIBRARY_CACHE_KEY,
-	PLAYLIST_CACHE_PREFIX,
-	type PlaylistView,
+	applyPlaylistChange,
 	patchCachedPlaylistSongs,
 	playlistRevision,
-	readCache,
+	readFreshPlaylistView,
+	readLibraryCache,
+	readPlaylistView,
 	SYNC_INTERVAL_MS,
 	subscribeToLibraryChanges,
 	subscribeToPlaylistChanges,
-	writeCache,
+	writeLibraryCache,
+	writePlaylistView,
 } from "@/lib/stores/playlist-cache";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { useDisplayTitle } from "@/lib/utils/title";
+import { useDisplayTitle } from "@/lib/utils/use-song-title";
 import { cn, parseDuration } from "@/lib/utils/utils";
 import {
 	cleanSubtitle,
-	collectionHeader,
-	collectSongs,
-	isEditablePlaylist,
+	loadPlaylistView,
 	mergePlaylistSongs,
-	type RowFallback,
 } from "@/lib/youtube/playlist-data";
-import {
-	enrichSongsWithDescriptions,
-	enrichSongsWithUploads,
-} from "@/lib/youtube/song-description";
+import { canonicalPlaylistId } from "@/lib/youtube/playlist-id";
+import { removePlaylistTrack } from "@/lib/youtube/playlist-mutations";
+import { enrichSongRows } from "@/lib/youtube/song-description";
 import { isAlbumId } from "@/lib/youtube/youtube.utils";
-import {
-	getAlbum,
-	getLibraryPlaylists,
-	getPlaylist,
-	type LibraryPlaylist,
-	loadPlaylistContinuation,
-	type Playlist,
-	removeSongFromPlaylist,
-} from "../lib/youtube/youtube-client";
+import { getLibraryPlaylists } from "../lib/youtube/youtube-client";
 
 type PlaylistSort =
 	| "newest"
@@ -125,10 +113,9 @@ export function PlaylistDetails() {
 	const [sort, setSort] = useState<PlaylistSort>("newest");
 	const displayTitle = useDisplayTitle();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
-	const downloads = useDownloads();
 	const [editOpen, setEditOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
-	const downloadJob = downloads.jobs.get(id ?? "");
+	const downloadJob = usePlaylistDownloadJob(id);
 	const downloaded = usePlaylistDownloaded(id ?? "");
 	// Video entries already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
@@ -153,8 +140,7 @@ export function PlaylistDetails() {
 	// are patched into the playlist cache so the next visit skips the fetch.
 	// Uploader-video detection runs alongside it: reuploads (no release) keep
 	// their raw titles, which the rows must know about.
-	const descriptionCancelRef = useRef<(() => void) | null>(null);
-	const uploadCancelRef = useRef<(() => void) | null>(null);
+	const enrichmentCancelRef = useRef<(() => void) | null>(null);
 	const pendingSongsRef = useRef(new Map<string, Song>());
 	const flushTimerRef = useRef<number | null>(null);
 
@@ -190,18 +176,11 @@ export function PlaylistDetails() {
 
 	const startEnrichment = useCallback(
 		(songs: Song[]) => {
-			descriptionCancelRef.current?.();
-			descriptionCancelRef.current = enrichSongsWithDescriptions(
+			enrichmentCancelRef.current?.();
+			enrichmentCancelRef.current = enrichSongRows(
 				songs,
 				applyEnrichedSong,
-				// Whatever is playing gets its description from the player
-				// response; prefetching it here would be a duplicate request.
-				playingId ? new Set([playingId]) : undefined,
-			);
-			uploadCancelRef.current?.();
-			uploadCancelRef.current = enrichSongsWithUploads(
-				songs,
-				applyEnrichedSong,
+				playingId,
 			);
 		},
 		[applyEnrichedSong, playingId],
@@ -211,8 +190,7 @@ export function PlaylistDetails() {
 	// and flushes whatever resolved so far into the cache.
 	useEffect(() => {
 		return () => {
-			descriptionCancelRef.current?.();
-			uploadCancelRef.current?.();
+			enrichmentCancelRef.current?.();
 			if (flushTimerRef.current !== null) {
 				window.clearTimeout(flushTimerRef.current);
 				flushTimerRef.current = null;
@@ -221,171 +199,121 @@ export function PlaylistDetails() {
 		};
 	}, [flushEnrichedSongs]);
 
+	const requestRef = useRef<AbortController | null>(null);
 	const fetchPlaylist = async (force = false) => {
 		if (!id) return;
+		requestRef.current?.abort();
+		const request = new AbortController();
+		requestRef.current = request;
 		const revision = playlistRevision(id);
-		const cacheKey = PLAYLIST_CACHE_PREFIX + id;
 		const keepEditedView = () => {
 			if (playlistRevision(id) === revision) return false;
-			const latest = readCache<PlaylistView>(cacheKey);
+			const latest = readPlaylistView(id);
 			if (!latest) return false;
 			setPlaylist({ ...latest.data, id });
+			request.abort();
+			setLoading(false);
+			setRefreshing(false);
+			setLoadingMore(false);
 			return true;
 		};
 
-		const cached = readCache<PlaylistView>(cacheKey);
-		if (
-			!force &&
-			cached &&
-			cached.data.complete &&
-			Date.now() - cached.timestamp < SYNC_INTERVAL_MS
-		) {
-			setPlaylist({ ...cached.data, id });
+		const fresh = force ? null : readFreshPlaylistView(id);
+		setLoadingMore(false);
+		setError(null);
+		if (fresh) {
+			setPlaylist({ ...fresh, id });
 			setLoading(false);
-			syncDownloadedPlaylist(id, cached.data.title, cached.data.songs);
-			startEnrichment(cached.data.songs);
+			setRefreshing(false);
+			syncDownloadedPlaylist(id, fresh.title, fresh.songs);
+			startEnrichment(fresh.songs);
 			return;
 		}
 
-		// Content for this id may already be on screen (cached or fetched):
-		// keep it visible and merge the fresh tracks into it once they arrive.
+		const cached = readPlaylistView(id);
 		const hasContent = !!cached || playlist?.id === id;
-		if (hasContent) {
-			setLoading(false);
-			setRefreshing(true);
-		} else {
-			setLoading(true);
-		}
-		if (cached) {
+		setLoading(!hasContent);
+		setRefreshing(hasContent);
+		if (cached)
 			setPlaylist((prev) => (prev?.id === id ? prev : { ...cached.data, id }));
-		}
 
 		try {
-			setError(null);
-			const albumMode = isAlbumId(id);
-			const data = albumMode ? await getAlbum(id) : await getPlaylist(id);
-			if (keepEditedView()) return;
-
-			if (!data) {
-				if (hasContent) {
-					showToast("Could not refresh playlist");
-				} else {
-					setError(
-						albumMode ? "Failed to load album." : "Failed to load playlist.",
+			const view = await loadPlaylistView(id, {
+				signal: request.signal,
+				onFirstPage: (first) => {
+					if (keepEditedView()) return;
+					// Refresh keeps previous rows visible until all pages arrive.
+					if (!hasContent) setPlaylist(first);
+					setLoading(false);
+					setLoadingMore(!first.complete);
+				},
+				onContinuation: (batch) => {
+					if (keepEditedView() || hasContent) return;
+					setPlaylist((prev) =>
+						prev?.id === id
+							? { ...prev, songs: [...prev.songs, ...batch] }
+							: prev,
 					);
-				}
+				},
+			});
+			if (keepEditedView()) return;
+			if (!view) {
+				if (hasContent) showToast("Could not refresh playlist");
+				else
+					setError(
+						isAlbumId(id)
+							? "Failed to load album."
+							: "Failed to load playlist.",
+					);
 				return;
 			}
 
-			const header = collectionHeader(data.header);
-			const items = "items" in data ? (data.items ?? []) : data.contents;
-			const rowFallback: RowFallback = {
-				artists: albumMode ? header.artists : undefined,
-				thumbnail: header.thumbnail,
-			};
-			const view: PlaylistView = {
-				id,
-				title: header.title,
-				subtitle: cleanSubtitle(header.subtitle),
-				thumbnail: header.thumbnail,
-				songs: collectSongs(items, rowFallback),
-				complete: !("has_continuation" in data && data.has_continuation),
-				editable: !albumMode && isEditablePlaylist(data),
-			};
-			// With content already on screen (stale cache or a force refresh),
-			// applying the first page would shrink the list to it until the
-			// continuation pages catch up — a refresh visibly flashed partial
-			// song counts. Keep the old list and swap it in once the pass ends.
-			if (!hasContent) {
-				setPlaylist(view);
-			}
-			setLoading(false);
-
-			// Load remaining pages, appending as they arrive (playlists only —
-			// albums fit in a single response). Only the new batch is applied:
-			// re-diffing the whole list on every page made big playlists stutter.
-			if ("has_continuation" in data && data.has_continuation) {
-				setLoadingMore(true);
-				let current: Playlist = data;
-				while (current.has_continuation) {
-					const continuation = await loadPlaylistContinuation(current);
-					if (keepEditedView()) {
-						setLoadingMore(false);
-						return;
-					}
-					if (!continuation) break;
-					current = continuation;
-					const batch = collectSongs(current.items ?? [], rowFallback);
-					view.songs = [...view.songs, ...batch];
-					if (!hasContent) {
-						setPlaylist((prev) =>
-							prev?.id === id
-								? { ...view, songs: [...prev.songs, ...batch] }
-								: { ...view, songs: [...view.songs] },
-						);
-					}
-				}
-				view.complete = !current.has_continuation;
+			setPlaylist((prev) =>
+				hasContent && prev?.id === id
+					? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
+					: view,
+			);
+			if (playlistRevision(id) === revision)
+				writePlaylistView(id, view, { keepComplete: true });
+			startEnrichment(view.songs);
+			syncDownloadedPlaylist(id, view.title, view.songs);
+		} catch (err) {
+			if (request.signal.aborted) return;
+			console.error("Error fetching playlist:", err);
+			if (hasContent) showToast("Could not refresh playlist");
+			else setError("Failed to load playlist.");
+		} finally {
+			if (!request.signal.aborted) {
+				setLoading(false);
+				setRefreshing(false);
 				setLoadingMore(false);
 			}
-
-			if (hasContent) {
-				// The refresh pass finished: apply the fresh list, keeping the
-				// previous row objects where nothing changed.
-				setPlaylist((prev) =>
-					prev?.id === id
-						? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
-						: view,
-				);
-			}
-
-			// Resolve real titles/artists from uploader descriptions in the
-			// background (updates the rendered list and the cache).
-			startEnrichment(view.songs);
-			// A kept-downloaded playlist picks up newly added songs here.
-			syncDownloadedPlaylist(id, view.title, view.songs);
-			// Never downgrade a complete cache to a partial one: when the
-			// continuation pass broke, the previous full list is more useful
-			// (and it keeps the cache usable on the next visit).
-			if (view.complete || !cached?.data.complete) {
-				writeCache(cacheKey, view);
-			}
-		} catch (err) {
-			console.error("Error fetching playlist:", err);
-			// Whatever is already on screen beats an error screen
-			if (hasContent) {
-				showToast("Could not refresh playlist");
-			} else {
-				setError("Failed to load playlist.");
-			}
-		} finally {
-			setLoading(false);
-			setRefreshing(false);
 		}
 	};
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylist changes on every re-render and should not be used as a hook dependency.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new route id owns a new request.
 	useEffect(() => {
-		fetchPlaylist();
+		void fetchPlaylist();
 		setSearch("");
+		return () => requestRef.current?.abort();
 	}, [id]);
 	useEffect(() => {
 		if (!id) return;
 		return subscribeToPlaylistChanges(id, (change) => {
+			if (change.type === "delete") {
+				requestRef.current?.abort();
+				navigate("/playlists", { replace: true });
+				return;
+			}
 			setPlaylist((prev) => {
 				if (!prev || prev.id !== id) return prev;
-				const next =
-					change.type === "metadata"
-						? { ...prev, ...change.patch }
-						: { ...prev, songs: [change.song, ...prev.songs] };
-				// A first page can be on screen before its full cache is written.
-				// Keep that edited snapshot too, so an older in-flight load cannot
-				// discard the addition when its continuation arrives.
-				writeCache(PLAYLIST_CACHE_PREFIX + id, next);
+				const next = applyPlaylistChange(prev, change);
+				// A first page can be visible before it has a cache entry.
+				if (!readPlaylistView(id)) writePlaylistView(id, next);
 				return next;
 			});
 		});
-	}, [id]);
+	}, [id, navigate]);
 
 	// The pinned sidebar entry stores its cover from pin time; refresh it
 	// whenever this page has fresher metadata (cached or fetched) so a dead
@@ -403,7 +331,7 @@ export function PlaylistDetails() {
 
 	const sharePlaylist = () => {
 		if (!playlist) return;
-		const rawId = id?.startsWith("VL") ? id.slice(2) : id;
+		const rawId = id && canonicalPlaylistId(id);
 		void shareLink({
 			title: playlist.title,
 			url: `https://music.youtube.com/playlist?list=${rawId}`,
@@ -419,16 +347,7 @@ export function PlaylistDetails() {
 		async (song: Song, index: number) => {
 			if (!id) return;
 			try {
-				await removeSongFromPlaylist(id, song.id);
-				setPlaylist((prev) => {
-					if (!prev) return prev;
-					const next = {
-						...prev,
-						songs: prev.songs.filter((_, i) => i !== index),
-					};
-					writeCache(PLAYLIST_CACHE_PREFIX + id, next);
-					return next;
-				});
+				await removePlaylistTrack(id, song.id, index);
 				showToast("Removed from playlist");
 			} catch (error) {
 				console.error("[YuMusic] remove from playlist failed:", error);
@@ -437,20 +356,6 @@ export function PlaylistDetails() {
 		},
 		[id],
 	);
-
-	/** Applies a saved edit to the header and its cache entry. */
-	const onEditSaved = (result: PlaylistEditResult) => {
-		setPlaylist((prev) => {
-			if (!prev) return prev;
-			const next = {
-				...prev,
-				title: result.title,
-				thumbnail: result.thumbnail,
-			};
-			writeCache(PLAYLIST_CACHE_PREFIX + (id ?? ""), next);
-			return next;
-		});
-	};
 
 	if (loading) {
 		return (
@@ -621,7 +526,6 @@ export function PlaylistDetails() {
 			<PlaylistContextMenu
 				highlight={false}
 				isPinned={isPinned(id ?? "")}
-				onDeleted={() => navigate("/playlists")}
 				onEdit={playlist.editable ? () => setEditOpen(true) : undefined}
 				onTogglePinned={() =>
 					togglePinned({
@@ -705,11 +609,7 @@ export function PlaylistDetails() {
 							className="grid size-11 place-items-center rounded-full border border-foreground/12 transition-all duration-200 hover:border-primary/40 hover:text-primary active:scale-95 disabled:pointer-events-none disabled:opacity-40"
 							disabled={songs.length === 0}
 							onClick={() => {
-								const shuffled = [...songs];
-								for (let i = shuffled.length - 1; i > 0; i--) {
-									const j = Math.floor(Math.random() * (i + 1));
-									[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-								}
+								const shuffled = shuffleFrom(songs, 0);
 								play(shuffled[0], shuffled.slice(1));
 							}}
 							title="Shuffle play"
@@ -887,21 +787,11 @@ export function PlaylistDetails() {
 				currentThumbnail={playlist.thumbnail}
 				currentTitle={playlist.title}
 				onOpenChange={setEditOpen}
-				onSaved={onEditSaved}
 				open={editOpen}
 				playlistId={id ?? null}
 			/>
 			<ConfirmDeletePlaylistDialog
-				isPinned={isPinned(id ?? "")}
-				onDeleted={() => navigate("/playlists")}
 				onOpenChange={setDeleteOpen}
-				onTogglePinned={() =>
-					togglePinned({
-						id: id ?? "",
-						thumbnail: playlist.thumbnail,
-						title: playlist.title,
-					})
-				}
 				open={deleteOpen}
 				playlistId={id ?? ""}
 				playlistTitle={playlist.title}
@@ -1033,7 +923,7 @@ export default function PlaylistsPage() {
 	const [error, setError] = useState<string | null>(null);
 
 	const fetchPlaylists = async (force = false) => {
-		const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+		const cached = readLibraryCache();
 		// An empty cached list is treated as absent: it usually means a fetch
 		// raced the login cookie, and caching it for 24h would pin the
 		// "no playlists" state even after the session is available.
@@ -1058,7 +948,7 @@ export default function PlaylistsPage() {
 			}));
 			setPlaylists(list);
 			reconcilePinnedPlaylists(list);
-			if (list.length > 0) writeCache(LIBRARY_CACHE_KEY, list);
+			if (list.length > 0) writeLibraryCache(list);
 		} catch (err) {
 			console.error("Error fetching playlists:", err);
 			// Stale cache beats an error screen
@@ -1080,7 +970,7 @@ export default function PlaylistsPage() {
 	useEffect(
 		() =>
 			subscribeToLibraryChanges(() => {
-				const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+				const cached = readLibraryCache();
 				if (cached) {
 					setPlaylists(cached.data);
 					reconcilePinnedPlaylists(cached.data);

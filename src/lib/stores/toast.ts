@@ -5,7 +5,7 @@ export interface ToastItem {
 	onClick?: () => void;
 }
 
-export interface ToastOptions {
+interface ToastOptions {
 	onClick?: () => void;
 	/** Auto-dismiss delay in ms; null keeps the toast until it is dismissed. */
 	durationMs?: number | null;

@@ -1,12 +1,13 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { normalizeHomeSectionTitle } from "@/lib/stores/home-sections";
+import { getYoutubeClient } from "./client-session";
 import type { HomeSection } from "./feed-items";
 import {
 	feedItemKey,
 	homeSectionsFromFeed,
 	withUpdatedSong,
 } from "./feed-items";
-import { getYoutubeClient, type HomeFeed } from "./youtube-client";
+import type { HomeFeed } from "./youtube-client";
 
 export const HOME_FEED_TTL_MS = 30 * 60 * 1000;
 /** Guard against an upstream feed that never ends. */

@@ -1,3 +1,4 @@
+import { validParticipantName } from "../player/shared-playback";
 import { notifySyncChange } from "../sync/events";
 
 export interface RoomProfile {
@@ -10,19 +11,13 @@ const KEY = "yumusic:room-profile:v1";
 
 export function validProfile(value: unknown): value is RoomProfile {
 	if (!value || typeof value !== "object") return false;
-	const p = value as RoomProfile;
+	const { username, avatar } = value as RoomProfile;
 	return (
-		typeof p.username === "string" &&
-		p.username.trim() === p.username &&
-		p.username.length > 0 &&
-		p.username.length <= 40 &&
-		!Array.from(p.username).some(
-			(c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127,
-		) &&
-		(p.avatar === null ||
-			(typeof p.avatar === "string" &&
-				p.avatar.length <= MAX_AVATAR_LENGTH &&
-				/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(p.avatar)))
+		validParticipantName(username) &&
+		(avatar === null ||
+			(typeof avatar === "string" &&
+				avatar.length <= MAX_AVATAR_LENGTH &&
+				/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(avatar)))
 	);
 }
 
@@ -37,15 +32,39 @@ export async function profileSource(
 	return `google:${Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-export function readRoomProfile(source: string): RoomProfile | null {
+interface SavedRoomProfile {
+	source: string;
+	profile: RoomProfile;
+}
+
+export function validSavedRoomProfile(
+	value: unknown,
+): value is SavedRoomProfile {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const { source, profile } = value as Partial<SavedRoomProfile>;
+	return (
+		typeof source === "string" && source.length <= 200 && validProfile(profile)
+	);
+}
+
+export function readSavedRoomProfile(): SavedRoomProfile | null {
 	try {
-		const saved = JSON.parse(localStorage.getItem(KEY) || "null");
-		return saved?.source === source && validProfile(saved.profile)
-			? saved.profile
-			: null;
+		const saved: unknown = JSON.parse(localStorage.getItem(KEY) || "null");
+		return validSavedRoomProfile(saved) ? saved : null;
 	} catch {
 		return null;
 	}
+}
+
+export function replaceSavedRoomProfile(value: SavedRoomProfile | null) {
+	if (value) localStorage.setItem(KEY, JSON.stringify(value));
+	else localStorage.removeItem(KEY);
+	notifySyncChange();
+}
+
+export function readRoomProfile(source: string): RoomProfile | null {
+	const saved = readSavedRoomProfile();
+	return saved?.source === source ? saved.profile : null;
 }
 
 export function saveRoomProfile(source: string, profile: RoomProfile) {
@@ -53,8 +72,7 @@ export function saveRoomProfile(source: string, profile: RoomProfile) {
 		throw new Error("Enter a username of 1–40 characters and a valid picture.");
 	// Confirmation can still succeed for this session if storage is unavailable.
 	try {
-		localStorage.setItem(KEY, JSON.stringify({ source, profile }));
-		notifySyncChange();
+		replaceSavedRoomProfile({ source, profile });
 	} catch {
 		/* best effort */
 	}

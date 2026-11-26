@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type DeviceCommand, deviceStatus } from "@/lib/connect/protocol";
 import { getDeviceHub, useDevices } from "@/lib/connect/store";
-import { useSystemVolume } from "@/lib/utils/hooks";
+import { useSystemVolume } from "@/lib/player/use-system-volume";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { audioPanelHandle } from "./audio-panel-handle";

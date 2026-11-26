@@ -1,20 +1,11 @@
 /** Lyrics providers: metadata, ordering and display selection. */
 
-import type { LrcLine } from "./lrclib";
-
-export type LyricsProviderId =
-	| "lrclib"
-	| "musixmatch"
-	| "youtube"
-	| "vocadb"
-	| "lrcred"
-	| "genius";
-
-/**
- * How detailed a provider's lyrics are, simplest first. "word" is reserved
- * for word-by-word timing (karaoke-style) if a provider integration grows it.
- */
-export type LyricsKind = "plain" | "synced" | "word";
+import {
+	type LyricsKind,
+	lyricsKind,
+	type ProviderLyrics,
+	type SelectableLyrics,
+} from "./lyrics";
 
 export const LYRICS_KIND_LABELS: Record<LyricsKind, string> = {
 	plain: "Plain",
@@ -22,54 +13,128 @@ export const LYRICS_KIND_LABELS: Record<LyricsKind, string> = {
 	word: "Word sync",
 };
 
-export interface LyricsProvider {
-	id: LyricsProviderId;
-	label: string;
-	/** Shown as the source under the lyrics. */
-	attribution: string;
-	/** Lyric detail levels this provider's integration can return. */
-	kinds: readonly LyricsKind[];
+interface LyricsQuery {
+	songId: string;
+	title: string;
+	artist: string;
+	duration: number;
+	looseMatch: boolean;
 }
 
-export const LYRICS_PROVIDERS: readonly LyricsProvider[] = [
-	{
-		id: "lrclib",
-		label: "LRCLIB",
-		attribution: "LRCLIB",
-		kinds: ["synced", "plain"],
-	},
-	{
-		id: "musixmatch",
-		label: "Musixmatch",
-		attribution: "Musixmatch",
-		kinds: ["word", "synced"],
-	},
-	{
-		id: "youtube",
+interface ProviderDefinition {
+	label: string;
+	attribution: string;
+	kinds: readonly LyricsKind[];
+	load: (query: LyricsQuery) => Promise<ProviderLyrics | null>;
+}
+
+const providers = {
+	youtube: {
 		label: "YouTube",
 		attribution: "YouTube Music",
 		kinds: ["synced", "plain"],
+		async load({ songId }) {
+			const { getSongLyrics } = await import("../youtube/youtube-client");
+			const result = await getSongLyrics(songId);
+			return result && (result.synced || result.plain)
+				? { synced: result.synced, plain: result.plain, confirmed: true }
+				: null;
+		},
 	},
-	{ id: "vocadb", label: "VocaDB", attribution: "VocaDB", kinds: ["plain"] },
-	{
-		id: "lrcred",
+	lrclib: {
+		label: "LRCLIB",
+		attribution: "LRCLIB",
+		kinds: ["synced", "plain"],
+		async load({ title, artist, duration, looseMatch }) {
+			const { fetchSyncedLyrics } = await import("./lrclib");
+			const result = await fetchSyncedLyrics(
+				title,
+				artist,
+				duration,
+				looseMatch,
+			);
+			return result && (result.synced || result.plain) ? result : null;
+		},
+	},
+	musixmatch: {
+		label: "Musixmatch",
+		attribution: "Musixmatch",
+		kinds: ["word", "synced"],
+		async load({ title, artist, duration }) {
+			const { fetchMusixmatchSynced } = await import("./musixmatch");
+			const synced = await fetchMusixmatchSynced(title, artist, duration);
+			return synced?.length ? { synced, plain: null, confirmed: true } : null;
+		},
+	},
+	lrcred: {
 		label: "lrc.red",
 		attribution: "lrc.red",
 		kinds: ["word", "synced", "plain"],
+		async load({ title, artist, duration }) {
+			const { fetchLrcRedLyrics } = await import("./lrcred");
+			return fetchLrcRedLyrics(title, artist, duration);
+		},
 	},
-	{ id: "genius", label: "Genius", attribution: "Genius", kinds: ["plain"] },
-];
+	genius: {
+		label: "Genius",
+		attribution: "Genius",
+		kinds: ["plain"],
+		async load({ songId, title, artist }) {
+			const [{ fetchGeniusLyrics }, { getTrackMeta }] = await Promise.all([
+				import("./genius"),
+				import("../youtube/youtube-client"),
+			]);
+			const meta = await getTrackMeta(songId).catch(() => null);
+			return fetchGeniusLyrics(title, artist, meta?.album?.name);
+		},
+	},
+	vocadb: {
+		label: "VocaDB",
+		attribution: "VocaDB",
+		kinds: ["plain"],
+		async load({ title, artist, duration }) {
+			const { fetchVocadbLyrics } = await import("./vocadb");
+			const plain = await fetchVocadbLyrics(title, artist, duration);
+			return plain ? { synced: null, plain, confirmed: true } : null;
+		},
+	},
+} satisfies Record<string, ProviderDefinition>;
 
-export const DEFAULT_LYRICS_PROVIDER_ORDER: LyricsProviderId[] = [
-	"youtube",
-	"lrclib",
-	"musixmatch",
-	"lrcred",
-	"genius",
-	"vocadb",
-];
+export type LyricsProviderId = keyof typeof providers;
+export type LyricsProvider = Omit<ProviderDefinition, "load"> & {
+	id: LyricsProviderId;
+};
+export type LyricsSources = Partial<
+	Record<LyricsProviderId, ProviderLyrics | null>
+>;
+export const DEFAULT_LYRICS_PROVIDER_ORDER = Object.keys(
+	providers,
+) as LyricsProviderId[];
 
-const VALID_IDS = new Set<LyricsProviderId>(DEFAULT_LYRICS_PROVIDER_ORDER);
+export function lyricsProvider(id: LyricsProviderId): LyricsProvider {
+	const { label, attribution, kinds } = providers[id];
+	return { id, label, attribution, kinds };
+}
+
+export function loadLyricsSources(
+	query: LyricsQuery,
+	deliver: (id: LyricsProviderId, lyrics: ProviderLyrics | null) => void,
+) {
+	let active = true;
+	for (const id of DEFAULT_LYRICS_PROVIDER_ORDER) {
+		void providers[id].load(query).then(
+			(result) => {
+				if (active) deliver(id, result);
+			},
+			() => {
+				if (active) deliver(id, null);
+			},
+		);
+	}
+	return () => {
+		active = false;
+	};
+}
 
 /**
  * Coerces stored/unknown data into a valid provider order: keeps known ids in
@@ -79,7 +144,7 @@ export function normalizeProviderOrder(value: unknown): LyricsProviderId[] {
 	const order: LyricsProviderId[] = [];
 	if (Array.isArray(value)) {
 		for (const id of value) {
-			if (typeof id === "string" && VALID_IDS.has(id as LyricsProviderId)) {
+			if (typeof id === "string" && Object.hasOwn(providers, id)) {
 				const providerId = id as LyricsProviderId;
 				if (!order.includes(providerId)) order.push(providerId);
 			}
@@ -89,21 +154,6 @@ export function normalizeProviderOrder(value: unknown): LyricsProviderId[] {
 		if (!order.includes(id)) order.push(id);
 	}
 	return order;
-}
-
-/** Timing level of the lyrics a provider payload actually carries. */
-export function lyricsKind(lyrics: { synced: LrcLine[] | null }): LyricsKind {
-	if (!lyrics.synced) return "plain";
-	return lyrics.synced.some((line) => line.words && line.words.length > 0)
-		? "word"
-		: "synced";
-}
-
-/** What the display picker needs to know about a provider's lyrics. */
-export interface SelectableLyrics {
-	synced: LrcLine[] | null;
-	/** Matched on artist + title (or authoritative), not a loose match. */
-	confirmed: boolean;
 }
 
 /**
@@ -116,7 +166,7 @@ export interface SelectableLyrics {
  */
 export function pickProvider<T extends string>(
 	order: readonly T[],
-	sources: Readonly<Record<T, SelectableLyrics | null | undefined>>,
+	sources: Readonly<Partial<Record<T, SelectableLyrics | null>>>,
 	preferSynced: boolean,
 ): T | null {
 	const available = order.filter((id) => sources[id]);

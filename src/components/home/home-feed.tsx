@@ -21,8 +21,8 @@ import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import {
 	hideHomeSection,
 	isHomeSectionHidden,
@@ -32,10 +32,10 @@ import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { getSettings, useSettings } from "@/lib/stores/settings";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
-import { useMediaQuery } from "@/lib/utils/hooks";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { cn } from "@/lib/utils/utils";
+import { MOBILE_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 import {
 	type FeedItem,
 	feedItemKey,
@@ -48,13 +48,9 @@ import {
 	patchCachedHomeFeedSong,
 	readCachedHomeFeed,
 } from "@/lib/youtube/home-feed-cache";
-import {
-	enrichSongsWithDescriptions,
-	enrichSongsWithUploads,
-} from "@/lib/youtube/song-description";
+import { enrichSongRows } from "@/lib/youtube/song-description";
 
 /** Matches Tailwind's `md` breakpoint; below it the feed uses compact rows. */
-const MOBILE_QUERY = "(max-width: 767.98px)";
 /** Devices with a touchscreen — the only ones that can swipe rows. */
 const TOUCH_QUERY = "(any-pointer: coarse)";
 /** Rows per home section on phones before "Show more". */
@@ -465,19 +461,11 @@ export function HomeFeed() {
 			// reopening within the TTL skips the enrichment request entirely.
 			patchCachedHomeFeedSong(updated);
 		};
-		// Descriptions resolve ambiguous credits and upload detection keeps
-		// reuploads raw; each continuation page feeds both pipelines.
 		const enrich = (list: HomeSection[]) => {
 			const songs = feedSongs(list);
 			if (songs.length === 0) return;
-			const playingId = playingIdRef.current;
 			cancels.push(
-				enrichSongsWithDescriptions(
-					songs,
-					applyUpdatedSong,
-					playingId ? new Set([playingId]) : undefined,
-				),
-				enrichSongsWithUploads(songs, applyUpdatedSong),
+				enrichSongRows(songs, applyUpdatedSong, playingIdRef.current),
 			);
 		};
 		setLoadingMore(true);

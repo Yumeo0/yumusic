@@ -5,7 +5,7 @@
  * counterpart in a PlaylistPanelVideoWrapper — this is where the song
  * version's id and listing metadata can be read from.
  */
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 
 /** The queue-entry fields needed from a PlaylistPanelVideo. */
 export interface QueueEntry {

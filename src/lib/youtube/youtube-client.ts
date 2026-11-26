@@ -1,279 +1,18 @@
-import {
-	Innertube,
-	Parser,
-	Platform,
-	type Types,
-	UniversalCache,
-	Utils,
-	YT,
-	YTNodes,
-} from "youtubei.js/web";
-import type { LrcLine } from "../lyrics/lrclib";
+import { type Innertube, Parser, Utils, YT, YTNodes } from "youtubei.js/web";
+import type { LrcLine } from "../lyrics/lyrics";
+import type { LibraryPlaylist } from "../music/playlist";
 import { LruCache } from "../utils/lru-cache";
-import { NEEDS_BODY_HEADER, PROXY_ORIGIN } from "../utils/tauri";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 import { botguardService } from "./botguard-service";
+import { getYoutubeClient } from "./client-session";
 import { getOembedMetadata } from "./oembed";
+import { canonicalPlaylistId, playlistBrowseId } from "./playlist-id";
 import { readSessionProfile, selectedGoogleEmail } from "./session-profile";
 import { type SongVersion, songVersionEntryFromQueue } from "./song-version";
-
-/** Base64-encodes a request body for transport inside an HTTP header. */
-async function bodyToBase64(body: BodyInit): Promise<string | null> {
-	let bytes: Uint8Array;
-	if (typeof body === "string") {
-		bytes = new TextEncoder().encode(body);
-	} else if (body instanceof Blob) {
-		bytes = new Uint8Array(await body.arrayBuffer());
-	} else if (body instanceof ArrayBuffer) {
-		bytes = new Uint8Array(body);
-	} else if (ArrayBuffer.isView(body)) {
-		bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-	} else {
-		return null;
-	}
-	let binary = "";
-	for (let i = 0; i < bytes.length; i += 0x8000) {
-		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-	}
-	return btoa(binary);
-}
+import { youtubeFetch } from "./youtube-fetch";
 
 export type Playlist = Awaited<ReturnType<Innertube["music"]["getPlaylist"]>>;
-export type Library = Awaited<ReturnType<Innertube["music"]["getLibrary"]>>;
 export type HomeFeed = Awaited<ReturnType<Innertube["music"]["getHomeFeed"]>>;
-
-interface ClientSlot {
-	instance: Innertube | null;
-	/** Cookie the cached client was built with (`null` = signed out). */
-	cookie: string | null;
-	/** In-flight creation, shared by callers asking for the same auth state. */
-	pending: Promise<Innertube> | null;
-	pendingCookie: string | null;
-}
-
-function createSlot(): ClientSlot {
-	return { instance: null, cookie: null, pending: null, pendingCookie: null };
-}
-
-// The app always fetches in English (matching the UI). A single client suffices
-// because `hl` lives on the shared session.
-const enClientSlot = createSlot();
-
-// Set up JavaScript evaluator for deciphering URLs
-Platform.shim.eval = async (
-	data: Types.BuildScriptResult,
-	env: Record<string, Types.VMPrimative>,
-) => {
-	const properties = [];
-
-	if (env.n) {
-		properties.push(`n: exportedVars.nFunction("${env.n}")`);
-	}
-
-	if (env.sig) {
-		properties.push(`sig: exportedVars.sigFunction("${env.sig}")`);
-	}
-
-	const code = `${data.output}\nreturn { ${properties.join(", ")} }`;
-
-	return new Function(code)();
-};
-
-export async function fetchFunction(
-	input: RequestInfo | URL,
-	init?: RequestInit,
-): Promise<Response> {
-	const userCookie = await window.electron.getCookie();
-
-	const urlStr =
-		typeof input === "string"
-			? input
-			: input instanceof URL
-				? input.toString()
-				: input.url;
-	const url = new URL(urlStr);
-
-	const proxyUrl = new URL(`${PROXY_ORIGIN}${url.pathname}${url.search}`);
-	proxyUrl.searchParams.set("__host", url.host);
-
-	const headersObj: Record<string, string> = {};
-
-	// Helper to extract headers from HeadersInit
-	const extractHeaders = (headers?: HeadersInit) => {
-		if (!headers) return;
-		if (headers instanceof Headers) {
-			headers.forEach((value, key) => {
-				headersObj[key] = value;
-			});
-		} else if (Array.isArray(headers)) {
-			headers.forEach(([key, value]) => {
-				headersObj[key] = value;
-			});
-		} else {
-			Object.entries(headers).forEach(([key, value]) => {
-				headersObj[key] = value as string;
-			});
-		}
-	};
-
-	if (input instanceof Request) {
-		extractHeaders(input.headers);
-	}
-	if (init?.headers) {
-		extractHeaders(init.headers);
-	}
-
-	// Match the browser session that minted the token, including Android's
-	// dedicated desktop YouTube view rather than the music view's mobile UA.
-	const isYoutube =
-		url.hostname === "youtube.com" || url.hostname.endsWith(".youtube.com");
-	if (
-		(isYoutube || url.hostname.endsWith(".googlevideo.com")) &&
-		botguardService.playbackUserAgent &&
-		!headersObj["User-Agent"] &&
-		!headersObj["user-agent"]
-	) {
-		headersObj["User-Agent"] = botguardService.playbackUserAgent;
-	}
-	const cookie =
-		userCookie || (isYoutube ? botguardService.playbackCookie : undefined);
-	if (cookie && !headersObj.cookie && !headersObj.Cookie) {
-		headersObj.Cookie = cookie;
-	}
-
-	let body: BodyInit | null = null;
-	const method =
-		init?.method || (input instanceof Request ? input.method : "GET");
-
-	// Only read body for non-GET/HEAD requests
-	if (method !== "GET" && method !== "HEAD") {
-		if (init?.body) {
-			body = init.body;
-		} else if (input instanceof Request && input.body) {
-			try {
-				body = await input.blob();
-			} catch (error) {
-				console.error("[fetchFunction] Failed to read body:", error);
-			}
-		}
-	}
-
-	// Propagate SABR cancellation so skipped tracks stop retaining response buffers.
-	const controller = new AbortController();
-	const timeoutId = setTimeout(() => {
-		console.error("[fetchFunction] Request timed out after 30 seconds");
-		controller.abort();
-	}, 30000);
-	try {
-		const proxyHeaders: Record<string, string> = {
-			"X-Proxy-Headers": JSON.stringify(headersObj),
-		};
-		if (NEEDS_BODY_HEADER && body != null) {
-			const encoded = await bodyToBase64(body);
-			if (encoded) proxyHeaders["X-Proxy-Body"] = encoded;
-		}
-
-		const response = await fetch(proxyUrl.toString(), {
-			method: method,
-			headers: proxyHeaders,
-			body: body,
-			signal: AbortSignal.any([
-				controller.signal,
-				...(init?.signal
-					? [init.signal]
-					: input instanceof Request
-						? [input.signal]
-						: []),
-			]),
-		});
-
-		clearTimeout(timeoutId);
-		if (!response.ok) {
-			response
-				.clone()
-				.text()
-				.then((body) =>
-					console.error("[fetchFunction] Error body:", body.slice(0, 600)),
-				)
-				.catch(() => undefined);
-		}
-		return response;
-	} catch (error) {
-		console.error("[fetchFunction] Fetch failed:", error);
-		throw error;
-	} finally {
-		clearTimeout(timeoutId);
-	}
-}
-
-// Bun's `fetch` type carries a `preconnect` member; provide a no-op so
-// the custom fetch is assignable to youtubei.js' `typeof fetch` option.
-Object.assign(fetchFunction, { preconnect: () => undefined });
-
-/**
- * Returns a cached Innertube client for the given language slot, creating it at
- * most once per auth state. Concurrent callers share the in-flight creation,
- * and a signed-out creation can never replace an already-authenticated client —
- * without these guarantees, data fetches that start before the login cookie is
- * available (the home feed mounts before the layout's login check) could
- * clobber the session and silently drop the account: wrong recommendations, an
- * empty library and a nameless "User" in the sidebar.
- */
-async function getClientFromSlot(
-	slot: ClientSlot,
-	lang: string,
-	cookie?: string,
-	refresh = false,
-): Promise<Innertube> {
-	const desired = cookie || (await window.electron.getCookie()) || null;
-
-	// Reuse the current client when it already matches; never downgrade an
-	// authenticated client just because no cookie was available this call.
-	if (!refresh && slot.instance && (desired === slot.cookie || !desired)) {
-		return slot.instance;
-	}
-
-	// Share an in-flight creation for the same auth state.
-	if (slot.pending && slot.pendingCookie === desired) {
-		return slot.pending;
-	}
-
-	slot.pendingCookie = desired;
-	let pending: Promise<Innertube>;
-	pending = Innertube.create({
-		cache: new UniversalCache(false),
-		generate_session_locally: true,
-		cookie: desired || undefined,
-		lang,
-		// Bun's `fetch` type carries a required `preconnect` member that the
-		// DOM-flavored custom fetch lacks; the runtime object satisfies it
-		// via the Object.assign above.
-		fetch: fetchFunction as typeof fetch,
-	})
-		.then((client) => {
-			// Only adopt this client if no newer auth state was requested while
-			// this creation was in flight.
-			if (slot.pendingCookie === desired) {
-				slot.instance = client;
-				slot.cookie = desired;
-			}
-			return client;
-		})
-		.finally(() => {
-			if (slot.pending === pending) {
-				slot.pending = null;
-				slot.pendingCookie = null;
-			}
-		});
-	slot.pending = pending;
-
-	return pending;
-}
-
-/** The app's Innertube client, pinned to English to match the UI. */
-export function getYoutubeClient(cookie?: string, refresh = false) {
-	return getClientFromSlot(enClientSlot, "en", cookie, refresh);
-}
 
 export async function getUserProfile() {
 	const client = await getYoutubeClient();
@@ -300,20 +39,6 @@ export async function getUserProfile() {
 	});
 }
 
-export async function getUserPlaylists() {
-	const client = await getYoutubeClient();
-	try {
-		const library = await client.music.getLibrary();
-		// The library usually contains sections like "Recent activity", "Playlists", etc.
-		// We want to find the playlists section or just return everything for now to inspect
-		return library;
-	} catch (error) {
-		console.error("Failed to get playlists:", error);
-		return null;
-	}
-}
-
-/** The account's rating for a song; null means "not rated". */
 export type SongRating = "like" | "dislike" | null;
 
 /**
@@ -391,23 +116,16 @@ export async function getPlaylist(id: string) {
 	}
 }
 
-export interface LibraryPlaylist {
-	id: string;
-	title: string;
-	subtitle: string;
-	thumbnail: string | null;
-}
-
 let libraryPlaylistsCache: LibraryPlaylist[] | null = null;
 
 export function patchLibraryPlaylist(
 	id: string,
 	patch: { title: string; thumbnail: string | null },
 ) {
-	const raw = editablePlaylistId(id);
+	const raw = canonicalPlaylistId(id);
 	if (libraryPlaylistsCache)
 		libraryPlaylistsCache = libraryPlaylistsCache.map((item) =>
-			editablePlaylistId(item.id) === raw ? { ...item, ...patch } : item,
+			canonicalPlaylistId(item.id) === raw ? { ...item, ...patch } : item,
 		);
 }
 
@@ -415,6 +133,16 @@ export function patchLibraryPlaylist(
  * The user's playlists from the library — shared by the playlists page and
  * the "Add to playlist" dialog. Cached for the session unless `force` is set.
  */
+async function getUserPlaylists() {
+	const client = await getYoutubeClient();
+	try {
+		return await client.music.getLibrary();
+	} catch (error) {
+		console.error("Failed to get playlists:", error);
+		return null;
+	}
+}
+
 export async function getLibraryPlaylists(
 	force = false,
 ): Promise<LibraryPlaylist[]> {
@@ -452,15 +180,9 @@ export async function getLibraryPlaylists(
 	return list;
 }
 
-/** The edit endpoint expects the raw id, without the browse-id "VL" prefix. */
-function editablePlaylistId(id: string): string {
-	return id.startsWith("VL") ? id.slice(2) : id;
-}
-
-/** Adds a video to a playlist the user owns. */
 export async function addSongToPlaylist(playlistId: string, videoId: string) {
 	const client = await getYoutubeClient();
-	await client.playlist.addVideos(editablePlaylistId(playlistId), [videoId]);
+	await client.playlist.addVideos(canonicalPlaylistId(playlistId), [videoId]);
 }
 
 /**
@@ -515,7 +237,7 @@ async function findSetVideoId(
 	playlistId: string,
 	videoId: string,
 ): Promise<string | null> {
-	const browseId = playlistId.startsWith("VL") ? playlistId : `VL${playlistId}`;
+	const browseId = playlistBrowseId(playlistId);
 	const seen = new Set<string>();
 	let continuation: string | null = null;
 	for (let page = 0; page < 6; page++) {
@@ -551,7 +273,7 @@ export async function removeSongFromPlaylist(
 	const setVideoId = await findSetVideoId(client, playlistId, videoId);
 	if (!setVideoId) throw new Error("Song not found in the playlist");
 	const response = await client.actions.execute("/browse/edit_playlist", {
-		playlistId: editablePlaylistId(playlistId),
+		playlistId: canonicalPlaylistId(playlistId),
 		actions: [{ action: "ACTION_REMOVE_VIDEO", setVideoId }],
 	});
 	if (!response.success) {
@@ -577,7 +299,7 @@ export async function createPlaylist(
 export async function deletePlaylist(playlistId: string) {
 	const client = await getYoutubeClient();
 	const response = await client.actions.execute("/playlist/delete", {
-		playlistId: editablePlaylistId(playlistId),
+		playlistId: canonicalPlaylistId(playlistId),
 	});
 	if (!response.success) {
 		throw new Error(`Playlist delete failed (HTTP ${response.status_code})`);
@@ -599,7 +321,7 @@ async function editPlaylistActions(
 	actions: Array<Record<string, unknown>>,
 ): Promise<unknown> {
 	const response = await client.actions.execute("/browse/edit_playlist", {
-		playlistId: editablePlaylistId(playlistId),
+		playlistId: canonicalPlaylistId(playlistId),
 		actions,
 		// Music-only actions (custom thumbnails) are rejected with the default
 		// WEB client context; run every playlist edit as YouTube Music.
@@ -1052,7 +774,7 @@ interface TimedLyricsBrowseResponse {
 }
 
 async function fetchTimedLyrics(browseId: string): Promise<LrcLine[] | null> {
-	const response = await fetchFunction(
+	const response = await youtubeFetch(
 		"https://music.youtube.com/youtubei/v1/browse?prettyPrint=false",
 		{
 			method: "POST",
@@ -1350,7 +1072,7 @@ async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 		if (!current) return null;
 		const versionEntry = songVersionEntryFromQueue(wrappers, videoId);
 		const oembed = await getOembedMetadata(videoId, (input, init) =>
-			fetchFunction(input, init),
+			youtubeFetch(input, init),
 		);
 		return {
 			album: current.album

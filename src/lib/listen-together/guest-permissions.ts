@@ -1,4 +1,4 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import type { RepeatMode } from "@/lib/player/repeat";
 import { notifySyncChange } from "../sync/events";
 
@@ -138,31 +138,52 @@ export function actionLabel(action: RoomAction, subject?: Song | null): string {
 	}
 }
 
+const STORAGE_KEY = "yumusic:guest-permissions:v1";
+
+export function readSavedGuestPermissions():
+	| GuestPermissions
+	| undefined
+	| null {
+	try {
+		const raw = localStorage.getItem(STORAGE_KEY);
+		if (raw === null) return undefined;
+		const value: unknown = JSON.parse(raw);
+		if (!validPermissions(value)) return null;
+		return Object.fromEntries(
+			Object.keys(defaultPermissions).map((key) => [
+				key,
+				value[key as PermissionCategory],
+			]),
+		) as GuestPermissions;
+	} catch {
+		return null;
+	}
+}
+
+export function replaceSavedGuestPermissions(value: GuestPermissions | null) {
+	if (value) localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+	else localStorage.removeItem(STORAGE_KEY);
+	notifySyncChange();
+}
+
 export interface PermissionsStorage {
 	read: () => GuestPermissions;
 	write: (value: GuestPermissions) => void;
 }
 export const permissionsStorage: PermissionsStorage = {
 	read() {
-		const fallback = Object.fromEntries(
-			Object.keys(defaultPermissions).map((key) => [key, "deny"]),
-		) as GuestPermissions;
-		try {
-			const raw = localStorage.getItem("yumusic:guest-permissions:v1");
-			if (raw === null) return { ...defaultPermissions };
-			const value = JSON.parse(raw);
-			return validPermissions(value) ? value : fallback;
-		} catch {
-			return fallback;
-		}
+		const saved = readSavedGuestPermissions();
+		if (saved === undefined) return { ...defaultPermissions };
+		return (
+			saved ??
+			(Object.fromEntries(
+				Object.keys(defaultPermissions).map((key) => [key, "deny"]),
+			) as GuestPermissions)
+		);
 	},
 	write(value) {
 		try {
-			localStorage.setItem(
-				"yumusic:guest-permissions:v1",
-				JSON.stringify(value),
-			);
-			notifySyncChange();
+			replaceSavedGuestPermissions(value);
 		} catch {
 			throw new Error("Could not save guest permissions.");
 		}

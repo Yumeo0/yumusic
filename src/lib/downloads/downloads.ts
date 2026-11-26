@@ -1,20 +1,19 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { SabrStream } from "googlevideo/sabr-stream";
-import { buildSabrFormat, EnabledTrackTypes } from "googlevideo/utils";
 import { useSyncExternalStore } from "react";
-import { Constants } from "youtubei.js";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import {
 	getSettings,
 	updateSettings,
 	useSettings,
 } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
+import { bytesToBase64 } from "@/lib/utils/base64";
 import { applySongDescription } from "@/lib/utils/description";
-import { botguardService } from "@/lib/youtube/botguard-service";
-import { loadPlaylistSongs } from "@/lib/youtube/playlist-data";
+import { loadPlaylistView } from "@/lib/youtube/playlist-data";
+import { createSabrAudioSource } from "@/lib/youtube/sabr-source";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
-import { fetchFunction, getPlaybackStream } from "@/lib/youtube/youtube-client";
+import { getPlaybackStream } from "@/lib/youtube/youtube-client";
+import { canonicalPlaylistId } from "../youtube/playlist-id";
 
 /**
  * Download manager: saves songs as audio files in the app's data directory
@@ -138,6 +137,21 @@ export function getDownloadEntry(id: string): DownloadEntry | undefined {
 	return entries.get(id);
 }
 
+export function useDownloadEntry(id: string | undefined) {
+	const entry = () => (id ? entries.get(id) : undefined);
+	return useSyncExternalStore(subscribe, entry, entry);
+}
+
+export function useDownloadStatus(id: string | undefined) {
+	const status = () => (id ? statuses.get(id) : undefined);
+	return useSyncExternalStore(subscribe, status, status);
+}
+
+export function usePlaylistDownloadJob(id: string | undefined) {
+	const job = () => (id ? jobs.get(canonicalPlaylistId(id)) : undefined);
+	return useSyncExternalStore(subscribe, job, job);
+}
+
 /** Loads the stored index once at startup. */
 let hydratePromise: Promise<void> | null = null;
 /** True once the stored index has been read; keeps sync from racing startup. */
@@ -172,6 +186,7 @@ let current: {
 	song: Song;
 	jobId?: string;
 	cancel: () => void;
+	settled: Promise<void>;
 } | null = null;
 let pumping = false;
 
@@ -190,9 +205,12 @@ function settle(item: QueueItem, ok: boolean) {
 	if (!item.jobId) return;
 	const job = jobs.get(item.jobId);
 	if (!job) return;
-	job.done += 1;
-	if (!ok) job.failed += 1;
-	if (job.done >= job.total) finishJob(item.jobId);
+	const done = job.done + 1;
+	if (done >= job.total) {
+		finishJob(item.jobId);
+		return;
+	}
+	jobs.set(item.jobId, { ...job, done, failed: job.failed + (ok ? 0 : 1) });
 	emit();
 }
 
@@ -233,14 +251,20 @@ async function pump() {
 /** Buffers `song` to disk. Returns false when it failed (or was cancelled). */
 async function runDownload(item: QueueItem): Promise<boolean> {
 	const { song } = item;
-	let cancelled = false;
+	const controller = new AbortController();
+	const { signal } = controller;
 	let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-	let stream: SabrStream | null = null;
+	let disposeStream: (() => void) | undefined;
+	let finishTransfer!: () => void;
+	const settled = new Promise<void>((resolve) => {
+		finishTransfer = resolve;
+	});
 	current = {
+		settled,
 		cancel: () => {
-			cancelled = true;
+			controller.abort();
 			void reader?.cancel().catch(() => undefined);
-			void stream?.abort().catch(() => undefined);
+			disposeStream?.();
 		},
 		jobId: item.jobId,
 		song,
@@ -252,7 +276,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 	let lastProgressEmit = 0;
 	try {
 		const result = await getPlaybackStream(song.id);
-		if (cancelled) throw new Error("cancelled");
+		signal.throwIfAborted();
 		// Hydration may have filled the index while this sat in the queue:
 		// the file is already stored, so re-downloading it is wasted work.
 		if (entries.has(song.id)) {
@@ -261,8 +285,6 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			return true;
 		}
 		const videoInfo = result.videoInfo;
-		const streamingData = videoInfo.streaming_data;
-		if (!streamingData) throw new Error("streaming data is missing");
 		// Keep the uploader description with the stored song: playback uses it
 		// to refine the parsed title/artist, and it is saved in the index.
 		const description =
@@ -275,47 +297,15 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		const enriched = description
 			? applySongDescription(song, description)
 			: song;
-		const decipher = async (url?: string) =>
-			(await result.innertube.session.player?.decipher(url)) as string;
-		const client = result.innertube.session.context.client;
-		const ustreamerConfig =
-			videoInfo.player_config?.media_common_config
-				.media_ustreamer_request_config?.video_playback_ustreamer_config;
-		const clientInfo = {
-			osName: client.osName,
-			osVersion: client.osVersion,
-			clientName: parseInt(
-				Constants.CLIENT_NAME_IDS[
-					client.clientName as keyof typeof Constants.CLIENT_NAME_IDS
-				],
-				10,
-			),
-			clientVersion: client.clientVersion,
-		};
-
-		stream = new SabrStream({
-			audioHighWaterMark: 256 * 1024,
-			videoHighWaterMark: 0,
-			videoId: result.videoId,
-			fetchFunction: fetchFunction as unknown as typeof fetch,
-			serverAbrStreamingUrl: await decipher(
-				streamingData.server_abr_streaming_url,
-			),
-			videoPlaybackUstreamerConfig: ustreamerConfig ?? "",
-			clientInfo,
-			poToken: await botguardService.mintToken(result.videoId),
-			formats: streamingData.adaptive_formats.map(buildSabrFormat),
-		});
-		if (cancelled) throw new Error("cancelled");
-
-		const { audioStream, selectedFormats } = stream.start({
-			enabledTrackTypes: EnabledTrackTypes.AUDIO_ONLY,
-			audioPreferences: {},
-			isPostLiveDvr: false,
-		});
-		if (cancelled) throw new Error("cancelled");
-
-		const mime = selectedFormats.audioFormat?.mimeType ?? "";
+		const createAudio = await createSabrAudioSource(
+			result.videoId,
+			videoInfo,
+			result.innertube,
+			signal,
+		);
+		signal.throwIfAborted();
+		const { audio, mime, contentLength: totalBytes, dispose } = createAudio();
+		disposeStream = dispose;
 		// Both containers are detected from their magic bytes by the asset
 		// protocol, and `.mp4` also has a safe MIME fallback if not.
 		const ext = mime.includes("webm")
@@ -323,12 +313,11 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			: mime.includes("mp4")
 				? "mp4"
 				: "bin";
-		const totalBytes = selectedFormats.audioFormat?.contentLength ?? 0;
 
 		token = await invoke<string>("download_begin", { songId: song.id, ext });
-		if (cancelled) throw new Error("cancelled");
+		signal.throwIfAborted();
 
-		reader = audioStream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+		reader = audio.getReader();
 		let pending: Uint8Array[] = [];
 		let pendingBytes = 0;
 		let received = 0;
@@ -349,7 +338,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			});
 		};
 
-		while (!cancelled) {
+		while (!signal.aborted) {
 			const { value, done } = await reader.read();
 			if (done) break;
 			if (!value || value.byteLength === 0) continue;
@@ -369,16 +358,15 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			}
 			if (pendingBytes >= CHUNK_BYTES) await flush();
 		}
-		if (cancelled) throw new Error("cancelled");
+		signal.throwIfAborted();
 		await flush();
+		signal.throwIfAborted();
 
 		const entry = await invoke<DownloadEntry>("download_finish", {
 			metadata: {
 				artist: enriched.artist,
 				description,
 				duration: enriched.duration ?? null,
-				ext,
-				id: enriched.id,
 				thumbnail: enriched.thumbnail || null,
 				title: enriched.title,
 			},
@@ -397,7 +385,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			}
 		}
 		// Failures stay in the queue with a retry action instead of toasting.
-		if (!cancelled) {
+		if (!signal.aborted) {
 			statuses.set(song.id, { phase: "error", song });
 			console.error("[downloads] download failed:", error);
 		} else {
@@ -405,7 +393,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		}
 		return false;
 	} finally {
-		void stream?.abort().catch(() => undefined);
+		disposeStream?.();
 		await reader?.cancel().catch(() => undefined);
 		reader?.releaseLock();
 		// Clear the running slot *before* publishing. Emitting inside the
@@ -413,6 +401,7 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 		// in the queue until some unrelated change re-rendered it (playlist
 		// items were masked by `settle`'s job update emit).
 		current = null;
+		finishTransfer();
 		emit();
 	}
 }
@@ -450,14 +439,15 @@ export function downloadSongs(songs: Song[]) {
  * already has one, otherwise loads it. The menu shows aggregate progress
  * through the `jobs` map while this runs.
  */
-export function downloadPlaylist(id: string, title: string, songs?: Song[]) {
+function downloadPlaylist(playlistId: string, title: string, songs?: Song[]) {
+	const id = canonicalPlaylistId(playlistId);
 	if (!isTauri() || jobs.has(id)) return;
 	jobs.set(id, { done: 0, failed: 0, title, total: 0 });
 	emit();
 	void (async () => {
 		try {
-			const list =
-				songs && songs.length > 0 ? songs : await loadPlaylistSongs(id);
+			const list = songs?.length ? songs : (await loadPlaylistView(id))?.songs;
+			if (!list) throw new Error("Could not load playlist");
 			if (list.length === 0) {
 				jobs.delete(id);
 				emit();
@@ -466,12 +456,15 @@ export function downloadPlaylist(id: string, title: string, songs?: Song[]) {
 			}
 			const job = jobs.get(id);
 			if (!job) return;
-			job.total = list.length;
+			jobs.set(id, { ...job, total: list.length });
 			const added = enqueue(list.map((song) => ({ jobId: id, song })));
-			// Songs that were already stored count as done right away.
-			job.done = list.length - added;
-			if (added === 0) finishJob(id);
-			else emit();
+			if (added === 0) {
+				finishJob(id);
+			} else {
+				// Songs already stored or queued elsewhere count toward the job.
+				jobs.set(id, { ...job, total: list.length, done: list.length - added });
+				emit();
+			}
 		} catch (error) {
 			jobs.delete(id);
 			emit();
@@ -483,13 +476,17 @@ export function downloadPlaylist(id: string, title: string, songs?: Song[]) {
 
 /** Whether the playlist is kept downloaded (the toggle's on state). */
 export function isPlaylistDownloaded(id: string): boolean {
-	return getSettings().downloadedPlaylists.includes(id);
+	return getSettings().downloadedPlaylists.some(
+		(saved) => canonicalPlaylistId(saved) === canonicalPlaylistId(id),
+	);
 }
 
 /** Reactive version of `isPlaylistDownloaded` for menus and buttons. */
 export function usePlaylistDownloaded(id: string): boolean {
 	const [settings] = useSettings();
-	return settings.downloadedPlaylists.includes(id);
+	return settings.downloadedPlaylists.some(
+		(saved) => canonicalPlaylistId(saved) === canonicalPlaylistId(id),
+	);
 }
 
 /**
@@ -505,15 +502,18 @@ export function togglePlaylistDownload(
 ) {
 	if (!isTauri()) return;
 	const { downloadedPlaylists } = getSettings();
-	if (downloadedPlaylists.includes(id)) {
+	if (isPlaylistDownloaded(id)) {
 		updateSettings({
 			downloadedPlaylists: downloadedPlaylists.filter(
-				(playlistId) => playlistId !== id,
+				(playlistId) =>
+					canonicalPlaylistId(playlistId) !== canonicalPlaylistId(id),
 			),
 		});
 		return;
 	}
-	updateSettings({ downloadedPlaylists: [...downloadedPlaylists, id] });
+	updateSettings({
+		downloadedPlaylists: [...downloadedPlaylists, canonicalPlaylistId(id)],
+	});
 	downloadPlaylist(id, title, songs);
 }
 
@@ -534,20 +534,20 @@ export function syncDownloadedPlaylist(
 	// Before the stored index is read, every song would look missing and the
 	// whole playlist would be re-downloaded. Wait for the next visit instead.
 	if (!hydrated || songs.length === 0 || !isPlaylistDownloaded(id)) return;
-	const missing = songs.some(
+	const missing = songs.filter(
 		(song) => !entries.has(song.id) && !statuses.has(song.id),
 	);
-	if (!missing) return;
-	downloadPlaylist(id, title, songs);
+	if (missing.length) downloadPlaylist(id, title, missing);
 }
 
 /** Drops a deleted playlist's subscription (its files stay until removed). */
 export function unsubscribeDownloadedPlaylist(id: string) {
 	const { downloadedPlaylists } = getSettings();
-	if (!downloadedPlaylists.includes(id)) return;
+	if (!isPlaylistDownloaded(id)) return;
 	updateSettings({
 		downloadedPlaylists: downloadedPlaylists.filter(
-			(playlistId) => playlistId !== id,
+			(playlistId) =>
+				canonicalPlaylistId(playlistId) !== canonicalPlaylistId(id),
 		),
 	});
 }
@@ -569,8 +569,11 @@ export function cancelDownload(id: string) {
 /** Removes downloads from disk and the index. */
 export async function removeDownloads(ids: string[]) {
 	if (ids.length === 0) return;
+	const transfer =
+		current && ids.includes(current.song.id) ? current.settled : null;
 	for (const id of ids) cancelDownload(id);
 	try {
+		if (transfer) await transfer;
 		const failed = await invoke<string[]>("downloads_remove", { ids });
 		const failedIds = new Set(failed);
 		const next = new Map(entries);
@@ -593,13 +596,4 @@ export async function removeDownloads(ids: string[]) {
 		console.error("[downloads] removal failed:", error);
 		showToast("Could not remove downloads");
 	}
-}
-
-/** Base64 for the IPC transport; the Rust side decodes and appends. */
-function bytesToBase64(bytes: Uint8Array): string {
-	let binary = "";
-	for (let i = 0; i < bytes.length; i += 0x8000) {
-		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-	}
-	return btoa(binary);
 }

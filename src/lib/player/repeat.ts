@@ -1,7 +1,11 @@
 export type RepeatMode = "off" | "all" | "one";
 
+export function isRepeatMode(value: unknown): value is RepeatMode {
+	return value === "all" || value === "one" || value === "off";
+}
+
 export function normalizeRepeatMode(value: unknown): RepeatMode {
-	return value === "all" || value === "one" ? value : "off";
+	return isRepeatMode(value) ? value : "off";
 }
 
 /** Manual skips bypass repeat-one; natural endings repeat the current entry. */

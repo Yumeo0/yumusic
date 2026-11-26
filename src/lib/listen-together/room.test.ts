@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { Peer, PeerOptions } from "peerjs";
+import type { PlaybackSnapshot } from "../player/shared-playback";
 import {
 	defaultPermissions,
 	type GuestPermissions,
@@ -11,7 +12,6 @@ import {
 } from "./guest-permissions";
 import { generateRoomIdentity, type RoomIdentity } from "./identity";
 import type { JoinSettings, JoinSettingsStorage } from "./join-settings";
-import type { RoomPlayback } from "./protocol";
 import { ListenRoom, type RoomState } from "./room";
 
 class Channel extends EventEmitter {
@@ -153,7 +153,7 @@ const create = (
 	rooms.push(room);
 	return room;
 };
-const state: Omit<RoomPlayback, "revision" | "sentAt"> = {
+const state: Omit<PlaybackSnapshot, "revision" | "sentAt"> = {
 	instance: "track1",
 	queue: [
 		{ id: "abcdefghijk", title: "Test", artist: "Artist", thumbnail: "" },

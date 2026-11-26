@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import type { PlaylistView } from "../music/playlist";
 import {
 	addSongToCachedPlaylist,
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
 	type PlaylistChange,
-	type PlaylistView,
 	patchCachedPlaylistMetadata,
 	readCache,
+	readPlaylistView,
 	subscribeToLibraryChanges,
 	subscribeToPlaylistChanges,
 	writeCache,
@@ -81,9 +82,7 @@ test("confirmed edits update library and detail aliases before notifying open vi
 	});
 	expect(visibleTitle).toBe("New name");
 	for (const id of ["PLtest", "VLPLtest"])
-		expect(
-			readCache<PlaylistView>(PLAYLIST_CACHE_PREFIX + id)?.data,
-		).toMatchObject({
+		expect(readPlaylistView(id)?.data).toMatchObject({
 			title: "New name",
 			thumbnail: "new-cover",
 			songs: [song],
@@ -104,9 +103,7 @@ test("adding from a different view notifies the open playlist and retains delibe
 	});
 	addSongToCachedPlaylist("PLtest", song);
 	expect(visible).toHaveLength(2);
-	expect(
-		readCache<PlaylistView>(`${PLAYLIST_CACHE_PREFIX}VLPLtest`)?.data.songs,
-	).toHaveLength(2);
+	expect(readPlaylistView("VLPLtest")?.data.songs).toHaveLength(2);
 	stop();
 });
 

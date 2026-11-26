@@ -253,33 +253,38 @@ async function publish() {
 	});
 }
 
-/** Flatpak owns its updates; publish a download without a Tauri updater entry. */
-async function publishFlatpak() {
-	const bundleDir = process.env.BUNDLE_DIR ?? "flatpak-dist";
-	const arch = process.env.FLATPAK_ARCH ?? ARCH[process.arch] ?? process.arch;
-	const path = `${bundleDir}/YuMusic_${version}_${arch}.flatpak`;
-	if (!(await file(path).exists()))
-		throw new Error(`Flatpak bundle not found: ${path}`);
-	const release = await ensureRelease(
-		tag,
-		() => process.env.RELEASE_NOTES ?? releaseNotes(),
-	);
-	await upload(release, path);
-	console.log(`Published Flatpak: ${basename(path)}`);
-}
+const standaloneArtifacts = {
+	flatpak: {
+		label: "Flatpak",
+		missing: "Flatpak bundle",
+		directory: "flatpak-dist",
+		filename: () => {
+			const arch =
+				process.env.FLATPAK_ARCH ?? ARCH[process.arch] ?? process.arch;
+			return `YuMusic_${version}_${arch}.flatpak`;
+		},
+	},
+	android: {
+		label: "Android APK",
+		missing: "Android APK",
+		directory: "android-dist",
+		filename: () => `YuMusic_${version}_universal.apk`,
+	},
+};
 
-/** Android APKs use Android signing and do not enter the desktop updater. */
-async function publishAndroid() {
-	const bundleDir = process.env.BUNDLE_DIR ?? "android-dist";
-	const path = `${bundleDir}/YuMusic_${version}_universal.apk`;
+/** Standalone packages use their platform's update mechanism. */
+async function publishStandalone(kind: keyof typeof standaloneArtifacts) {
+	const artifact = standaloneArtifacts[kind];
+	const directory = process.env.BUNDLE_DIR ?? artifact.directory;
+	const path = `${directory}/${artifact.filename()}`;
 	if (!(await file(path).exists()))
-		throw new Error(`Android APK not found: ${path}`);
+		throw new Error(`${artifact.missing} not found: ${path}`);
 	const release = await ensureRelease(
 		tag,
 		() => process.env.RELEASE_NOTES ?? releaseNotes(),
 	);
 	await upload(release, path);
-	console.log(`Published Android APK: ${basename(path)}`);
+	console.log(`Published ${artifact.label}: ${basename(path)}`);
 }
 
 function isNewerVersion(candidate: string, current: string): boolean {
@@ -363,9 +368,9 @@ if (command === "publish") {
 } else if (command === "latest") {
 	await latest();
 } else if (command === "publish-flatpak") {
-	await publishFlatpak();
+	await publishStandalone("flatpak");
 } else if (command === "publish-android") {
-	await publishAndroid();
+	await publishStandalone("android");
 } else {
 	throw new Error(
 		"Usage: bun scripts/forgejo-release.ts <publish|publish-flatpak|publish-android|latest>",

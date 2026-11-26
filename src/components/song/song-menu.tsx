@@ -17,15 +17,16 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer } from "@/contexts/player-context";
 import {
 	cancelDownload,
 	downloadSong,
 	removeDownloads,
-	useDownloads,
+	useDownloadEntry,
+	useDownloadStatus,
 } from "@/lib/downloads/downloads";
 import { preventSwipeContextMenu } from "@/lib/motion/swipe-context-menu";
+import type { Song } from "@/lib/music/song";
 import { shareSong } from "@/lib/services/share";
 import { type Settings, useSettings } from "@/lib/stores/settings";
 import { showToast } from "@/lib/stores/toast";
@@ -153,14 +154,12 @@ export function SongContextMenu({
 		duration: playerDuration,
 	} = usePlayer();
 	const [settings] = useSettings();
-	const downloads = useDownloads();
+	const downloadEntry = useDownloadEntry(song?.id);
+	const downloadStatus = useDownloadStatus(song?.id);
 	const [playlistSong, setPlaylistSong] = useState<Song | null>(null);
 	const navigate = useNavigate();
 
 	if (!song) return <>{children}</>;
-
-	const downloadEntry = downloads.entries.get(song.id);
-	const downloadStatus = downloads.statuses.get(song.id);
 
 	return (
 		<>

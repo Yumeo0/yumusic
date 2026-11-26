@@ -9,6 +9,7 @@ import { file, fileURLToPath, write } from "bun";
 import { prepareReleaseChangelog } from "./changelog";
 import { runGit } from "./git";
 import { addMetainfoRelease } from "./metainfo";
+import { prepareVersionFiles, versionPaths } from "./stamp-version";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const BUMPS = ["patch", "minor", "major"] as const;
@@ -19,12 +20,10 @@ function fail(message: string): never {
 	process.exit(1);
 }
 
-/** Runs git and captures its output. */
 function git(...args: string[]): string {
 	return runGit(args, { cwd: ROOT });
 }
 
-/** Runs git with its output going straight to the terminal. */
 function gitInherit(...args: string[]) {
 	runGit(args, { cwd: ROOT, inherit: true });
 }
@@ -36,12 +35,6 @@ function bumpVersion(version: string, bump: Bump): string {
 	if (bump === "major") return `${major + 1}.0.0`;
 	if (bump === "minor") return `${major}.${minor + 1}.0`;
 	return `${major}.${minor}.${patch + 1}`;
-}
-
-async function updateJsonVersion(path: URL, version: string) {
-	const json = (await file(path).json()) as Record<string, unknown>;
-	json.version = version;
-	await write(path, `${JSON.stringify(json, null, "\t")}\n`);
 }
 
 const args = process.argv.slice(2);
@@ -75,47 +68,24 @@ const changelog = prepareReleaseChangelog(
 	date,
 );
 
-await updateJsonVersion(packagePath, version);
-await updateJsonVersion(
-	new URL("../src-tauri/tauri.conf.json", import.meta.url),
-	version,
-);
-
-const cargoPath = new URL("../src-tauri/Cargo.toml", import.meta.url);
-const cargo = (await file(cargoPath).text()).replace(
-	/^version = "[^"]*"/m,
-	`version = "${version}"`,
-);
-await write(cargoPath, cargo);
-
-const lockPath = new URL("../src-tauri/Cargo.lock", import.meta.url);
-const lock = await file(lockPath).text();
-const updatedLock = lock.replace(
-	/(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(?=")/,
-	`$1${version}`,
-);
-if (updatedLock === lock) {
-	fail("Could not find the app package in src-tauri/Cargo.lock.");
-}
-await write(lockPath, updatedLock);
-
 const metainfoPath = new URL(
 	"../src-tauri/linux/dev.yumeo.yumusic.metainfo.xml",
 	import.meta.url,
 );
-await write(
-	metainfoPath,
-	addMetainfoRelease(await file(metainfoPath).text(), version, date),
+const metainfo = addMetainfoRelease(
+	await file(metainfoPath).text(),
+	version,
+	date,
 );
+for (const { path, contents } of await prepareVersionFiles(version))
+	await write(path, contents);
+await write(metainfoPath, metainfo);
 await write(changelogPath, changelog);
 
 gitInherit(
 	"add",
 	"CHANGELOG.md",
-	"package.json",
-	"src-tauri/tauri.conf.json",
-	"src-tauri/Cargo.toml",
-	"src-tauri/Cargo.lock",
+	...versionPaths,
 	"src-tauri/linux/dev.yumeo.yumusic.metainfo.xml",
 );
 gitInherit("commit", "-m", `chore: release ${tag}`);

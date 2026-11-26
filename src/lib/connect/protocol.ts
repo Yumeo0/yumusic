@@ -1,13 +1,13 @@
 import {
-	parseMessage,
-	type RoomPlayback,
-	wireSong,
-} from "../listen-together/protocol";
+	type PlaybackSnapshot,
+	parsePlaybackSnapshot,
+	playbackThumbnail,
+} from "../player/shared-playback";
 
 export type DeviceCommand = "pause" | "resume" | "next" | "previous";
 export type DeviceRequest =
 	| { type: "control"; command: DeviceCommand }
-	| { type: "transfer"; playback: RoomPlayback }
+	| { type: "transfer"; playback: PlaybackSnapshot }
 	| { type: "handoff"; target: string };
 
 export function parseDeviceRequest(input: unknown): DeviceRequest | null {
@@ -25,20 +25,8 @@ export function parseDeviceRequest(input: unknown): DeviceRequest | null {
 	)
 		return { type: "handoff", target: m.target };
 	if (m.type === "transfer") {
-		let state: ReturnType<typeof parseMessage>;
-		try {
-			state = parseMessage(
-				JSON.stringify({
-					type: "state",
-					session: "connect",
-					playback: m.playback,
-				}),
-			);
-		} catch {
-			return null;
-		}
-		if (state?.type === "state" && state.playback.song)
-			return { type: "transfer", playback: state.playback };
+		const playback = parsePlaybackSnapshot(m.playback);
+		if (playback?.song) return { type: "transfer", playback };
 	}
 	return null;
 }
@@ -57,12 +45,7 @@ export function deviceStatus(input: unknown): DeviceStatus {
 		unknown
 	>;
 	return {
-		thumbnail: wireSong({
-			id: "",
-			title: "",
-			artist: "",
-			thumbnail: typeof s.thumbnail === "string" ? s.thumbnail : "",
-		}).thumbnail,
+		thumbnail: playbackThumbnail(s.thumbnail),
 		upload: s.upload === true,
 		playing: s.playing === true,
 		room: s.room === true,

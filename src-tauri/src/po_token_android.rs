@@ -66,7 +66,7 @@ pub async fn mint(binding: String) -> Result<PoToken, String> {
 		token,
 		context,
 		account_index: value["accountIndex"].as_u64().unwrap_or(0),
-		cookie: super::super::dedup_cookie_header(value["cookie"].as_str().unwrap_or_default()),
+		cookie: crate::login_session::dedup_cookie_header(value["cookie"].as_str().unwrap_or_default()),
 	})
 }
 

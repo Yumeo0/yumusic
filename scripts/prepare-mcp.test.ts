@@ -55,14 +55,7 @@ test("replaces an existing unprepared copy using native file operations", async 
 	await cp(source, destination, { recursive: true });
 	await prepareMcp(root);
 	expect(await manifestText(destination)).toBe('tauri = "3"\n');
-	const entries = await readdir(join(root, "src-tauri/.cache"));
-	const previous = entries.find((entry) =>
-		entry.startsWith("tauri-plugin-mcp-bridge.previous-"),
-	);
-	expect(previous).toBeDefined();
-	expect(
-		await manifestText(join(root, "src-tauri/.cache", previous ?? "")),
-	).toBe('tauri = "2"\n');
+	expect(await manifestText(source)).toBe('tauri = "2"\n');
 });
 
 test("keeps the prepared copy intact when an updated patch fails", async () => {

@@ -5,8 +5,15 @@ import { DeviceHub } from "@/lib/connect/hub";
 import { AccountDeviceDiscovery, deviceId } from "@/lib/connect/lifecycle";
 import { attachDeviceHub, getDeviceHub } from "@/lib/connect/store";
 import { peerOptions } from "@/lib/listen-together/peer-options";
-import { type RoomPlayback, wireSong } from "@/lib/listen-together/protocol";
 import { listenRoom } from "@/lib/listen-together/room";
+import {
+	type PlaybackSnapshot,
+	playbackInstance,
+	playbackThumbnail,
+	SHARED_AUTOPLAY_LIMIT,
+	sharedPlaybackQueue,
+	wireSong,
+} from "@/lib/player/shared-playback";
 import { updateSettings } from "@/lib/stores/settings";
 import { accountDataClient, supabase } from "@/lib/sync/client";
 import {
@@ -82,9 +89,9 @@ export function DeviceBridge() {
 					{
 						available,
 						status: () => ({
-							thumbnail: live.current.player.currentSong
-								? wireSong(live.current.player.currentSong).thumbnail
-								: "",
+							thumbnail: playbackThumbnail(
+								live.current.player.currentSong?.thumbnail,
+							),
 							upload: live.current.player.currentSong?.upload ?? false,
 							playing: live.current.controls.isPlaying,
 							title: live.current.player.currentSong?.title.slice(0, 500) ?? "",
@@ -95,21 +102,21 @@ export function DeviceBridge() {
 						playback: () => {
 							const { player: p, controls: c } = live.current;
 							if (!p.currentSong) return null;
-							let queue = p.queue;
-							let index = p.currentIndex;
-							if (queue[index]?.id !== p.currentSong.id) {
-								queue = [p.currentSong, ...queue];
-								index = 0;
-							}
-							const start = Math.max(0, index - 100);
+							const { sourceIndex, ...queue } = sharedPlaybackQueue(
+								p.queue,
+								p.currentIndex,
+								p.currentSong,
+							);
 							return {
 								revision: 0,
-								instance: `${p.getPlaybackGeneration()}:${index}:${p.currentSong.id}`,
-								queue: queue.slice(start, start + 300).map((s) => wireSong(s)),
-								index: index - start,
-								song: wireSong(p.currentSong),
+								instance: playbackInstance(
+									p.getPlaybackGeneration(),
+									sourceIndex,
+									p.currentSong.id,
+								),
+								...queue,
 								autoplayQueue: p.autoplayTracks
-									.slice(0, 100)
+									.slice(0, SHARED_AUTOPLAY_LIMIT)
 									.map((s) => wireSong(s)),
 								autoplayEnabled: p.autoplayEnabled,
 								repeatMode: p.repeatMode,
@@ -133,24 +140,14 @@ export function DeviceBridge() {
 							);
 							preparedGeneration = live.current.player.getPlaybackGeneration();
 							await preparation;
-							const until = performance.now() + 20_000;
-							while (valid() && performance.now() < until) {
-								if (
-									preparedGeneration !==
+							if (
+								!valid() ||
+								preparedGeneration !==
 									live.current.player.getPlaybackGeneration()
-								)
-									throw new Error("The destination track changed. Try again.");
-								const media = live.current.player.videoElementRef?.current;
-								if (media?.error)
-									throw new Error(
-										"This track is unavailable on the destination.",
-									);
-								if (media && media.readyState >= 2) return;
-								await new Promise((resolve) => setTimeout(resolve, 100));
-							}
-							throw new Error("The destination could not load this track.");
+							)
+								throw new Error("The destination track changed. Try again.");
 						},
-						start: async (state: RoomPlayback, valid) => {
+						start: async (state: PlaybackSnapshot, valid) => {
 							const p = live.current.player;
 							const media = p.videoElementRef?.current;
 							if (

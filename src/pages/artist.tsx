@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { YTNodes } from "youtubei.js/web";
 import { EqualizerBars } from "@/components/player/waveform";
 import { VirtualTrackList } from "@/components/playlist/virtual-track-list";
 import { SwipeToQueue } from "@/components/queue/swipe-to-queue";
@@ -23,182 +22,22 @@ import { SongRowHover, SongRowRating } from "@/components/song/song-row-hover";
 import { SongTitle } from "@/components/song/song-title";
 import { Alert, AlertAction, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
+import { shuffleFrom } from "@/lib/player/shuffle";
 import { shareLink } from "@/lib/services/share";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
-import { LruCache } from "@/lib/utils/lru-cache";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
-import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
+import { cn } from "@/lib/utils/utils";
 import {
 	type ArtistShelfItem,
-	artistShelfItems,
 	loadArtistCategoryItems,
 } from "@/lib/youtube/artist-category";
-import {
-	channelCardShelves,
-	channelProfileThumbnail,
-	channelVideos,
-} from "@/lib/youtube/channel-data";
-import {
-	artistMixSource,
-	getMixSongs,
-	getYoutubeClient,
-	type MixSource,
-} from "@/lib/youtube/youtube-client";
-
-// Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
-const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-interface ArtistShelf {
-	title: string;
-	items: ArtistShelfItem[];
-	category?: string;
-}
-
-interface ArtistCategory {
-	title: string;
-	endpoint: YTNodes.NavigationEndpoint;
-}
-
-interface ArtistView {
-	name: string;
-	shareUrl: string;
-	description: string | null;
-	thumbnail: string | null;
-	songsTitle: string;
-	songsCategory?: string;
-	songs: Song[];
-	shelves: ArtistShelf[];
-	categories: Map<string, ArtistCategory>;
-	/** Context for the header's "Mix" (radio) action, when the artist has one. */
-	mix: MixSource | null;
-}
-
-const artistCache = new LruCache<
-	string,
-	{ timestamp: number; data: ArtistView }
->(12);
-
-async function fetchArtistView(id: string, force = false): Promise<ArtistView> {
-	const cached = artistCache.get(id);
-	if (!force && cached && Date.now() - cached.timestamp < SYNC_INTERVAL_MS) {
-		return cached.data;
-	}
-
-	const client = await getYoutubeClient();
-	const fetchChannel = async (): Promise<ArtistView> => {
-		const channel = await client.getChannel(id);
-		const metadata = channel.metadata;
-		const name = metadata.title || "Channel";
-		const uploads = channel.has_videos ? await channel.getVideos() : channel;
-		const view: ArtistView = {
-			name,
-			shareUrl: `https://www.youtube.com/channel/${id}`,
-			description: metadata.description || null,
-			thumbnail:
-				hiResThumb(biggestThumb(metadata.avatar ?? metadata.thumbnail)?.url) ||
-				null,
-			songsTitle: "Videos",
-			songs: channelVideos(uploads.videos, name, id),
-			shelves: [],
-			categories: new Map(),
-			mix: null,
-		};
-		artistCache.set(id, { timestamp: Date.now(), data: view });
-		return view;
-	};
-	let artist: Awaited<ReturnType<typeof client.music.getArtist>>;
-	try {
-		artist = await client.music.getArtist(id);
-	} catch {
-		return fetchChannel();
-	}
-	const header = artist.header;
-	const mix = artistMixSource(header);
-
-	let name = "Artist";
-	let description: string | null = null;
-	let thumbnail: string | null = null;
-	if (header instanceof YTNodes.MusicImmersiveHeader) {
-		name = header.title?.text || name;
-		description = header.description?.toString() || null;
-		thumbnail = hiResThumb(biggestThumb(header.thumbnail?.contents)?.url);
-	} else if (header instanceof YTNodes.MusicVisualHeader) {
-		name = header.title?.text || name;
-		thumbnail = channelProfileThumbnail(header);
-	} else if (header instanceof YTNodes.MusicHeader) {
-		name = header.title?.text || name;
-	}
-
-	const shelves: ArtistShelf[] = channelCardShelves(
-		artist.page.contents_memo?.getType(YTNodes.MusicCardShelf) ?? [],
-	);
-	const categories = new Map<string, ArtistCategory>();
-	let songs: Song[] = [];
-	let songsTitle = "Songs";
-	let songsCategory: string | undefined;
-
-	function registerCategory(
-		title: string,
-		endpoint: YTNodes.NavigationEndpoint | undefined,
-	) {
-		if (!endpoint || typeof endpoint.payload?.browseId !== "string") return;
-		const slug =
-			title
-				.toLowerCase()
-				.replace(/&/g, " and ")
-				.replace(/[^\p{L}\p{N}]+/gu, "-")
-				.replace(/^-|-$/g, "") || "items";
-		let key = slug;
-		for (let suffix = 2; categories.has(key); suffix++) {
-			key = `${slug}-${suffix}`;
-		}
-		categories.set(key, { endpoint, title: title || "Items" });
-		return key;
-	}
-
-	for (const section of artist.sections ?? []) {
-		const carousel = section.is(YTNodes.MusicCarouselShelf);
-		const title =
-			(carousel ? section.header?.title?.text : section.title?.text) || "";
-		const endpoint = carousel
-			? section.header?.more_content?.endpoint
-			: (section.endpoint ?? section.bottom_button?.endpoint);
-		const category = registerCategory(title, endpoint);
-		const items = artistShelfItems(section.contents ?? [], name, id);
-		if (!carousel && /songs?/i.test(title) && songs.length === 0) {
-			const shelfSongs = items.flatMap((item) =>
-				item.song ? [item.song] : [],
-			);
-			if (shelfSongs.length > 0) {
-				songs = shelfSongs;
-				songsTitle = title;
-				songsCategory = category;
-				continue;
-			}
-		}
-		if (items.length || category) shelves.push({ title, items, category });
-	}
-
-	const view: ArtistView = {
-		name,
-		shareUrl: `https://music.youtube.com/channel/${id}`,
-		description,
-		thumbnail,
-		songsTitle,
-		songsCategory,
-		songs,
-		shelves,
-		categories,
-		mix,
-	};
-	if (!songs.length && !shelves.length) return fetchChannel();
-	artistCache.set(id, { timestamp: Date.now(), data: view });
-	return view;
-}
+import { type ArtistView, fetchArtistView } from "@/lib/youtube/artist-data";
+import { getYoutubeClient } from "@/lib/youtube/client-session";
+import { getMixSongs } from "@/lib/youtube/youtube-client";
 
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();
@@ -210,24 +49,30 @@ export default function ArtistPage() {
 	const [mixPending, setMixPending] = useState(false);
 	const artistName = artist?.name;
 
+	const requestId = useRef(0);
 	const fetchArtist = async (force = false) => {
 		if (!id) return;
+		const request = ++requestId.current;
 		try {
 			setLoading(true);
 			setError(null);
 			const view = await fetchArtistView(id, force);
-			setArtist(view);
-		} catch (err) {
-			console.error("Error fetching artist:", err);
+			if (requestId.current === request) setArtist(view);
+		} catch (error) {
+			if (requestId.current !== request) return;
+			console.error("Error fetching artist:", error);
 			setError("Failed to load artist.");
 		} finally {
-			setLoading(false);
+			if (requestId.current === request) setLoading(false);
 		}
 	};
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchArtist changes on every re-render and should not be used as a hook dependency.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: each route id owns its requests.
 	useEffect(() => {
-		fetchArtist();
+		void fetchArtist();
+		return () => {
+			requestId.current++;
+		};
 	}, [id]);
 
 	const onBack = () => navigate(-1);
@@ -346,11 +191,7 @@ export default function ArtistPage() {
 								<button
 									className="flex h-10 items-center gap-2 rounded-full border border-foreground/12 px-5 text-sm font-medium transition-colors duration-200 hover:border-primary/40 hover:text-primary active:scale-95"
 									onClick={() => {
-										const shuffled = [...artist.songs];
-										for (let i = shuffled.length - 1; i > 0; i--) {
-											const j = Math.floor(Math.random() * (i + 1));
-											[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-										}
+										const shuffled = shuffleFrom(artist.songs, 0);
 										play(shuffled[0], shuffled.slice(1));
 									}}
 									title="Shuffle play"

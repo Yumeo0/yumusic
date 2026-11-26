@@ -18,8 +18,8 @@ import { Input } from "@/components/ui/input";
 import { useDownloads } from "@/lib/downloads/downloads";
 import {
 	LYRICS_KIND_LABELS,
-	LYRICS_PROVIDERS,
 	type LyricsProviderId,
+	lyricsProvider,
 } from "@/lib/lyrics/lyrics-providers";
 import { validateListenbrainzToken } from "@/lib/services/listenbrainz";
 import { updaterSupported } from "@/lib/services/updater";
@@ -33,8 +33,6 @@ import {
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatBytes } from "@/lib/utils/utils";
 
-const PROVIDER_LABEL = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.label]));
-const PROVIDER_KINDS = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p.kinds]));
 const LISTENBRAINZ_TOKEN_URL = "https://listenbrainz.org/settings/#auth-token";
 
 interface SettingsPageProps {
@@ -390,10 +388,10 @@ export default function SettingsPage({
 								>
 									<GripVertical className="size-4 shrink-0 cursor-grab text-muted-foreground/50" />
 									<span className="flex-1 text-sm font-medium">
-										{PROVIDER_LABEL.get(id) ?? id}
+										{lyricsProvider(id).label}
 									</span>
 									<div className="flex shrink-0 items-center gap-1">
-										{PROVIDER_KINDS.get(id)?.map((kind) => (
+										{lyricsProvider(id).kinds.map((kind) => (
 											<span
 												className={cn(
 													"rounded-full border px-1.5 py-px text-[10px] font-medium",
@@ -408,7 +406,7 @@ export default function SettingsPage({
 										))}
 									</div>
 									<button
-										aria-label={`Move ${PROVIDER_LABEL.get(id) ?? id} up`}
+										aria-label={`Move ${lyricsProvider(id).label} up`}
 										className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 										disabled={index === 0}
 										onClick={() => moveProvider(id, -1)}
@@ -417,7 +415,7 @@ export default function SettingsPage({
 										<ChevronUp className="size-4" />
 									</button>
 									<button
-										aria-label={`Move ${PROVIDER_LABEL.get(id) ?? id} down`}
+										aria-label={`Move ${lyricsProvider(id).label} down`}
 										className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-foreground/8 hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
 										disabled={index === settings.lyricsProviderOrder.length - 1}
 										onClick={() => moveProvider(id, 1)}

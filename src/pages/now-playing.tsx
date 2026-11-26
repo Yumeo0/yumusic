@@ -31,7 +31,6 @@ import { CoverImage } from "@/components/song/cover-image";
 import { DownloadedBadge } from "@/components/song/downloaded-badge";
 import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
-import type { Song } from "@/contexts/player-context";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useRoomRole } from "@/lib/listen-together/room";
 import { useLyricsMorph } from "@/lib/motion/lyrics-motion";
@@ -40,9 +39,11 @@ import {
 	type QueueGestureCheck,
 	useQueueDragGesture,
 	useQueueSheetGesture,
-} from "@/lib/motion/queue-drag";
+} from "@/lib/motion/queue-gesture";
+import type { Song } from "@/lib/music/song";
 import { setQueueRevealTarget } from "@/lib/player/player-ui";
-import { useMediaTime } from "@/lib/utils/hooks";
+import { nextQueueIndex } from "@/lib/player/repeat";
+import { useMediaTime } from "@/lib/player/use-media-time";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
 
@@ -87,14 +88,12 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 	// and slides them out on hover. It reserves no height: the stack grows to
 	// fit its cards when revealed, pushing the content below it. When the queue
 	// has nothing left, repeat wraps it before falling back to autoplay.
-	const nextQueueStart =
-		repeatMode === "one"
-			? currentIndex
-			: queue.length > currentIndex + 1
-				? currentIndex + 1
-				: repeatMode === "all" && queue.length > 0
-					? 0
-					: null;
+	const nextQueueStart = nextQueueIndex(
+		currentIndex,
+		queue.length,
+		repeatMode,
+		true,
+	);
 	const hasQueuedNext = nextQueueStart !== null && nextQueueStart >= 0;
 	const upNext = hasQueuedNext
 		? repeatMode === "one" && currentSong

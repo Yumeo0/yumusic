@@ -2,15 +2,15 @@ import type { Session } from "@supabase/supabase-js";
 import { useSyncExternalStore } from "react";
 import { accountDataClient, supabase } from "./client";
 import { SyncEngine } from "./engine";
-import { SYNC_DATA_CHANGED } from "./events";
+import { SYNC_ACCOUNT_CHANGED, SYNC_DATA_CHANGED } from "./events";
 import {
 	applyLocalData,
-	migrateRichPresenceBackup,
-	migrateScrobbleBackup,
+	GUEST_BACKUP_KEY,
+	migrateGuestBackup,
 	readLocalData,
 	supportsSyncKey,
 } from "./local-data";
-import { finishBrowserSignIn } from "./oauth";
+import { authorizeWithGoogle, finishBrowserSignIn } from "./oauth";
 import {
 	createJournal,
 	type Journal,
@@ -23,6 +23,7 @@ import {
 	matchesYouTubeAccount,
 	YOUTUBE_ACCOUNT_CHANGED,
 	type YouTubeSyncAccount,
+	youtubeSyncEmail,
 } from "./youtube-account";
 
 interface SyncState {
@@ -60,7 +61,6 @@ export const useCloudSync = () =>
 	);
 
 const OWNER_KEY = "yumusic:sync:owner";
-const GUEST_KEY = "yumusic:sync:guest";
 const journalKey = (owner: string) => `yumusic:sync:journal:${owner}`;
 let owner: string | null = null;
 let engine: SyncEngine | null = null;
@@ -82,14 +82,14 @@ function changeAccount(session: Session | null) {
 		return;
 	engine?.capture();
 	engine?.stop();
-	window.dispatchEvent(new Event("yumusic:sync-account-changed"));
+	window.dispatchEvent(new Event(SYNC_ACCOUNT_CHANGED));
 	engine = null;
 	owner = null;
 	// Restore local preferences when leaving an account. A different account
 	// never inherits the previous account's private trust or pinned lists.
 	const storedOwner = localStorage.getItem(OWNER_KEY);
 	if (storedOwner && storedOwner !== nextOwner) {
-		const guest = localStorage.getItem(GUEST_KEY);
+		const guest = localStorage.getItem(GUEST_BACKUP_KEY);
 		if (!guest)
 			throw new Error(
 				"The device's local settings backup is missing. Sync is paused.",
@@ -108,7 +108,7 @@ function changeAccount(session: Session | null) {
 		return;
 	}
 	if (!storedOwner || storedOwner !== nextOwner)
-		localStorage.setItem(GUEST_KEY, JSON.stringify(readLocalData()));
+		localStorage.setItem(GUEST_BACKUP_KEY, JSON.stringify(readLocalData()));
 	const raw = localStorage.getItem(journalKey(nextOwner));
 	let journal: Journal;
 	if (raw) {
@@ -213,6 +213,16 @@ function scheduleSync(delay = 750) {
 	}, delay);
 }
 
+export async function signInWithGoogle() {
+	const email = youtubeSyncEmail();
+	const {
+		data: { session },
+	} = await supabase.auth.getSession();
+	if (session && matchesYouTubeAccount(session.user)) return;
+	if (session) await signOutOfSync();
+	await authorizeWithGoogle(email);
+}
+
 export async function signOutOfSync() {
 	engine?.capture();
 	await (
@@ -225,8 +235,7 @@ export async function signOutOfSync() {
 
 export function startCloudSync() {
 	try {
-		migrateScrobbleBackup();
-		migrateRichPresenceBackup();
+		migrateGuestBackup();
 	} catch {
 		update({
 			status: "error",
@@ -308,8 +317,6 @@ export function startCloudSync() {
 		if (document.visibilityState === "visible") scheduleSync(0);
 	};
 	window.addEventListener(SYNC_DATA_CHANGED, onChange);
-	window.addEventListener("yumusic:settings-changed", onChange);
-	window.addEventListener("yumusic:pinned-changed", onChange);
 	window.addEventListener("storage", onStorage);
 	window.addEventListener("online", onResume);
 	document.addEventListener("visibilitychange", onResume);
@@ -339,8 +346,6 @@ export function startCloudSync() {
 		clearInterval(interval);
 		window.removeEventListener(SYNC_DATA_CHANGED, onChange);
 		window.removeEventListener(YOUTUBE_ACCOUNT_CHANGED, reconcile);
-		window.removeEventListener("yumusic:settings-changed", onChange);
-		window.removeEventListener("yumusic:pinned-changed", onChange);
 		window.removeEventListener("storage", onStorage);
 		window.removeEventListener("online", onResume);
 		document.removeEventListener("visibilitychange", onResume);

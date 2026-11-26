@@ -2,19 +2,14 @@ import { Dialog } from "@base-ui/react/dialog";
 import { ImagePlus, Loader2, Music2, Trash2, X } from "lucide-react";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
-import { reconcilePinnedPlaylists } from "@/lib/stores/pinned";
-import { patchCachedPlaylistMetadata } from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { cn, hiResThumb } from "@/lib/utils/utils";
+import { cn } from "@/lib/utils/utils";
 import { fetchPlaylistEditMeta } from "@/lib/youtube/playlist-data";
-import {
-	type PlaylistEdit,
-	type PlaylistPrivacy,
-	patchLibraryPlaylist,
-	removePlaylistThumbnail,
-	setPlaylistThumbnail,
-	updatePlaylist,
+import { savePlaylistEdits } from "@/lib/youtube/playlist-mutations";
+import type {
+	PlaylistEdit,
+	PlaylistPrivacy,
 } from "@/lib/youtube/youtube-client";
 
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
@@ -29,25 +24,18 @@ const PRIVACY_OPTIONS: Array<{
 	{ value: "PRIVATE", label: "Private", hint: "Only you can see it." },
 ];
 
-export interface PlaylistEditResult {
-	title: string;
-	thumbnail: string | null;
-}
-
 export function EditPlaylistDialog({
 	playlistId,
 	currentTitle,
 	currentThumbnail,
 	open,
 	onOpenChange,
-	onSaved,
 }: {
 	playlistId: string | null;
 	currentTitle: string;
 	currentThumbnail: string | null;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
-	onSaved?: (result: PlaylistEditResult) => void;
 }) {
 	const [status, setStatus] = useState<"loading" | "ready" | "forbidden">(
 		"loading",
@@ -149,33 +137,14 @@ export function EditPlaylistDialog({
 				}
 				if (privacy !== initial.privacy) changes.privacy = privacy;
 			}
-			await updatePlaylist(playlistId, changes);
-			const coverChanged = !!coverFile || removeCover;
-			let coverUrl: string | null = null;
-			if (coverFile) {
-				const bytes = new Uint8Array(await coverFile.arrayBuffer());
-				coverUrl = await setPlaylistThumbnail(
-					playlistId,
-					bytes,
-					coverFile.type || "image/jpeg",
-				);
-			} else if (removeCover) {
-				coverUrl = await removePlaylistThumbnail(playlistId);
-			}
-			// Prefer the cover echoed by the edit; only a follow-up browse can
-			// still serve the old image for a while after the change.
-			const thumbnail = coverUrl
-				? hiResThumb(coverUrl, 1080)
-				: coverChanged
-					? ((await fetchPlaylistEditMeta(playlistId))?.thumbnail ??
-						currentThumbnail)
-					: currentThumbnail;
-			const result = { title: name, thumbnail };
-			patchLibraryPlaylist(playlistId, result);
-			patchCachedPlaylistMetadata(playlistId, result);
-			reconcilePinnedPlaylists([{ id: playlistId, ...result }]);
+			await savePlaylistEdits(
+				playlistId,
+				name,
+				changes,
+				currentThumbnail,
+				coverFile ?? (removeCover ? "remove" : undefined),
+			);
 			showToast("Playlist updated");
-			onSaved?.({ title: name, thumbnail });
 			onOpenChange(false);
 		} catch (error) {
 			console.error("[YuMusic] edit playlist failed:", error);

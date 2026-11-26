@@ -5,7 +5,7 @@
  * video entry renders — and plays — the song version from then on.
  */
 import { useSyncExternalStore } from "react";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { LruCache } from "@/lib/utils/lru-cache";
 
 const replacements = new LruCache<string, Song>(256);

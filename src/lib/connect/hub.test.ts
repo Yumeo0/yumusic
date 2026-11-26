@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import type { Peer } from "peerjs";
-import { type RoomPlayback, wireSong } from "../listen-together/protocol";
+import { type PlaybackSnapshot, wireSong } from "../player/shared-playback";
 import { type DeviceAdapter, DeviceHub, type PlaybackDevice } from "./hub";
 import { deviceStatus, parseDeviceRequest } from "./protocol";
 
@@ -72,7 +72,7 @@ const song = {
 	artist: "Artist",
 	thumbnail: "",
 };
-const playback: RoomPlayback = {
+const playback: PlaybackSnapshot = {
 	revision: 0,
 	instance: "one",
 	queue: [song],

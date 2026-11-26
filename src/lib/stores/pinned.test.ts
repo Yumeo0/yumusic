@@ -30,8 +30,8 @@ function installBrowserStubs() {
 		configurable: true,
 		writable: true,
 		value: {
-			dispatchEvent: () => {
-				dispatched += 1;
+			dispatchEvent: (event: Event) => {
+				if (event.type === "yumusic:pinned-changed") dispatched += 1;
 				return true;
 			},
 		},

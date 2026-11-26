@@ -1,5 +1,5 @@
 import { type YT, YTNodes } from "youtubei.js/web";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { biggestThumb, hiResThumb } from "../utils/utils";
 
 /** Profile headers keep the avatar in front of a separate wide banner. */

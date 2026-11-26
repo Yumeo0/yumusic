@@ -2,8 +2,7 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { defaultPermissions } from "../listen-together/guest-permissions";
 import {
 	applyLocalData,
-	migrateRichPresenceBackup,
-	migrateScrobbleBackup,
+	migrateGuestBackup,
 	readLocalData,
 	SCROBBLE_SYNC_KEY,
 	supportsSyncKey,
@@ -89,11 +88,11 @@ test("rich presence imports on a default-off device and disabling it removes the
 test("upgrading preserves device-local rich presence in the sign-out backup", () => {
 	storage.set("yumusic:sync:guest", JSON.stringify(readLocalData()));
 	storage.set("yumusic:settings:v1", JSON.stringify({ discordRpc: true }));
-	migrateRichPresenceBackup();
+	migrateGuestBackup();
 	const backup = storage.get("yumusic:sync:guest") || "{}";
 	expect(JSON.parse(backup)["settings/discordRpc"]).toBe(true);
 	applyLocalData({});
-	migrateRichPresenceBackup();
+	migrateGuestBackup();
 	expect(storage.get("yumusic:sync:guest")).toBe(backup);
 	applyLocalData(JSON.parse(backup));
 	expect(readLocalData()["settings/discordRpc"]).toBe(true);
@@ -141,7 +140,7 @@ test("upgrading preserves the original device's scrobbling in its sign-out backu
 			listenbrainzToken: "original-device-token",
 		}),
 	);
-	migrateScrobbleBackup();
+	migrateGuestBackup();
 	const backup = JSON.parse(storage.get("yumusic:sync:guest") || "{}");
 	expect(backup[SCROBBLE_SYNC_KEY]).toEqual({
 		enabled: true,
@@ -151,7 +150,7 @@ test("upgrading preserves the original device's scrobbling in its sign-out backu
 		...backup,
 		[SCROBBLE_SYNC_KEY]: { enabled: true, token: "cloud-token" },
 	});
-	migrateScrobbleBackup();
+	migrateGuestBackup();
 	applyLocalData(JSON.parse(storage.get("yumusic:sync:guest") || "{}"));
 	expect(readLocalData()[SCROBBLE_SYNC_KEY]).toEqual({
 		enabled: true,

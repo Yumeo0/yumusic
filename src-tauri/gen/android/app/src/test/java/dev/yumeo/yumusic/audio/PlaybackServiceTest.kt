@@ -7,7 +7,6 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.RenderersFactory
-import androidx.media3.session.MediaSession
 import androidx.media3.test.utils.FakeRenderer
 import java.io.File
 import java.time.Duration
@@ -102,13 +101,10 @@ class PlaybackServiceTest {
     val controller = Robolectric.buildService(PlaybackService::class.java).create()
     val service = controller.get()
     try {
-      assertSame(service, PlaybackService.instance)
-      val field = PlaybackService::class.java.getDeclaredField("session").apply { isAccessible = true }
-      val session = field.get(service) as MediaSession
       // JNI playback has no bound controller to register this session for us.
       // An unregistered session never enters foreground and Android stops it.
-      assertEquals(listOf(session), service.sessions)
-      service.metadata(JSONObject().put("canGoNext", true).put("canGoPrevious", false))
+      val session = service.sessions.single()
+      AudioBridge.metadata(JSONObject().put("canGoNext", true).put("canGoPrevious", false).toString())
       assertTrue(session.player.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM))
       assertFalse(session.player.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM))
       // System play requests follow the UI's room permissions.
@@ -130,7 +126,6 @@ class PlaybackServiceTest {
       assertEquals(1, effects.size)
       assertTrue(effects.single().getIntExtra(AudioEffect.EXTRA_AUDIO_SESSION, 0) > 0)
     } finally { controller.destroy() }
-    assertNull(PlaybackService.instance)
     assertTrue(shadowOf(RuntimeEnvironment.getApplication()).broadcastIntents.any { it.action == AudioEffect.ACTION_CLOSE_AUDIO_EFFECT_CONTROL_SESSION })
   }
 }

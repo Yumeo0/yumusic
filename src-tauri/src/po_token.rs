@@ -193,7 +193,7 @@ async fn mint_in_window(app: AppHandle, binding: String) -> Result<PoToken, Stri
 		.clone();
 	let url = Url::parse("https://www.youtube.com/").unwrap();
 	let cookies = window.cookies_for_url(url).map_err(|e| e.to_string())?;
-	let cookie = super::dedup_cookie_header(
+	let cookie = crate::login_session::dedup_cookie_header(
 		&cookies
 			.iter()
 			.map(|cookie| format!("{}={}", cookie.name(), cookie.value()))

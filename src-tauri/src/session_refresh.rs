@@ -3,9 +3,9 @@ use std::future::Future;
 use std::sync::{atomic::Ordering, Arc, Mutex};
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Url};
 
-use super::login_session;
+use super::{login_session, session_window};
 
 const WINDOW: &str = "session-refresh";
 const YOUTUBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -27,44 +27,30 @@ pub async fn refresh(
 	}
 	let finished = Arc::new(Mutex::new(None::<Url>));
 	let on_load = finished.clone();
-	let mut builder = WebviewWindowBuilder::new(
-		app,
-		WINDOW,
-		WebviewUrl::External(Url::parse("about:blank").unwrap()),
-	)
-	.title("Google session recovery")
-	.visible(false)
-	.focused(false)
-	.on_navigation(|url| {
-		url.as_str() == "about:blank"
-			|| login_session::is_youtube_page(url)
-			|| (url.scheme() == "https"
-				&& matches!(
-					url.host_str(),
-					Some(
-						"accounts.google.com"
-							| "accounts.youtube.com"
-							| "youtube.com" | "consent.google.com"
-							| "consent.youtube.com"
-					)
-				))
-	})
-	.on_page_load(move |_, payload| {
-		if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
-			*on_load.lock().unwrap() = Some(payload.url().clone());
-		}
-	});
-	// WebView2 requires identical arguments for windows sharing a cookie store.
-	if let Some(args) = app
-		.config()
-		.app
-		.windows
-		.iter()
-		.find(|config| config.label == "main")
-		.and_then(|config| config.additional_browser_args.clone())
-	{
-		builder = builder.additional_browser_args(&args);
-	}
+	let builder = session_window(app, WINDOW, Url::parse("about:blank").unwrap())
+		.title("Google session recovery")
+		.visible(false)
+		.focused(false)
+		.on_navigation(|url| {
+			url.as_str() == "about:blank"
+				|| login_session::is_youtube_page(url)
+				|| (url.scheme() == "https"
+					&& matches!(
+						url.host_str(),
+						Some(
+							"accounts.google.com"
+								| "accounts.youtube.com"
+								| "youtube.com"
+								| "consent.google.com"
+								| "consent.youtube.com"
+						)
+					))
+		})
+		.on_page_load(move |_, payload| {
+			if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+				*on_load.lock().unwrap() = Some(payload.url().clone());
+			}
+		});
 	let window = builder.build().map_err(|e| e.to_string())?;
 	let result = recover_by_navigation(|url, timeout| {
 		let window = &window;

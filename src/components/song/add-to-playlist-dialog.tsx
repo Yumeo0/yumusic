@@ -2,20 +2,16 @@ import { Dialog } from "@base-ui/react/dialog";
 import { ListMusic, Loader2, Plus, Search, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
-import type { Song } from "@/contexts/player-context";
-import {
-	addSongToCachedPlaylist,
-	invalidateLibraryCache,
-} from "@/lib/stores/playlist-cache";
+import type { LibraryPlaylist } from "@/lib/music/playlist";
+import type { Song } from "@/lib/music/song";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import {
-	addSongToPlaylist,
-	createPlaylist,
-	getLibraryPlaylists,
-	type LibraryPlaylist,
-} from "@/lib/youtube/youtube-client";
+	addPlaylistTrack,
+	createPlaylistWithTrack,
+} from "@/lib/youtube/playlist-mutations";
+import { getLibraryPlaylists } from "@/lib/youtube/youtube-client";
 
 /**
  * Modal for adding a song to one of the user's playlists, with an inline
@@ -67,8 +63,7 @@ export function AddToPlaylistDialog({
 		if (!song || busy !== null) return;
 		setBusy(playlist.id);
 		try {
-			await addSongToPlaylist(playlist.id, song.id);
-			addSongToCachedPlaylist(playlist.id, song);
+			await addPlaylistTrack(playlist.id, song);
 			showToast(`Added to ${playlist.title}`);
 			onOpenChange(false);
 		} catch (error) {
@@ -85,8 +80,7 @@ export function AddToPlaylistDialog({
 		if (!song || !title || busy !== null) return;
 		setBusy("new");
 		try {
-			await createPlaylist(title, song.id);
-			invalidateLibraryCache();
+			await createPlaylistWithTrack(title, song);
 			showToast(`Added to ${title}`);
 			onOpenChange(false);
 		} catch (error) {

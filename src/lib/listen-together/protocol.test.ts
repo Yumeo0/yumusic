@@ -1,12 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
 	expectedPosition,
-	parseInvite,
-	parseMessage,
-	parseRoomAction,
-	type RoomPlayback,
+	type PlaybackSnapshot,
 	wireSong,
-} from "./protocol";
+} from "../player/shared-playback";
+import { parseInvite, parseMessage, parseRoomAction } from "./protocol";
 
 const song = {
 	id: "abcdefghijk",
@@ -14,7 +12,7 @@ const song = {
 	artist: "Artist",
 	thumbnail: "",
 };
-const playback: RoomPlayback = {
+const playback: PlaybackSnapshot = {
 	revision: 1,
 	instance: "track-1",
 	queue: [song, song],

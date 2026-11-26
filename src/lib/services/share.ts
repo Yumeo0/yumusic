@@ -1,4 +1,4 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { showToast } from "../stores/toast";
 import { IS_MOBILE } from "../utils/tauri";
 

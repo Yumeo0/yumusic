@@ -12,29 +12,25 @@ import {
 import { LyricSectionHeading } from "@/components/lyrics/lyric-section";
 import { LyricsSourceSelect } from "@/components/lyrics/lyrics-source-select";
 import { readingSegments, wordProgress } from "@/lib/lyrics/fill";
-import { fetchGeniusLyrics } from "@/lib/lyrics/genius";
 import {
-	fetchSyncedLyrics,
 	type LrcLine,
 	type LrcWord,
-} from "@/lib/lyrics/lrclib";
-import { fetchLrcRedLyrics } from "@/lib/lyrics/lrcred";
+	type LyricsKind,
+	lyricsKind,
+} from "@/lib/lyrics/lyrics";
 import {
 	LYRICS_KIND_LABELS,
-	LYRICS_PROVIDERS,
-	type LyricsKind,
 	type LyricsProviderId,
-	lyricsKind,
+	type LyricsSources,
+	loadLyricsSources,
+	lyricsProvider,
 	pickProvider,
 } from "@/lib/lyrics/lyrics-providers";
-import { fetchMusixmatchSynced } from "@/lib/lyrics/musixmatch";
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
 import { parseLyricSection } from "@/lib/lyrics/sections";
-import { fetchVocadbLyrics } from "@/lib/lyrics/vocadb";
 import { prefersReducedMotion } from "@/lib/motion/spring";
 import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
-import { getSongLyrics, getTrackMeta } from "@/lib/youtube/youtube-client";
 
 interface LyricsPanelProps {
 	songId: string;
@@ -50,33 +46,7 @@ interface LyricsPanelProps {
 	className?: string;
 }
 
-interface ProviderLyrics {
-	synced: LrcLine[] | null;
-	plain: string | null;
-	/** Matched on artist + title (or authoritative), not a loose match. */
-	confirmed: boolean;
-}
-
-/**
- * Per-provider result: `undefined` while the fetch is still in flight, `null`
- * once it settled without lyrics. Each provider fills in as it resolves, so
- * fast sources show up without waiting for the slowest one.
- */
-type LyricsSources = Record<
-	LyricsProviderId,
-	ProviderLyrics | null | undefined
->;
-
-const PROVIDER_BY_ID = new Map(LYRICS_PROVIDERS.map((p) => [p.id, p]));
-
-const PENDING_SOURCES: LyricsSources = {
-	lrclib: undefined,
-	musixmatch: undefined,
-	vocadb: undefined,
-	youtube: undefined,
-	lrcred: undefined,
-	genius: undefined,
-};
+const PENDING_SOURCES: LyricsSources = {};
 
 /** Tooltips for the sync-kind badge in the header. */
 const KIND_TITLES: Record<LyricsKind, string> = {
@@ -102,95 +72,64 @@ export function LyricsPanel({
 	videoRef,
 	className,
 }: LyricsPanelProps) {
-	const [sources, setSources] = useState<LyricsSources>(PENDING_SOURCES);
-	const [view, setView] = useState<LyricsProviderId>("lrclib");
 	const [settings] = useSettings();
-	// A manual provider pick sticks for the current track (until the next song).
-	const manualView = useRef(false);
+	const {
+		lrclibLooseMatch,
+		lyricsProviderOrder: order,
+		preferSyncedLyrics,
+		romanizeLyrics: romanize,
+	} = settings;
+	const requestKey = JSON.stringify([
+		songId,
+		title,
+		artist,
+		duration,
+		lrclibLooseMatch,
+	]);
+	const [fetched, setFetched] = useState<{
+		key: string;
+		sources: LyricsSources;
+	} | null>(null);
+	const [manualView, setManualView] = useState<{
+		songId: string;
+		provider: LyricsProviderId;
+	} | null>(null);
 
 	useEffect(() => {
-		let cancelled = false;
-		setSources(PENDING_SOURCES);
-		manualView.current = false;
+		setFetched({ key: requestKey, sources: PENDING_SOURCES });
+		return loadLyricsSources(
+			{ songId, title, artist, duration, looseMatch: lrclibLooseMatch },
+			(id, lyrics) =>
+				setFetched((previous) =>
+					previous?.key === requestKey
+						? {
+								key: requestKey,
+								sources: { ...previous.sources, [id]: lyrics },
+							}
+						: previous,
+				),
+		);
+	}, [requestKey, songId, title, artist, duration, lrclibLooseMatch]);
 
-		// Each provider lands on its own; a failing fetch counts as "none".
-		const settle = <T,>(
-			id: LyricsProviderId,
-			request: Promise<T>,
-			toLyrics: (result: T) => ProviderLyrics | null,
-		) => {
-			request
-				.then(toLyrics, () => null)
-				.then((lyrics) => {
-					if (!cancelled) setSources((prev) => ({ ...prev, [id]: lyrics }));
-				});
-		};
-
-		settle(
-			"lrclib",
-			fetchSyncedLyrics(title, artist, duration, settings.lrclibLooseMatch),
-			(lrclib) => (lrclib && (lrclib.synced || lrclib.plain) ? lrclib : null),
-		);
-		settle(
-			"musixmatch",
-			fetchMusixmatchSynced(title, artist, duration),
-			(musixmatch) =>
-				musixmatch && musixmatch.length > 0
-					? { synced: musixmatch, plain: null, confirmed: true }
-					: null,
-		);
-		settle("youtube", getSongLyrics(songId), (youtube) =>
-			youtube && (youtube.synced || youtube.plain)
-				? { synced: youtube.synced, plain: youtube.plain, confirmed: true }
-				: null,
-		);
-		settle("vocadb", fetchVocadbLyrics(title, artist, duration), (vocadb) =>
-			vocadb ? { synced: null, plain: vocadb, confirmed: true } : null,
-		);
-		settle(
-			"lrcred",
-			fetchLrcRedLyrics(title, artist, duration),
-			(lrcred) => lrcred,
-		);
-		settle(
-			"genius",
-			getTrackMeta(songId)
-				.catch(() => null)
-				.then((meta) => fetchGeniusLyrics(title, artist, meta?.album?.name)),
-			(genius) => genius,
-		);
-
-		return () => {
-			cancelled = true;
-		};
-	}, [songId, title, artist, duration, settings.lrclibLooseMatch]);
-
-	// Provider order is user-configurable, so selection re-runs when it changes.
-	const order = settings.lyricsProviderOrder;
-	const preferSynced = settings.preferSyncedLyrics;
-
-	// Pick the provider (respecting manual picks) among the sources that have
-	// arrived so far; re-runs as more land, so a better match that resolves
-	// later takes over. A confirmed match beats a loose one, word-synced
-	// lyrics beat line-synced ones; ties keep the priority order.
 	useEffect(() => {
-		const chosen = pickProvider(order, sources, preferSynced);
-		if (chosen === null) return;
-		if (manualView.current && sources[view]) return;
-		setView(chosen);
-	}, [sources, order, preferSynced, view]);
+		setManualView((previous) =>
+			previous?.songId === songId ? previous : null,
+		);
+	}, [songId]);
 
-	const romanize = settings.romanizeLyrics;
-	const available = order.flatMap((id) => {
-		const provider = PROVIDER_BY_ID.get(id);
-		if (!provider || !sources[id]) return [];
-		return [provider];
-	});
+	const sources =
+		fetched?.key === requestKey ? fetched.sources : PENDING_SOURCES;
+	const preferred = manualView?.songId === songId ? manualView.provider : null;
+	const view =
+		preferred && sources[preferred]
+			? preferred
+			: pickProvider(order, sources, preferSyncedLyrics);
+	const available = order.filter((id) => sources[id]).map(lyricsProvider);
 	const pending = order.some((id) => sources[id] === undefined);
-	// The view can briefly point at a provider that hasn't arrived (or has
-	// none) until the selection effect catches up.
-	const active = sources[view] ?? null;
-	const attribution = PROVIDER_BY_ID.get(view)?.attribution;
+	const active = view ? sources[view] : null;
+	const attribution = view ? lyricsProvider(view).attribution : undefined;
+	const selectSource = (provider: LyricsProviderId) =>
+		setManualView({ songId, provider });
 	const kind = active ? lyricsKind(active) : null;
 
 	return (
@@ -208,13 +147,10 @@ export function LyricsPanel({
 					</span>
 				</div>
 				<div className="relative h-9 w-36 md:hidden">
-					{available.length > 0 ? (
+					{view ? (
 						<LyricsSourceSelect
 							key={songId}
-							onChange={(provider) => {
-								manualView.current = true;
-								setView(provider);
-							}}
+							onChange={selectSource}
 							providers={available}
 							value={view}
 						/>
@@ -254,10 +190,7 @@ export function LyricsPanel({
 										: "text-muted-foreground hover:text-foreground",
 								)}
 								key={provider.id}
-								onClick={() => {
-									manualView.current = true;
-									setView(provider.id);
-								}}
+								onClick={() => selectSource(provider.id)}
 								type="button"
 							>
 								{provider.label}

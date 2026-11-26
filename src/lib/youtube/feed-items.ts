@@ -1,5 +1,5 @@
 import { YTNodes } from "youtubei.js/web";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import {
 	biggestThumb,
 	hiResThumb,
@@ -43,10 +43,6 @@ export interface HomeSection {
 	items: FeedItem[];
 }
 
-export function lastThumb(urls: ThumbCandidate[] | undefined): string {
-	return hiResThumb(biggestThumb(urls)?.url);
-}
-
 /** Stable identity of an entry, for keys and continuation de-duplication. */
 export function feedItemKey(item: FeedItem): string {
 	if (item.kind === "song") return `song:${item.song.id}`;
@@ -57,6 +53,10 @@ export function feedItemKey(item: FeedItem): string {
 }
 
 /** Every playable song in the feed, for the description prefetch. */
+function lastThumb(urls: ThumbCandidate[] | undefined): string {
+	return hiResThumb(biggestThumb(urls)?.url);
+}
+
 export function feedSongs(sections: HomeSection[]): Song[] {
 	return sections.flatMap((section) =>
 		section.items.flatMap((item) => (item.kind === "song" ? [item.song] : [])),

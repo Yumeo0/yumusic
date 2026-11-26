@@ -1,5 +1,3 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
 	HouseIcon,
 	LibraryIcon,
@@ -9,7 +7,7 @@ import {
 	SettingsIcon,
 	X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
 	HashRouter,
@@ -20,7 +18,9 @@ import {
 } from "react-router-dom";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { installMobileHaptics } from "@/lib/utils/haptics";
+import { AmbientSync } from "./components/app/ambient-sync";
 import { CloudSync } from "./components/app/cloud-sync";
+import { NativeBackNavigation } from "./components/app/native-back-navigation";
 import { Titlebar } from "./components/app/titlebar";
 import { Toaster } from "./components/app/toaster";
 import { UpdateNotifier } from "./components/app/updates";
@@ -30,806 +30,43 @@ import { RoomPlaybackBridge } from "./components/listen-together/playback-bridge
 import { RoomActivity } from "./components/listen-together/room-activity";
 import { DeviceBridge } from "./components/player/device-bridge";
 import { DeviceActivity } from "./components/player/device-picker";
+import { DiscordPresenceSync } from "./components/player/discord-presence";
+import { ListenBrainzSync } from "./components/player/listenbrainz-sync";
+import { MediaSessionSync } from "./components/player/media-session";
+import { NowPlayingOverlay } from "./components/player/now-playing-overlay";
 import { Player } from "./components/player/player";
 import { PlaylistContextMenu } from "./components/playlist/playlist-menu";
 import { QueuePanel } from "./components/queue/queue-panel";
 import { LinkPreviewDialog } from "./components/song/link-preview-dialog";
-import {
-	PlayerProvider,
-	usePlayer,
-	usePlayerControls,
-} from "./contexts/player-context";
+import { PlayerProvider } from "./contexts/player-context";
 import { hydrateDownloads } from "./lib/downloads/downloads";
 import {
-	useNowPlayingMotion,
-	useNowPlayingSwipe,
-} from "./lib/motion/now-playing-motion";
-import { dismissTopOverlay, handleAppBack } from "./lib/player/app-back";
-import { listeningSession } from "./lib/player/listening";
-import {
-	NATIVE_AUDIO_EVENT,
-	type NativeAudioEvent,
-} from "./lib/player/native-audio";
-import {
-	getNowPlayingOpen,
-	getQueueOpen,
-	setNowPlayingOpen,
-	setQueueOpen,
-	toggleNowPlaying,
-	toggleQueue,
-	useNowPlayingOpen,
-	useQueueOpen,
-} from "./lib/player/player-ui";
-import { findRecording, submitListen } from "./lib/services/listenbrainz";
-import {
-	canonicalPlaylistId,
 	reconcilePinnedPlaylists,
 	usePinnedPlaylists,
 } from "./lib/stores/pinned";
 import {
-	LIBRARY_CACHE_KEY,
 	pruneStaleCacheVersions,
-	readCache,
+	readLibraryCache,
 } from "./lib/stores/playlist-cache";
-import { useSettings } from "./lib/stores/settings";
-import { showToast } from "./lib/stores/toast";
-import { signInWithGoogle } from "./lib/sync/oauth";
-import { signOutOfSync } from "./lib/sync/sync";
-import {
-	getYouTubeSyncAccount,
-	setYouTubeSyncAccount,
-} from "./lib/sync/youtube-account";
-import { loadCoverCrop } from "./lib/utils/cover-crop";
-import { discordArtworkUrl } from "./lib/utils/discord-artwork";
-import { useAmbientColor } from "./lib/utils/hooks";
 import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
-import {
-	displayTitle,
-	formatArtistName,
-	scrobbleTitle,
-} from "./lib/utils/title";
 import { cn } from "./lib/utils/utils";
-import { restoreSession } from "./lib/youtube/restore-session";
-import {
-	getArtistAvatar,
-	getTrackMeta,
-	getUserProfile,
-	getYoutubeClient,
-	type LibraryPlaylist,
-	type TrackMeta,
-} from "./lib/youtube/youtube-client";
+import { canonicalPlaylistId } from "./lib/youtube/playlist-id";
+import { useYouTubeSession } from "./lib/youtube/use-youtube-session";
 import ArtistPage, { ArtistCategoryPage } from "./pages/artist";
 import HomePage from "./pages/home";
 import ListenTogetherPage from "./pages/listen-together";
-import { NowPlayingPage } from "./pages/now-playing";
 import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
 import SettingsPage from "./pages/settings";
 
-/**
- * Mirrors the current song into Discord rich presence while enabled:
- * cover art + album tooltip (linked), artist avatar, clickable song title and
- * artist, plus playback timestamps that freeze while paused. Paused presence
- * expires after 15 minutes and returns when playback resumes.
- */
-function DiscordPresenceSync() {
-	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
-	const { isPlaying } = usePlayerControls();
-	const [settings] = useSettings();
-	const [meta, setMeta] = useState<TrackMeta | null>(null);
-	const [mediaDuration, setMediaDuration] = useState(0);
-
-	const songId = currentSong?.id;
-	const artist = currentSong?.artist ?? "";
-	const title = displayTitle(
-		currentSong?.title ?? "",
-		// Uploader videos keep their raw title (no original/translation split).
-		currentSong?.upload ? "both" : settings.titleMode,
-		settings.cleanTitles,
-		artist,
-	);
-	const cover = currentSong?.thumbnail ?? "";
-	const [discordCover, setDiscordCover] = useState({ source: "", url: "" });
-	useEffect(() => {
-		let cancelled = false;
-		if (settings.discordRpc && cover) {
-			void loadCoverCrop(proxiedImageUrl(cover, 1024)).then((crop) => {
-				if (!cancelled)
-					setDiscordCover({
-						source: cover,
-						url: discordArtworkUrl(cover, crop),
-					});
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [cover, settings.discordRpc]);
-	const artistId =
-		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
-	const discordEnabled = settings.discordRpc;
-	const [discordIdle, setDiscordIdle] = useState(false);
-	const [artistAvatar, setArtistAvatar] = useState<{
-		artistId: string;
-		url: string;
-	} | null>(null);
-	const artistAvatarUrl =
-		artistAvatar && artistAvatar.artistId === artistId
-			? artistAvatar.url
-			: null;
-
-	useEffect(() => {
-		if (!discordEnabled || !artistId) return;
-		let cancelled = false;
-		void getArtistAvatar(artistId).then((url) => {
-			// Discord fetches the avatar directly and limits image URLs to 300 characters.
-			if (!cancelled && url && url.length <= 300 && /^https?:\/\//.test(url)) {
-				setArtistAvatar({ artistId, url });
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [discordEnabled, artistId]);
-
-	// Metadata refreshes, seeks and the presence retry must not restart this
-	// countdown. Only resuming playback or toggling the feature resets it.
-	useEffect(() => {
-		setDiscordIdle(false);
-		if (!discordEnabled || isPlaying) return;
-		const timeout = window.setTimeout(() => setDiscordIdle(true), 15 * 60_000);
-		return () => window.clearTimeout(timeout);
-	}, [discordEnabled, isPlaying]);
-
-	// Track the element's duration reactively: when a song starts, the
-	// presence update fires before MSE metadata is parsed (duration NaN),
-	// so re-send once durationchange/loadedmetadata deliver the real value.
-	// A crossfade preloads the next track onto the idle deck early, so its
-	// duration events have already fired by the time the handover makes it
-	// current — read the value once at attach time to catch those.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: songId is an intentional reset trigger for the tracked duration
-	useEffect(() => {
-		setMediaDuration(0);
-		const videoEl = videoElementRef?.current;
-		if (!videoEl) return;
-		const sync = () =>
-			setMediaDuration(
-				Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
-			);
-		sync();
-		videoEl.addEventListener("durationchange", sync);
-		videoEl.addEventListener("loadedmetadata", sync);
-		return () => {
-			videoEl.removeEventListener("durationchange", sync);
-			videoEl.removeEventListener("loadedmetadata", sync);
-		};
-	}, [videoElementRef, songId]);
-
-	// Album data arrives from a follow-up fetch; it upgrades the presence
-	// (album tooltip/link) once loaded.
-	useEffect(() => {
-		let cancelled = false;
-		setMeta(null);
-		if (discordEnabled && songId) {
-			getTrackMeta(songId).then((next) => {
-				if (!cancelled) setMeta(next);
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [discordEnabled, songId]);
-
-	// The player's metadata length (YouTube's listing) is preferred over the
-	// media element's duration, which reports a fraction less; it is also the
-	// only total available when a crossfade preload beat the element listeners.
-	const durationSecs = knownDuration > 0 ? knownDuration : mediaDuration;
-
-	useEffect(() => {
-		if (!discordEnabled || discordIdle || !songId) return;
-		const videoEl = videoElementRef?.current ?? null;
-		const update = () =>
-			invoke("set_discord_activity", {
-				track: {
-					title,
-					artist: formatArtistName(artist),
-					album: meta?.album?.name ?? null,
-					coverUrl:
-						discordCover.source === cover ? discordCover.url || null : null,
-					artistAvatarUrl,
-					songUrl: `https://music.youtube.com/watch?v=${songId}`,
-					artistUrl: artistId
-						? `https://music.youtube.com/channel/${artistId}`
-						: null,
-					albumUrl: meta?.album?.id
-						? `https://music.youtube.com/playlist?list=${meta.album.id}`
-						: null,
-					playing: isPlaying,
-					elapsedSecs: videoEl?.currentTime ?? 0,
-					durationSecs,
-				},
-			}).catch((error) => {
-				console.warn("[discord] presence update failed:", error);
-			});
-		void update();
-		videoEl?.addEventListener("seeked", update);
-		const retry = window.setInterval(update, 30_000);
-		return () => {
-			videoEl?.removeEventListener("seeked", update);
-			window.clearInterval(retry);
-		};
-	}, [
-		discordEnabled,
-		discordIdle,
-		songId,
-		title,
-		artist,
-		cover,
-		discordCover,
-		artistId,
-		artistAvatarUrl,
-		isPlaying,
-		durationSecs,
-		meta,
-		videoElementRef,
-	]);
-
-	// Clear expired paused presence as well as disabled or empty playback.
-	useEffect(() => {
-		if (!discordEnabled || discordIdle || !songId) {
-			invoke("clear_discord_activity").catch(() => undefined);
-		}
-	}, [discordEnabled, discordIdle, songId]);
-
-	return null;
-}
-
-interface MediaControlPayload {
-	action: string;
-	position?: number;
-}
-
-/**
- * Bridges playback to the native OS media session (Windows SMTC, macOS Now
- * Playing, Linux MPRIS — see the Rust side). Owning the session natively is
- * what gives the system the app's real name and icon; WebView2's own
- * MediaSession shows up as "Unknown App". The hardware media keys arrive as
- * `media-control` events.
- */
-function MediaSessionSync() {
-	const {
-		currentSong,
-		currentIndex,
-		hasNext,
-		next,
-		previous,
-		videoElementRef,
-		seek,
-	} = usePlayer();
-	const { isPlaying, toggle } = usePlayerControls();
-	const [settings] = useSettings();
-
-	// Next may roll into the autoplay radio once the queue ends, matching the
-	// in-app button; previous stays queue-only so it never rewrites the queue
-	// from history.
-	const canGoNext = hasNext;
-	const canStepPrevious = currentIndex > 0;
-
-	// Media key presses are handled with the latest player state.
-	const live = useRef({
-		canGoNext,
-		canStepPrevious,
-		isPlaying,
-		next,
-		previous,
-		toggle,
-		videoElementRef,
-		seek,
-	});
-	live.current = {
-		canGoNext,
-		canStepPrevious,
-		isPlaying,
-		next,
-		previous,
-		toggle,
-		videoElementRef,
-		seek,
-	};
-
-	useEffect(() => {
-		if (!isTauri()) return;
-		let disposed = false;
-		let unlisten: (() => void) | undefined;
-		const handle = ({ action, position }: MediaControlPayload) => {
-			const video = live.current.videoElementRef?.current;
-			switch (action) {
-				case "play":
-					if (!live.current.isPlaying) live.current.toggle();
-					break;
-				case "pause":
-				case "stop":
-					if (live.current.isPlaying) live.current.toggle();
-					break;
-				case "toggle":
-					live.current.toggle();
-					break;
-				case "next":
-					if (live.current.canGoNext) void live.current.next();
-					break;
-				case "previous":
-					if (live.current.canStepPrevious) void live.current.previous();
-					break;
-				case "seek-by":
-					if (video && typeof position === "number") {
-						live.current.seek(Math.max(0, video.currentTime + position));
-					}
-					break;
-				case "set-position":
-					if (video && typeof position === "number") {
-						live.current.seek(position);
-					}
-					break;
-			}
-		};
-		const nativeControl = (event: Event) => {
-			const data = (event as CustomEvent<NativeAudioEvent>).detail;
-			if (data.type === "control" && data.action)
-				handle({ action: data.action, position: data.position });
-		};
-		window.addEventListener(NATIVE_AUDIO_EVENT, nativeControl);
-		listen<MediaControlPayload>("media-control", (event) =>
-			handle(event.payload),
-		).then((fn) => {
-			if (disposed) fn();
-			else unlisten = fn;
-		});
-		return () => {
-			disposed = true;
-			unlisten?.();
-			window.removeEventListener(NATIVE_AUDIO_EVENT, nativeControl);
-		};
-	}, []);
-
-	const title = currentSong
-		? displayTitle(
-				currentSong.title,
-				// Uploader videos keep their raw title.
-				currentSong.upload ? "both" : settings.titleMode,
-				settings.cleanTitles,
-				currentSong.artist,
-			)
-		: null;
-	const artist = currentSong ? formatArtistName(currentSong.artist) : null;
-	const cover = currentSong?.thumbnail ?? null;
-	const songId = currentSong?.id ?? null;
-
-	// Snapshot for the native session; the same cover the fullscreen player
-	// shows (the OS fetches the URL itself).
-	const push = useCallback(() => {
-		if (!isTauri()) return;
-		const video = videoElementRef?.current;
-		const duration =
-			video && Number.isFinite(video.duration) && video.duration > 0
-				? video.duration
-				: null;
-		invoke("update_media_session", {
-			snapshot: {
-				artist,
-				canGoNext,
-				canGoPrevious: canStepPrevious,
-				coverUrl: cover,
-				duration,
-				id: songId,
-				playing: isPlaying,
-				position: video?.currentTime ?? 0,
-				title,
-			},
-		}).catch(() => undefined);
-	}, [
-		artist,
-		canGoNext,
-		canStepPrevious,
-		cover,
-		isPlaying,
-		songId,
-		title,
-		videoElementRef,
-	]);
-
-	useEffect(() => {
-		push();
-	}, [push]);
-
-	// Position ticks keep the OS progress bar moving while playing.
-	useEffect(() => {
-		if (!isPlaying) return;
-		const timer = window.setInterval(push, 5000);
-		return () => window.clearInterval(timer);
-	}, [isPlaying, push]);
-
-	return null;
-}
-
-/**
- * Scrobbles finished plays to ListenBrainz: a "playing now" listen when
- * playback starts and a single listen (with the MusicBrainz recording MBID,
- * looked up once per track and cached) once half the song — max 4 minutes —
- * has actually been listened to.
- */
-function ListenBrainzSync() {
-	const { currentSong, videoElementRef } = usePlayer();
-	const { isPlaying } = usePlayerControls();
-	const [settings] = useSettings();
-	const [meta, setMeta] = useState<TrackMeta | null>(null);
-
-	const songId = currentSong?.id;
-	const token = settings.listenbrainzToken.trim();
-	const enabled = settings.listenbrainz && token.length > 0;
-
-	const startedAtRef = useRef<number | null>(null);
-
-	/**
-	 * Scrobble metadata in the track's original language: the uploader's
-	 * locale-independent title parsed like the display pipeline — always
-	 * cleaned, since catalog metadata doesn't follow the display preference —
-	 * and the primary artist credit, without channel/group decorations
-	 * ("Apricot (Froot)" → "Apricot") so the submission and the MusicBrainz
-	 * lookup use the artist's catalog name.
-	 */
-	const scrobbleMetadata = useCallback((): {
-		trackName: string;
-		artistName: string;
-		mainTitle: string;
-		feats: string[];
-	} => {
-		const { main, feats, trackName } = scrobbleTitle(
-			meta?.originalTitle ?? currentSong?.title ?? "",
-			currentSong?.artist,
-		);
-		const artistName = formatArtistName(
-			meta?.originalArtist ?? currentSong?.artist ?? "",
-		);
-		return {
-			trackName,
-			artistName,
-			mainTitle: main,
-			feats,
-		};
-	}, [currentSong, meta]);
-	const scrobbleMetadataRef = useRef(scrobbleMetadata);
-	scrobbleMetadataRef.current = scrobbleMetadata;
-
-	// Album name for the release metadata.
-	useEffect(() => {
-		let cancelled = false;
-		setMeta(null);
-		if (enabled && songId) {
-			getTrackMeta(songId).then((next) => {
-				if (!cancelled) setMeta(next);
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [enabled, songId]);
-
-	// New track — reset the listen-start timestamp so skipping songs doesn't
-	// submit a stale listenedAt.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: songId/enabled are intentional reset triggers
-	useEffect(() => {
-		startedAtRef.current = null;
-	}, [songId, enabled]);
-
-	// Remember when playback started; used as the scrobble's listenedAt.
-	useEffect(() => {
-		if (!enabled || !songId || !isPlaying) return;
-		if (startedAtRef.current === null) {
-			startedAtRef.current = Math.floor(Date.now() / 1000);
-		}
-	}, [enabled, songId, isPlaying]);
-
-	// The shared listening session drives both the "playing now" submission
-	// (grace period reached) and the scrobble (half the track listened), so
-	// the timing stays consistent with the YouTube watch-history pings.
-	useEffect(() => {
-		if (!enabled || !songId || !currentSong) return;
-		return listeningSession.subscribe((event, eventSongId) => {
-			if (eventSongId !== songId) return;
-			const names = scrobbleMetadataRef.current();
-			const videoEl = videoElementRef?.current ?? null;
-			const duration =
-				videoEl && Number.isFinite(videoEl.duration) ? videoEl.duration : 0;
-
-			if (event === "established") {
-				// Resolve the recording MBID for the playing_now listen as well —
-				// it links the card and gives it cover art, and pre-warms the
-				// cache for the scrobble. Submits without MBIDs if lookup fails.
-				const submit = async () => {
-					const mbids = await findRecording(
-						names.mainTitle,
-						names.artistName,
-						duration,
-						names.feats,
-					).catch(() => null);
-					await submitListen({
-						token,
-						trackName: names.trackName,
-						artistName: names.artistName,
-						album: meta?.album?.name,
-						mbids,
-					});
-				};
-				submit().catch((error) => {
-					console.warn("[listenbrainz] playing_now failed:", error);
-				});
-				return;
-			}
-
-			const listenedAt = startedAtRef.current ?? Math.floor(Date.now() / 1000);
-			const submit = async () => {
-				const mbids = await findRecording(
-					names.mainTitle,
-					names.artistName,
-					duration,
-					names.feats,
-				).catch(() => null);
-				await submitListen({
-					token,
-					trackName: names.trackName,
-					artistName: names.artistName,
-					album: meta?.album?.name,
-					mbids,
-					listenedAt,
-				});
-			};
-			submit().catch((error) => {
-				console.warn("[listenbrainz] scrobble failed:", error);
-			});
-		});
-	}, [enabled, songId, currentSong, token, meta, videoElementRef]);
-
-	return null;
-}
-
-/** Recolors the app accent from the current song's thumbnail. */
-function AmbientSync() {
-	const { currentSong } = usePlayer();
-	const ambient = useAmbientColor(currentSong?.thumbnail);
-
-	useEffect(() => {
-		const root = document.documentElement;
-		root.style.setProperty("--primary", ambient);
-		root.style.setProperty("--accent", ambient);
-		root.style.setProperty("--ring", ambient);
-	}, [ambient]);
-
-	return null;
-}
-
-function NativeBackNavigation() {
-	const navigate = useNavigate();
-	const location = useLocation();
-	useEffect(() => {
-		const back = () =>
-			handleAppBack({
-				dismissOverlay: dismissTopOverlay,
-				closeQueue: () => {
-					if (!getQueueOpen()) return false;
-					setQueueOpen(false);
-					return true;
-				},
-				closePlayer: () => {
-					if (!getNowPlayingOpen()) return false;
-					setNowPlayingOpen(false);
-					return true;
-				},
-				navigateBack: () => {
-					if ((window.history.state?.idx ?? 0) > 0) {
-						navigate(-1);
-						return true;
-					}
-					if (location.pathname !== "/" && location.pathname !== "/home") {
-						navigate("/", { replace: true });
-						return true;
-					}
-					return false;
-				},
-			});
-		window.__yumusicBack = back;
-		return () => {
-			if (window.__yumusicBack === back) delete window.__yumusicBack;
-		};
-	}, [navigate, location.pathname]);
-	return null;
-}
-
-function NowPlayingOverlay() {
-	const isNowPlayingOpen = useNowPlayingOpen();
-	const isQueueOpen = useQueueOpen();
-	const overlayRef = useRef<HTMLElement>(null);
-	useNowPlayingMotion(overlayRef, isNowPlayingOpen);
-	// Dragging down on the fullscreen player minimizes it — but only while the
-	// queue is closed: with the sheet open, the same swipe drags the queue.
-	// The scrollable lyrics column opts out so it keeps scrolling normally.
-	const dismissGesture = useNowPlayingSwipe(false);
-
-	// Escape closes the queue first, then the fullscreen view
-	useEffect(() => {
-		if (!isNowPlayingOpen) return;
-		const handler = (e: KeyboardEvent) => {
-			if (e.key !== "Escape" || e.defaultPrevented) return;
-			e.preventDefault();
-			if (isQueueOpen) {
-				setQueueOpen(false);
-			} else {
-				toggleNowPlaying();
-			}
-		};
-		window.addEventListener("keydown", handler);
-		return () => window.removeEventListener("keydown", handler);
-	}, [isNowPlayingOpen, isQueueOpen]);
-
-	return (
-		<section
-			aria-hidden={!isNowPlayingOpen}
-			aria-label="Now Playing"
-			className="np-overlay invisible fixed inset-0 z-50"
-			inert={!isNowPlayingOpen}
-			ref={overlayRef}
-			style={{ transform: "translateY(var(--np-slide, 0px))" }}
-			{...dismissGesture}
-		>
-			<NowPlayingPage
-				isQueueOpen={isQueueOpen}
-				onClose={toggleNowPlaying}
-				onToggleQueue={toggleQueue}
-			/>
-		</section>
-	);
-}
-
 function Layout() {
-	const authRevision = useRef(0);
-	const authBusy = useRef(false);
-	const [isLoggedIn, setIsLoggedIn] = useState(false);
-	const [userProfile, setUserProfile] = useState<{
-		name?: string;
-		photo?: string;
-		email?: string;
-	} | null>(null);
-
-	useEffect(() => {
-		let disposed = false;
-		let checking = false;
-		let retryTimer: number | undefined;
-		const checkLogin = async () => {
-			if (checking || authBusy.current || document.visibilityState === "hidden")
-				return;
-			window.clearTimeout(retryTimer);
-			checking = true;
-			const revision = authRevision.current;
-			try {
-				const cookie = await window.electron.getCookie();
-				if (!cookie) {
-					if (!disposed && revision === authRevision.current)
-						setYouTubeSyncAccount({ status: "signed-out" });
-					return;
-				}
-				const { signedIn, profile } = await restoreSession(cookie, {
-					loadProfile: async (sessionCookie, refresh) => {
-						await getYoutubeClient(sessionCookie, refresh);
-						return getUserProfile();
-					},
-					validateSession: () => window.electron.validateSession(),
-				});
-				if (disposed || revision !== authRevision.current) return;
-				// Profile metadata is optional. A missing name must never erase the
-				// saved session or shared browser cookies.
-				if (profile || !signedIn) setUserProfile(profile);
-				setIsLoggedIn(signedIn);
-				setYouTubeSyncAccount(
-					!signedIn
-						? { status: "signed-out" }
-						: profile?.email
-							? { status: "ready", email: profile.email }
-							: { status: "unavailable" },
-				);
-			} catch (error) {
-				// Offline, rate-limited and server failures do not invalidate cookies.
-				console.error("Failed to check Google session:", error);
-				if (!disposed && revision === authRevision.current)
-					retryTimer = window.setTimeout(checkLogin, 15_000);
-			} finally {
-				checking = false;
-			}
-		};
-		void checkLogin();
-		window.addEventListener("focus", checkLogin);
-		document.addEventListener("visibilitychange", checkLogin);
-		const timer = window.setInterval(checkLogin, 5 * 60 * 1000);
-		return () => {
-			disposed = true;
-			window.clearTimeout(retryTimer);
-			window.removeEventListener("focus", checkLogin);
-			document.removeEventListener("visibilitychange", checkLogin);
-			window.clearInterval(timer);
-		};
-	}, []);
-
-	const handleLogin = async () => {
-		if (authBusy.current) return;
-		authBusy.current = true;
-		authRevision.current += 1;
-		const previousAccount = getYouTubeSyncAccount();
-		setYouTubeSyncAccount({ status: "checking" });
-		try {
-			const cookie = await window.electron.login();
-			if (!cookie) {
-				setYouTubeSyncAccount(previousAccount);
-				return;
-			}
-			await getYoutubeClient(cookie, true);
-			const profile = await getUserProfile();
-			setIsLoggedIn(true);
-			setUserProfile(profile);
-			setYouTubeSyncAccount(
-				profile?.email
-					? { status: "ready", email: profile.email }
-					: { status: "unavailable" },
-			);
-			if (profile?.email) {
-				try {
-					await signInWithGoogle();
-				} catch {
-					/* YouTube stays signed in if optional sync consent is cancelled. */
-				}
-			}
-			// The native login command already verified the session with YouTube.
-			// Refetch all mounted views with the validated session.
-			window.location.reload();
-		} catch (error) {
-			setYouTubeSyncAccount(previousAccount);
-			console.error("Google sign-in failed:", error);
-			showToast("Could not verify Google sign-in. Please try again.");
-		} finally {
-			authBusy.current = false;
-		}
-	};
-
-	const handleLogout = async () => {
-		if (authBusy.current) return;
-		authBusy.current = true;
-		authRevision.current += 1;
-		const previousAccount = getYouTubeSyncAccount();
-		setYouTubeSyncAccount({ status: "signed-out" });
-		try {
-			await signOutOfSync();
-			await window.electron.logout();
-			setIsLoggedIn(false);
-			setUserProfile(null);
-			window.location.reload();
-		} catch (error) {
-			setYouTubeSyncAccount(previousAccount);
-			console.error("Google sign-out failed:", error);
-			showToast("Could not clear Google sign-in. Please try again.");
-		} finally {
-			authBusy.current = false;
-		}
-	};
-
+	const account = useYouTubeSession();
 	return (
 		<PlayerProvider>
-			<AppShell
-				handleLogin={handleLogin}
-				handleLogout={handleLogout}
-				isLoggedIn={isLoggedIn}
-				userProfile={userProfile}
-			/>
+			<AppShell {...account} />
 		</PlayerProvider>
 	);
 }
 
-/** Rendered inside PlayerProvider so it can consume player state. */
 function AppShell({
 	isLoggedIn,
 	userProfile,
@@ -859,7 +96,7 @@ function AppShell({
 	// raw variants that no longer resolve) doesn't leave the sidebar artwork
 	// broken until the playlists page is visited.
 	useEffect(() => {
-		const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+		const cached = readLibraryCache();
 		if (cached && cached.data.length > 0) {
 			reconcilePinnedPlaylists(cached.data);
 		}
@@ -885,12 +122,10 @@ function AppShell({
 					IS_MOBILE ? "h-app" : "h-[calc(100vh-2.25rem)]",
 				)}
 			>
-				{/* ── Sidebar (desktop) ───────────────────────── */}
 				<aside className="hidden w-70 shrink-0 flex-col border-r border-foreground/6 bg-sidebar md:flex">
 					<div
 						className={cn("flex min-h-0 flex-1 flex-col px-4 pt-6", "pb-26")}
 					>
-						{/* Account — kept at the top of the sidebar */}
 						<div className="pb-3">
 							{isLoggedIn ? (
 								<UserMenu onLogout={handleLogout} user={userProfile || {}} />
@@ -907,29 +142,9 @@ function AppShell({
 						</div>
 
 						<nav className="space-y-1">
-							<SidebarItem
-								icon={<HouseIcon className="size-4.5" strokeWidth={2.2} />}
-								isActive={
-									location.pathname === "/" || location.pathname === "/home"
-								}
-								label="Home"
-								onClick={() => navigate("/")}
-							/>
-							<SidebarItem
-								icon={<LibraryIcon className="size-4.5" strokeWidth={2.2} />}
-								isActive={location.pathname === "/playlists"}
-								label="Playlists"
-								onClick={() => navigate("/playlists")}
-							/>
-							<SidebarItem
-								icon={<SettingsIcon className="size-4.5" strokeWidth={2.2} />}
-								isActive={location.pathname.startsWith("/settings")}
-								label="Settings"
-								onClick={() => navigate("/settings")}
-							/>
+							<NavigationItems />
 						</nav>
 
-						{/* Pinned playlists — separated from the nav above */}
 						{pinned.length > 0 && (
 							<div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-foreground/6 pt-3">
 								<div className="flex items-center gap-2 px-3 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground/70 uppercase">
@@ -985,7 +200,6 @@ function AppShell({
 							</div>
 						)}
 
-						{/* Download queue — lives at the bottom of the rail */}
 						<div className="mt-auto pt-3 pb-4">
 							<div className="border-t border-foreground/6 pt-3">
 								<DownloadQueueButton />
@@ -994,7 +208,6 @@ function AppShell({
 					</div>
 				</aside>
 
-				{/* ── Main content ────────────────────────────── */}
 				<main className="relative flex-1 overflow-hidden">
 					<ScrollArea className="h-full">
 						{/* Extra top/bottom room on mobile: status-bar safe area,
@@ -1075,52 +288,68 @@ function PinnedThumbnail({ thumbnail }: { thumbnail: string | null }) {
  * Sits below the player bar, which lifts above it while a song plays.
  * Account management lives on the settings page.
  */
-function MobileNav() {
-	const location = useLocation();
-	const navigate = useNavigate();
+const destinations = [
+	{
+		path: "/",
+		label: "Home",
+		icon: HouseIcon,
+		matches: (path: string) => path === "/" || path === "/home",
+	},
+	{
+		path: "/playlists",
+		label: "Playlists",
+		icon: LibraryIcon,
+		matches: (path: string, mobile: boolean) =>
+			mobile ? path.startsWith("/playlists") : path === "/playlists",
+	},
+	{
+		path: "/settings",
+		label: "Settings",
+		icon: SettingsIcon,
+		matches: (path: string) => path.startsWith("/settings"),
+	},
+];
 
+function MobileNav() {
 	return (
 		<nav
 			className="fixed inset-x-0 bottom-0 z-45 flex min-h-[calc(3.75rem+var(--safe-area-bottom))] items-stretch border-t border-foreground/8 bg-sidebar/95 pb-(--safe-area-bottom) backdrop-blur-xl md:hidden"
 			data-mobile-nav
 		>
-			<MobileNavItem
-				icon={<HouseIcon className="size-5" strokeWidth={2.2} />}
-				isActive={location.pathname === "/" || location.pathname === "/home"}
-				label="Home"
-				onClick={() => navigate("/")}
-			/>
-			<MobileNavItem
-				icon={<LibraryIcon className="size-5" strokeWidth={2.2} />}
-				isActive={location.pathname.startsWith("/playlists")}
-				label="Playlists"
-				onClick={() => navigate("/playlists")}
-			/>
-			<MobileNavItem
-				icon={<SettingsIcon className="size-5" strokeWidth={2.2} />}
-				isActive={location.pathname.startsWith("/settings")}
-				label="Settings"
-				onClick={() => navigate("/settings")}
-			/>
+			<NavigationItems mobile />
 		</nav>
 	);
 }
 
-function MobileNavItem({ icon, label, isActive, onClick }: SidebarItemProps) {
-	return (
-		<button
-			aria-current={isActive ? "page" : undefined}
-			className={cn(
-				"flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200 active:scale-95",
-				isActive ? "text-primary" : "text-muted-foreground",
-			)}
-			onClick={onClick}
-			type="button"
-		>
-			{icon}
-			<span>{label}</span>
-		</button>
-	);
+function NavigationItems({ mobile = false }: { mobile?: boolean }) {
+	const { pathname } = useLocation();
+	const navigate = useNavigate();
+	return destinations.map(({ path, label, icon: Icon, matches }) => {
+		const active = matches(pathname, mobile);
+		return (
+			<button
+				aria-current={active ? "page" : undefined}
+				className={cn(
+					mobile
+						? "flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200 active:scale-95"
+						: "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
+					active
+						? mobile
+							? "text-primary"
+							: "bg-primary/12 text-primary"
+						: mobile
+							? "text-muted-foreground"
+							: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+				)}
+				key={path}
+				onClick={() => navigate(path)}
+				type="button"
+			>
+				<Icon className={mobile ? "size-5" : "size-4.5"} strokeWidth={2.2} />
+				<span>{label}</span>
+			</button>
+		);
+	});
 }
 
 function App() {
@@ -1128,32 +357,6 @@ function App() {
 		<HashRouter>
 			<Layout />
 		</HashRouter>
-	);
-}
-
-interface SidebarItemProps {
-	icon: React.ReactNode;
-	label: string;
-	isActive: boolean;
-	onClick: () => void;
-}
-
-function SidebarItem({ icon, label, isActive, onClick }: SidebarItemProps) {
-	return (
-		<button
-			aria-current={isActive ? "page" : undefined}
-			className={cn(
-				"flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors duration-200",
-				isActive
-					? "bg-primary/12 text-primary"
-					: "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-			)}
-			onClick={onClick}
-			type="button"
-		>
-			{icon}
-			<span>{label}</span>
-		</button>
 	);
 }
 

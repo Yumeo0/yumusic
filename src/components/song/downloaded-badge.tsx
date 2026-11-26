@@ -1,6 +1,6 @@
 import { CheckLine } from "lucide-react";
 import type { ComponentPropsWithoutRef } from "react";
-import { useDownloads } from "@/lib/downloads/downloads";
+import { useDownloadEntry } from "@/lib/downloads/downloads";
 import { cn } from "@/lib/utils/utils";
 
 /**
@@ -14,8 +14,7 @@ export function DownloadedBadge({
 }: {
 	songId: string;
 } & Omit<ComponentPropsWithoutRef<"span">, "children">) {
-	const downloads = useDownloads();
-	if (!downloads.entries.has(songId)) return null;
+	if (!useDownloadEntry(songId)) return null;
 	return (
 		<span
 			{...props}

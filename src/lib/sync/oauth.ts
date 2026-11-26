@@ -3,8 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSyncExternalStore } from "react";
 import { supabase } from "./client";
-import { signOutOfSync } from "./sync";
-import { matchesYouTubeAccount, youtubeSyncEmail } from "./youtube-account";
+import { matchesYouTubeAccount } from "./youtube-account";
 
 let cancel: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -21,12 +20,7 @@ export const useGoogleAuthorization = () =>
 const notifyAuthorization = () => {
 	for (const listener of listeners) listener();
 };
-export async function signInWithGoogle() {
-	const email = youtubeSyncEmail();
-	const current = await supabase.auth.getSession();
-	if (current.data.session && matchesYouTubeAccount(current.data.session.user))
-		return;
-	if (current.data.session) await signOutOfSync();
+export async function authorizeWithGoogle(email: string) {
 	if (cancel) throw new Error("Google sign-in is already open.");
 	if (!isTauri()) {
 		const { error } = await supabase.auth.signInWithOAuth({

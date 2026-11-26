@@ -3,6 +3,22 @@ use tauri::Url;
 
 pub const YOUTUBE_MUSIC_URL: &str = "https://music.youtube.com/";
 
+/// Joins cookies into a header value, keeping only the first occurrence of
+/// each name. Google rejects headers that list a cookie twice with a
+/// redirect to accounts.google.com/CookieMismatch; older YuMusic versions
+/// stored such duplicated headers, so this is applied on read as well.
+pub fn dedup_cookie_header(header: &str) -> String {
+	let mut seen = std::collections::HashSet::new();
+	header
+		.split("; ")
+		.filter(|pair| {
+			let name = pair.split('=').next().unwrap_or_default();
+			!name.is_empty() && seen.insert(name.to_string())
+		})
+		.collect::<Vec<_>>()
+		.join("; ")
+}
+
 pub fn google_login_url() -> Result<Url, String> {
 	let mut url = Url::parse("https://accounts.google.com/ServiceLogin?service=youtube")
 		.map_err(|e| e.to_string())?;

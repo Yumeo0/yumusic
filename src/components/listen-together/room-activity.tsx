@@ -1,17 +1,13 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
 import { Headphones, X } from "lucide-react";
-import { useMediaQuery } from "@/lib/utils/hooks";
-import {
-	ROOM_DESKTOP_QUERY,
-	roomDialogHandle,
-	roomPopoverHandle,
-} from "./room-button";
+import { DESKTOP_QUERY, useMediaQuery } from "@/lib/utils/viewport";
+import { roomDialogHandle, roomPopoverHandle } from "./room-button";
 import { RoomPanel } from "./room-panel";
 
 /** An anchored desktop panel and a fullscreen mobile room dialog. */
 export function RoomActivity() {
-	const desktop = useMediaQuery(ROOM_DESKTOP_QUERY);
+	const desktop = useMediaQuery(DESKTOP_QUERY);
 	if (desktop)
 		return (
 			<Popover.Root handle={roomPopoverHandle}>

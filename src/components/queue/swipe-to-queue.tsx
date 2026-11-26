@@ -7,9 +7,15 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { type Song, usePlayer } from "@/contexts/player-context";
+import { usePlayer } from "@/contexts/player-context";
 import { GestureVelocity, rubberband } from "@/lib/motion/spring";
+import {
+	allowSwipeContextMenu,
+	isSwipeContextSuppressed,
+	suppressSwipeContextMenu,
+} from "@/lib/motion/swipe-context-menu";
 import { useSpringOffset } from "@/lib/motion/use-spring-offset";
+import type { Song } from "@/lib/music/song";
 import {
 	NEXT_THRESHOLD,
 	type SwipeAction,
@@ -64,8 +70,7 @@ export function SwipeToQueue({
 		start.current = null;
 		axis.current = null;
 		springTo(0, { velocity, momentum: !cancelled });
-		if (row.current && suppressClick.current)
-			row.current.dataset.swipeContextUntil = String(performance.now() + 700);
+		if (suppressClick.current) suppressSwipeContextMenu(row.current);
 		if (!cancelled && selected) {
 			haptic("confirm");
 			if (selected === "remove") onRemove?.();
@@ -115,7 +120,7 @@ export function SwipeToQueue({
 			detent.current = selected;
 			setAction(selected);
 		}
-		if (row.current) row.current.dataset.swipeContextUntil = "Infinity";
+		suppressSwipeContextMenu(row.current, true);
 		setDirection(next < 0 ? -1 : 1);
 		origin.velocity.add(next);
 		spring.jump(next, origin.velocity.read());
@@ -132,9 +137,7 @@ export function SwipeToQueue({
 		<div
 			className={cn("cv-row relative overflow-hidden rounded-lg", className)}
 			onContextMenuCapture={(event) => {
-				if (
-					Number(row.current?.dataset.swipeContextUntil) > performance.now()
-				) {
+				if (isSwipeContextSuppressed(row.current)) {
 					event.preventDefault();
 					event.stopPropagation();
 				}
@@ -188,7 +191,7 @@ export function SwipeToQueue({
 					axis.current = null;
 					detent.current = null;
 					setAction(null);
-					if (row.current) row.current.dataset.swipeContextUntil = "0";
+					allowSwipeContextMenu(row.current);
 					suppressClick.current = false;
 					if (suppressTimer.current) clearTimeout(suppressTimer.current);
 				}}

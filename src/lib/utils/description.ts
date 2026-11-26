@@ -1,4 +1,4 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import {
 	formatArtistName,
 	formatTitleParts,

@@ -9,7 +9,7 @@ import {
 	SectionListContinuation,
 	YTNodes,
 } from "youtubei.js/web";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
 import { songRatingEntry } from "./playlist-data";

@@ -1,12 +1,8 @@
 import { Cloud, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-	cancelGoogleSignIn,
-	signInWithGoogle,
-	useGoogleAuthorization,
-} from "@/lib/sync/oauth";
-import { syncNow, useCloudSync } from "@/lib/sync/sync";
+import { cancelGoogleSignIn, useGoogleAuthorization } from "@/lib/sync/oauth";
+import { signInWithGoogle, syncNow, useCloudSync } from "@/lib/sync/sync";
 
 export function SyncSection() {
 	const sync = useCloudSync();

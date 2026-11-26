@@ -2,7 +2,6 @@ import { type RefObject, useLayoutEffect, useRef } from "react";
 import {
 	type DismissGeometry,
 	measureDismissGeometry,
-	type QueueGestureCheck,
 } from "@/lib/motion/queue-drag";
 import {
 	getNowPlayingOpen,
@@ -12,6 +11,8 @@ import {
 	setQueueOpen,
 	setQueueReveal,
 } from "@/lib/player/player-ui";
+import { MOBILE_QUERY } from "../utils/viewport";
+import type { QueueGestureCheck } from "./queue-gesture";
 import {
 	createSpring,
 	GestureVelocity,
@@ -20,7 +21,6 @@ import {
 } from "./spring";
 
 /** Matches Tailwind's max-md breakpoint; swipes mirror the mobile layout. */
-const MOBILE_QUERY = "(max-width: 767.98px)";
 
 /** One motion driver for taps, keyboard actions and both swipe directions. */
 interface PlayerMotion {

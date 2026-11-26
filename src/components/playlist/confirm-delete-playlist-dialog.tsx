@@ -1,24 +1,18 @@
 import { Dialog } from "@base-ui/react/dialog";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
-import { unsubscribeDownloadedPlaylist } from "@/lib/downloads/downloads";
-import { removePlaylistFromCaches } from "@/lib/stores/playlist-cache";
 import { showToast } from "@/lib/stores/toast";
-import { deletePlaylist } from "@/lib/youtube/youtube-client";
+import { deleteLibraryPlaylist } from "@/lib/youtube/playlist-mutations";
 
 export function ConfirmDeletePlaylistDialog({
 	playlistId,
 	playlistTitle,
-	isPinned,
-	onTogglePinned,
 	onDeleted,
 	open,
 	onOpenChange,
 }: {
 	playlistId: string;
 	playlistTitle: string;
-	isPinned: boolean;
-	onTogglePinned: () => void;
 	onDeleted?: () => void;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -29,10 +23,7 @@ export function ConfirmDeletePlaylistDialog({
 		if (busy) return;
 		setBusy(true);
 		try {
-			await deletePlaylist(playlistId);
-			removePlaylistFromCaches(playlistId);
-			unsubscribeDownloadedPlaylist(playlistId);
-			if (isPinned) onTogglePinned();
+			await deleteLibraryPlaylist(playlistId);
 			onOpenChange(false);
 			showToast("Playlist deleted");
 			onDeleted?.();

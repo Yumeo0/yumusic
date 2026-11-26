@@ -1,9 +1,11 @@
 import { YTNodes } from "youtubei.js/web";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
-import { artistListOf, isAlbumId, videoIdOf } from "./youtube.utils";
+import type { PlaylistView } from "../music/playlist";
+import { type RowFallback, songFromMusicRow } from "./music-row";
+import { isAlbumId } from "./youtube.utils";
 import {
 	type Album,
 	getAlbum,
@@ -12,43 +14,6 @@ import {
 	type Playlist,
 	type SongRating,
 } from "./youtube-client";
-
-/** Whether parsed credits name a real artist, not the unknown placeholder. */
-function hasArtistCredit(artists: Array<{ name: string }>): boolean {
-	return artists.some((artist) => {
-		const name = artist.name?.trim();
-		return !!name && !/^unknown artist$/i.test(name);
-	});
-}
-
-/** Header-level info used for rows that carry no per-track credit or art. */
-export interface RowFallback {
-	artists?: Array<{ name: string; id?: string }>;
-	thumbnail?: string | null;
-}
-
-/**
- * Album rows usually omit both the artist and the artwork (the header holds
- * them), so album pages pass those down as a fallback for rows without them.
- */
-function toSong(
-	item: YTNodes.MusicResponsiveListItem,
-	fallback?: RowFallback,
-): Song {
-	const artists = artistListOf(item);
-	const credit =
-		fallback?.artists && !hasArtistCredit(artists) ? fallback.artists : artists;
-	const rowThumb = biggestThumb(item.thumbnail?.contents)?.url;
-	return {
-		id: videoIdOf(item),
-		title: item.title ?? "Unknown Title",
-		artist: credit.map((artist) => artist.name).join(", "),
-		artistId: credit.find((artist) => artist.id)?.id,
-		artists: credit,
-		thumbnail: hiResThumb(rowThumb) || fallback?.thumbnail || "",
-		duration: item.duration?.text,
-	};
-}
 
 /**
  * The account's rating for a playlist/album row. List responses carry a
@@ -84,7 +49,7 @@ export function collectSongs(
 		if (item.is(YTNodes.MusicResponsiveListItem)) {
 			const rating = songRatingEntry(item);
 			if (rating) ratings.push(rating);
-			const song = toSong(item, fallback);
+			const song = songFromMusicRow(item, fallback);
 			if (song.id) songs.push(song);
 		}
 	}
@@ -277,34 +242,54 @@ export async function fetchPlaylistEditMeta(
 	};
 }
 
-/**
- * Loads every track of a playlist (all continuation pages), or of an album.
- * `onFirstPage` fires as soon as the first response arrives, so callers can
- * start playback without waiting for the remaining pages.
- */
-export async function loadPlaylistSongs(
+interface PlaylistLoadOptions {
+	signal?: AbortSignal;
+	onFirstPage?: (view: PlaylistView) => void;
+	onContinuation?: (batch: Song[]) => void;
+}
+
+/** Resolves the best available snapshot; complete is false if continuation failed. */
+export async function loadPlaylistView(
 	id: string,
-	onFirstPage?: (songs: Song[]) => void,
-): Promise<Song[]> {
+	{ signal, onFirstPage, onContinuation }: PlaylistLoadOptions = {},
+): Promise<PlaylistView | null> {
 	const albumMode = isAlbumId(id);
+	signal?.throwIfAborted();
 	const data = albumMode ? await getAlbum(id) : await getPlaylist(id);
-	if (!data) throw new Error("Could not load playlist");
+	signal?.throwIfAborted();
+	if (!data) return null;
 	const header = collectionHeader(data.header);
-	const items = "items" in data ? (data.items ?? []) : data.contents;
 	const rowFallback: RowFallback = {
 		artists: albumMode ? header.artists : undefined,
 		thumbnail: header.thumbnail,
 	};
-	const songs = collectSongs(items, rowFallback);
-	onFirstPage?.([...songs]);
-	if ("has_continuation" in data && data.has_continuation) {
-		let current: Playlist = data;
-		while (current.has_continuation) {
-			const continuation = await loadPlaylistContinuation(current);
-			if (!continuation) break;
-			current = continuation;
-			songs.push(...collectSongs(current.items ?? [], rowFallback));
-		}
+	const firstSongs = collectSongs(
+		"items" in data ? (data.items ?? []) : data.contents,
+		rowFallback,
+	);
+	let current = "has_continuation" in data ? data : null;
+	const view = {
+		id,
+		title: header.title,
+		subtitle: cleanSubtitle(header.subtitle),
+		thumbnail: header.thumbnail,
+		songs: firstSongs,
+		complete: !current?.has_continuation,
+		editable: !albumMode && isEditablePlaylist(data),
+	};
+	onFirstPage?.(view);
+	if (view.complete) return view;
+
+	const songs = [...firstSongs];
+	while (current?.has_continuation) {
+		signal?.throwIfAborted();
+		const continuation = await loadPlaylistContinuation(current);
+		signal?.throwIfAborted();
+		if (!continuation) return { ...view, songs };
+		current = continuation;
+		const batch = collectSongs(current.items ?? [], rowFallback);
+		songs.push(...batch);
+		onContinuation?.(batch);
 	}
-	return songs;
+	return { ...view, songs, complete: true };
 }

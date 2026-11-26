@@ -16,6 +16,7 @@ object AudioBridge {
   private var view = WeakReference<WebView>(null)
   private val pending = ArrayDeque<JSONObject>()
   private var metadata: JSONObject? = null
+  private var playbackService: PlaybackService? = null
 
   private val main = Handler(Looper.getMainLooper())
   private var paused = false
@@ -82,21 +83,26 @@ object AudioBridge {
   }
   fun command(context: Context, data: String) {
     val command = JSONObject(data)
-    val service = PlaybackService.instance
+    val service = playbackService
     if (service != null) service.command(command)
     else {
       pending.addLast(command)
       context.startService(Intent(context, PlaybackService::class.java))
     }
   }
-  fun ready(service: PlaybackService) {
+  fun attachService(service: PlaybackService) {
+    playbackService = service
     metadata?.let { service.metadata(it) }
     while (pending.isNotEmpty()) service.command(pending.removeFirst())
   }
+  fun detachService(service: PlaybackService) {
+    if (playbackService === service) playbackService = null
+  }
   fun metadata(data: String) {
-    metadata = JSONObject(data)
-    PlaybackService.instance?.metadata(metadata!!)
+    val snapshot = JSONObject(data)
+    metadata = snapshot
+    playbackService?.metadata(snapshot)
   }
   fun append(deck: Int, id: String, epoch: Int, bytes: ByteArray): Boolean =
-    PlaybackService.instance?.append(deck, id, epoch, bytes) ?: true
+    playbackService?.append(deck, id, epoch, bytes) ?: true
 }

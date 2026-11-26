@@ -5,10 +5,10 @@ import {
 	useLayoutEffect,
 	useRef,
 } from "react";
+import { MOBILE_QUERY } from "../utils/viewport";
 import { PLAYER_SECONDARY_PAIRS, textRect } from "./player-items";
 
 /** Matches Tailwind's max-md breakpoint: the lyrics toggle is mobile-only. */
-const MOBILE_QUERY = "(max-width: 767.98px)";
 /** A short layout glide; re-toggles capture the live presentation boxes. */
 const DURATION = 300;
 const EASING = "cubic-bezier(0.33, 1, 0.68, 1)";

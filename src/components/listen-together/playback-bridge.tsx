@@ -5,8 +5,14 @@ import {
 	actionCategory,
 	queueKey,
 } from "@/lib/listen-together/guest-permissions";
-import { expectedPosition, wireSong } from "@/lib/listen-together/protocol";
 import { listenRoom } from "@/lib/listen-together/room";
+import {
+	expectedPosition,
+	playbackInstance,
+	SHARED_AUTOPLAY_LIMIT,
+	sharedPlaybackQueue,
+	wireSong,
+} from "@/lib/player/shared-playback";
 import { showToast } from "@/lib/stores/toast";
 import { formatTime } from "@/lib/utils/utils";
 
@@ -22,7 +28,11 @@ export function RoomPlaybackBridge() {
 				const { player: p, controls: c } = live.current;
 				const category = actionCategory(action);
 				const shared = listenRoom.getSnapshot().playback;
-				const currentInstance = `${p.getPlaybackGeneration()}:${p.currentIndex}:${p.videoInfo?.basic_info.id || p.currentSong?.id || "empty"}`;
+				const currentInstance = playbackInstance(
+					p.getPlaybackGeneration(),
+					p.currentIndex,
+					p.playingVideoId || p.currentSong?.id,
+				);
 				if (
 					["skip", "remove", "reorder", "seek", "playback"].includes(
 						category,
@@ -44,7 +54,8 @@ export function RoomPlaybackBridge() {
 					case "autoplay":
 						if (
 							!p.autoplayEnabled ||
-							queueKey(p.autoplayTracks.slice(0, 100)) !== action.queueKey ||
+							queueKey(p.autoplayTracks.slice(0, SHARED_AUTOPLAY_LIMIT)) !==
+								action.queueKey ||
 							!p.autoplayTracks[action.index]
 						)
 							throw new Error("The autoplay queue changed. Please try again.");
@@ -158,10 +169,14 @@ export function RoomPlaybackBridge() {
 								p.queue[p.currentIndex]?.id === p.currentSong.id
 									? p.queue[p.currentIndex].addedBy
 									: p.currentSong.addedBy,
-							id: p.videoInfo?.basic_info.id || p.currentSong.id,
+							id: p.playingVideoId || p.currentSong.id,
 						}
 					: null;
-				const instance = `${p.getPlaybackGeneration()}:${p.currentIndex}:${actualSong?.id || "empty"}`;
+				const instance = playbackInstance(
+					p.getPlaybackGeneration(),
+					p.currentIndex,
+					actualSong?.id,
+				);
 				const key = `${instance}:${playing}:${p.queue.length}:${p.repeatMode}`;
 				const jumped =
 					Math.abs(
@@ -170,27 +185,23 @@ export function RoomPlaybackBridge() {
 							(playing ? (now - previousTime) / 1000 : 0),
 					) > 0.4;
 				if (key !== previousKey || jumped || now - lastSent >= 1000) {
-					let queue = p.queue;
-					let index = p.currentIndex;
-					// History navigation can play a song outside the visible queue.
-					if (p.currentSong && queue[index]?.id !== p.currentSong.id) {
-						queue = [p.currentSong, ...queue];
-						index = 0;
-					}
-					if (actualSong)
-						queue = queue.map((song, i) => (i === index ? actualSong : song));
-					const start = Math.max(0, index - 100);
+					const { queue, index, song } = sharedPlaybackQueue(
+						p.queue,
+						p.currentIndex,
+						p.currentSong,
+						actualSong,
+					);
 					listenRoom.broadcastPlayback({
 						instance,
-						queue: queue
-							.slice(start, start + 300)
-							.map((song) => wireSong(song)),
+						queue,
+						index,
+						song,
 						autoplayQueue: p.autoplayEnabled
-							? p.autoplayTracks.slice(0, 100).map((song) => wireSong(song))
+							? p.autoplayTracks
+									.slice(0, SHARED_AUTOPLAY_LIMIT)
+									.map((song) => wireSong(song))
 							: [],
 						autoplayEnabled: p.autoplayEnabled,
-						index: p.currentSong ? index - start : -1,
-						song: actualSong ? wireSong(actualSong) : null,
 						position,
 						playing,
 						repeatMode: p.repeatMode,

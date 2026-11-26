@@ -1,12 +1,9 @@
 import { Fragment } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import { closeNowPlaying } from "@/lib/player/player-ui";
-import {
-	formatArtistName,
-	mergeArtistNames,
-	useFormatTitle,
-} from "@/lib/utils/title";
+import { formatArtistName, mergeArtistNames } from "@/lib/utils/title";
+import { useFormatTitle } from "@/lib/utils/use-song-title";
 import { cn } from "@/lib/utils/utils";
 import { artistSubtitle } from "@/lib/youtube/youtube.utils";
 

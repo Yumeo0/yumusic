@@ -1,5 +1,6 @@
-import { fetchFunction } from "../youtube/youtube-client";
-import type { LrcLine, LrcWord } from "./lrclib";
+import { proxiedFetch } from "../utils/tauri";
+import type { LrcLine, LrcWord } from "./lyrics";
+import { fieldMatches } from "./match";
 
 /**
  * Musixmatch provider using the mobile-app API (`apic-appmobile`), which —
@@ -9,7 +10,7 @@ import type { LrcLine, LrcWord } from "./lrclib";
  * `token.get`, then one `macro.subtitles.get` call that resolves and returns
  * the lyrics in a single round trip.
  *
- * Requests go through the app's Tauri proxy (`fetchFunction`) because the
+ * Requests go through the app's Tauri proxy (`proxiedFetch`) because the
  * endpoint needs custom headers and sends no CORS headers for a webview.
  */
 const ROOT = "https://apic-appmobile.musixmatch.com/ws/1.1/";
@@ -36,9 +37,9 @@ function getToken(): Promise<string | null> {
 	if (!tokenPromise) {
 		tokenPromise = (async () => {
 			try {
-				const res = await fetchFunction(
+				const res = await proxiedFetch(
 					`${ROOT}token.get?app_id=${APP_ID}&format=json&t=${Date.now()}`,
-					{ headers: HEADERS },
+					HEADERS,
 				);
 				const data = (await res.json()) as {
 					message?: {
@@ -82,9 +83,7 @@ async function mget(
 		t: Date.now().toString(),
 	});
 	if (token) query.set("usertoken", token);
-	const res = await fetchFunction(`${ROOT}${action}?${query}`, {
-		headers: HEADERS,
-	});
+	const res = await proxiedFetch(`${ROOT}${action}?${query}`, HEADERS);
 	if (!res.ok) {
 		console.warn("[musixmatch] request failed", action, res.status);
 	}
@@ -98,31 +97,6 @@ interface MxmTrack {
 	instrumental?: number;
 	has_subtitles?: number;
 	has_richsync?: number;
-}
-
-function normalize(value: string): string {
-	return value
-		.toLowerCase()
-		.replace(/[^\p{L}\p{N}]+/gu, " ")
-		.trim();
-}
-
-/** True when one normalized string contains the other, or they overlap enough. */
-function fieldMatches(
-	candidate: string,
-	wanted: string,
-	minCoverage: number,
-): boolean {
-	const c = normalize(candidate);
-	const w = normalize(wanted);
-	if (!c || !w) return false;
-	if (c === w || c.includes(w) || w.includes(c)) return true;
-	const have = new Set(c.split(" ").filter(Boolean));
-	const want = w.split(" ").filter(Boolean);
-	if (want.length === 0) return false;
-	return (
-		want.filter((token) => have.has(token)).length / want.length >= minCoverage
-	);
 }
 
 const LRC_TIME = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;

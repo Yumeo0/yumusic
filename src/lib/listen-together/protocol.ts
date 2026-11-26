@@ -1,5 +1,13 @@
-import type { Song } from "@/contexts/player-context";
-import type { RepeatMode } from "@/lib/player/repeat";
+import type { Song } from "@/lib/music/song";
+import { isRepeatMode } from "@/lib/player/repeat";
+import {
+	type PlaybackSnapshot,
+	parsePlaybackSnapshot,
+	SHARED_AUTOPLAY_LIMIT,
+	SHARED_QUEUE_LIMIT,
+	validSong,
+	wireSong,
+} from "@/lib/player/shared-playback";
 import {
 	type ActionContext,
 	type GuestPermissions,
@@ -19,19 +27,6 @@ export interface Participant {
 	profile: RoomProfile;
 	status: "listening" | "buffering" | "paused" | "unavailable";
 	fingerprint?: string;
-}
-export interface RoomPlayback {
-	revision: number;
-	instance: string;
-	queue: Song[];
-	autoplayQueue: Song[];
-	autoplayEnabled: boolean;
-	index: number;
-	song: Song | null;
-	position: number;
-	playing: boolean;
-	sentAt: number;
-	repeatMode: RepeatMode;
 }
 export type RoomMessage =
 	| { type: "identity-request"; challenge: JoinChallenge }
@@ -64,7 +59,7 @@ export type RoomMessage =
 	| { type: "profile"; profile: RoomProfile }
 	| { type: "suggest"; song: Song }
 	| { type: "status"; status: Participant["status"] }
-	| { type: "state"; session: string; playback: RoomPlayback }
+	| { type: "state"; session: string; playback: PlaybackSnapshot }
 	| {
 			type: "tick";
 			session: string;
@@ -86,20 +81,6 @@ const finite = (v: unknown): v is number =>
 	typeof v === "number" && Number.isFinite(v);
 export const validStatus = (v: unknown) =>
 	["listening", "buffering", "paused", "unavailable"].includes(String(v));
-function validSong(v: unknown): v is Song {
-	return (
-		record(v) &&
-		typeof v.id === "string" &&
-		/^[A-Za-z0-9_-]{11}$/.test(v.id) &&
-		text(v.title, 500) &&
-		text(v.artist, 500) &&
-		text(v.thumbnail, 2000) &&
-		(v.thumbnail === "" || /^https:\/\//.test(String(v.thumbnail))) &&
-		(v.duration === undefined || text(v.duration, 30)) &&
-		(v.addedBy === undefined ||
-			validProfile({ username: v.addedBy, avatar: null }))
-	);
-}
 function validMembers(v: unknown): v is Participant[] {
 	return (
 		Array.isArray(v) &&
@@ -124,7 +105,7 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 		case "autoplay":
 			return Number.isInteger(value.index) &&
 				Number(value.index) >= 0 &&
-				Number(value.index) < 100 &&
+				Number(value.index) < SHARED_AUTOPLAY_LIMIT &&
 				text(value.queueKey, 2000)
 				? {
 						type: "autoplay",
@@ -142,7 +123,7 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 			if (
 				!Array.isArray(songs) ||
 				!songs.length ||
-				songs.length > 300 ||
+				songs.length > SHARED_QUEUE_LIMIT ||
 				!songs.every(validSong)
 			)
 				return null;
@@ -171,13 +152,13 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 		case "remove":
 			return Number.isInteger(value.index) &&
 				Number(value.index) >= 0 &&
-				Number(value.index) < 300
+				Number(value.index) < SHARED_QUEUE_LIMIT
 				? { type: "remove", index: Number(value.index) }
 				: null;
 		case "reorder": {
 			const order = value.order;
 			return Array.isArray(order) &&
-				order.length <= 300 &&
+				order.length <= SHARED_QUEUE_LIMIT &&
 				new Set(order).size === order.length &&
 				order.every((i) => Number.isInteger(i) && i >= 0 && i < order.length)
 				? { type: "reorder", order }
@@ -190,9 +171,8 @@ export function parseRoomAction(value: unknown): RoomAction | null {
 				? { type: "seek", position: value.position }
 				: null;
 		case "repeat":
-			return ["off", "one", "all"].includes(String(value.mode)) &&
-				typeof value.mode === "string"
-				? { type: "repeat", mode: value.mode as RepeatMode }
+			return isRepeatMode(value.mode)
+				? { type: "repeat", mode: value.mode }
 				: null;
 		default:
 			return null;
@@ -306,55 +286,11 @@ export function parseMessage(raw: unknown): RoomMessage | null {
 					? (m as RoomMessage)
 					: null;
 			case "state": {
-				const p = m.playback;
-				if (
-					!text(m.session) ||
-					!record(p) ||
-					!Number.isSafeInteger(p.revision) ||
-					Number(p.revision) < 0 ||
-					!text(p.instance) ||
-					!Array.isArray(p.queue) ||
-					p.queue.length > 300 ||
-					!p.queue.every(validSong) ||
-					!Array.isArray(p.autoplayQueue) ||
-					p.autoplayQueue.length > 100 ||
-					!p.autoplayQueue.every(validSong) ||
-					typeof p.autoplayEnabled !== "boolean" ||
-					!Number.isInteger(p.index) ||
-					Number(p.index) < -1 ||
-					Number(p.index) >= p.queue.length ||
-					!(p.song === null || validSong(p.song)) ||
-					!finite(p.position) ||
-					p.position < 0 ||
-					p.position > 86400 ||
-					!finite(p.sentAt) ||
-					typeof p.playing !== "boolean" ||
-					!["off", "one", "all"].includes(String(p.repeatMode))
-				)
-					return null;
-				if (
-					p.song &&
-					(p.index === -1 || p.queue[Number(p.index)].id !== p.song.id)
-				)
-					return null;
-				// Strip unrecognized fields before data reaches the player and UI.
-				return {
-					type: "state",
-					session: String(m.session),
-					playback: {
-						revision: Number(p.revision),
-						instance: String(p.instance),
-						queue: p.queue.map((song) => wireSong(song)),
-						autoplayQueue: p.autoplayQueue.map((song) => wireSong(song)),
-						autoplayEnabled: p.autoplayEnabled,
-						index: Number(p.index),
-						song: p.song ? wireSong(p.song as unknown as Song) : null,
-						position: p.position,
-						playing: p.playing,
-						sentAt: p.sentAt,
-						repeatMode: p.repeatMode as RepeatMode,
-					},
-				};
+				if (!text(m.session)) return null;
+				const playback = parsePlaybackSnapshot(m.playback);
+				return playback
+					? { type: "state", session: String(m.session), playback }
+					: null;
 			}
 			default:
 				return null;
@@ -362,38 +298,6 @@ export function parseMessage(raw: unknown): RoomMessage | null {
 	} catch {
 		return null;
 	}
-}
-
-/** Deliberately omit descriptions, playback URLs and any account/session data. */
-function safeThumbnail(url: string): string {
-	try {
-		const parsed = new URL(url);
-		const allowed = ["ytimg.com", "googleusercontent.com", "ggpht.com"].some(
-			(host) =>
-				parsed.hostname === host || parsed.hostname.endsWith(`.${host}`),
-		);
-		return parsed.protocol === "https:" && allowed ? url.slice(0, 2000) : "";
-	} catch {
-		return "";
-	}
-}
-
-export function wireSong(song: Song, attribution = true): Song {
-	return {
-		id: song.id,
-		title: song.title.slice(0, 500),
-		artist: song.artist.slice(0, 500),
-		thumbnail: safeThumbnail(song.thumbnail),
-		duration: song.duration,
-		...(attribution && song.addedBy ? { addedBy: song.addedBy } : {}),
-	};
-}
-
-export function expectedPosition(p: RoomPlayback, hostNow: number): number {
-	return Math.max(
-		0,
-		p.position + (p.playing ? Math.max(0, hostNow - p.sentAt) / 1000 : 0),
-	);
 }
 
 export function parseInvite(

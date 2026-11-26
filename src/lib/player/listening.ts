@@ -84,21 +84,6 @@ class ListeningSession {
 		}
 	}
 
-	/** Listened seconds for the current track. */
-	get elapsed() {
-		return this.#elapsed;
-	}
-
-	/** The track currently being tracked, if any. */
-	get songId() {
-		return this.#songId;
-	}
-
-	/** Whether the current track has passed the grace period. */
-	get established() {
-		return this.#established;
-	}
-
 	subscribe(listener: Listener): () => void {
 		this.#listeners.add(listener);
 		return () => {

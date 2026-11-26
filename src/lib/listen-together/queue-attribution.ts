@@ -1,4 +1,4 @@
-import type { Song } from "@/contexts/player-context";
+import type { Song } from "@/lib/music/song";
 import type { RoomAction } from "./guest-permissions";
 
 /** Attribution belongs to a queue occurrence, never to the song's global metadata. */
