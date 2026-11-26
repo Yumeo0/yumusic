@@ -142,14 +142,14 @@ const PlayerVolumeContext = createContext<PlayerVolumeContextType | undefined>(
 
 /**
  * Seconds before the end of a track at which the next one starts buffering
- * on the idle deck. Generous enough for the metadata request, PoToken and
- * SABR handshake to finish before the fade window opens; a preload that is
- * still not ready when the track ends falls back to the normal load path.
+ * on the idle deck. Allow time for playback setup before the fade or the
+ * end of the track. If the preload is still pending, use the normal load path.
  */
 const CROSSFADE_PRELOAD_LEAD_SECONDS = 15;
 
 interface CrossfadeState {
 	phase: "preload" | "transitioning" | "failed";
+	controller: AbortController;
 	target: TransitionTrack;
 	incoming: LoadedTrack | null;
 	fromSong: Song;
@@ -328,6 +328,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const crossfadeRafRef = useRef<number | null>(null);
 	const updateCrossfadeRef = useRef<() => void>(() => undefined);
 	const loadRequestRef = useRef(0);
+	const loadControllerRef = useRef<AbortController | null>(null);
+	const cancelTrackLoad = useCallback(() => {
+		loadControllerRef.current?.abort();
+		loadControllerRef.current = null;
+		return ++loadRequestRef.current;
+	}, []);
 	const preparingTrackRef = useRef<number | null>(null);
 	const autoplayRequestRef = useRef<AutoplayRequest | null>(null);
 	const loadAutoplay = useCallback((songId: string, retryEmpty = false) => {
@@ -381,6 +387,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		const state = crossfadeRef.current;
 		if (!state) return;
 		crossfadeRef.current = null;
+		state.controller.abort();
 		if (crossfadeRafRef.current !== null) {
 			cancelAnimationFrame(crossfadeRafRef.current);
 			crossfadeRafRef.current = null;
@@ -406,14 +413,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 
 	const commitCrossfade = useCallback(
-		(state: CrossfadeState) => {
+		(state: CrossfadeState, skipped = false) => {
 			const nextEl = decksRef.current[state.deckIndex]?.ref.current;
 			if (crossfadeRef.current !== state || !state.incoming || !nextEl) {
-				return;
+				return false;
 			}
 			const oldDeck = decksRef.current[activeDeckRef.current];
 			// A timer changed during the fade. Finish the outgoing song at full gain.
 			if (
+				!skipped &&
 				!oldDeck.ref.current?.ended &&
 				sleepTimer.shouldStopAtTrackEnd(
 					currentIndex,
@@ -422,9 +430,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				)
 			) {
 				abortCrossfade();
-				return;
+				return false;
 			}
-			if (stopForSleepTimer(state.endedAt)) return;
+			if (!skipped && stopForSleepTimer(state.endedAt)) return false;
 			crossfadeRef.current = null;
 			if (crossfadeRafRef.current !== null) {
 				cancelAnimationFrame(crossfadeRafRef.current);
@@ -457,6 +465,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setIsPlaying(true);
 
 			oldDeck.reset();
+			return true;
 		},
 		[
 			abortCrossfade,
@@ -548,6 +557,55 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		[abortCrossfade, commitCrossfade],
 	);
 
+	const handoffPreparedTrack = useCallback(
+		(target: TransitionTrack | null, endedAt?: number) => {
+			const state = crossfadeRef.current;
+			if (
+				listenRoom.getSnapshot().role ||
+				state?.phase !== "preload" ||
+				!state.incoming ||
+				!sameTarget(state.target, target)
+			) {
+				return false;
+			}
+			const deck = decksRef.current[state.deckIndex];
+			const nextEl = deck.ref.current;
+			if (!deck.ready || !nextEl) return false;
+
+			const request = cancelTrackLoad();
+			state.endedAt = endedAt;
+			if (endedAt !== undefined && IS_ANDROID) {
+				state.seconds = 0;
+				startTransition(state);
+				return true;
+			}
+
+			if (commitCrossfade(state, endedAt === undefined)) {
+				const src = nextEl.src;
+				const isCurrent = () =>
+					request === loadRequestRef.current &&
+					videoElementRef.current === nextEl &&
+					nextEl.src === src;
+				void deck.play().then(
+					(started) => {
+						if (!started && isCurrent() && nextEl.paused) setIsPlaying(false);
+					},
+					(error: unknown) => {
+						if (!isCurrent()) return;
+						deck.reset();
+						setIsPlaying(false);
+						console.warn(
+							"[PlayerContext] Prepared track could not play:",
+							error,
+						);
+					},
+				);
+			}
+			return true;
+		},
+		[cancelTrackLoad, commitCrossfade, startTransition],
+	);
+
 	const armCrossfade = useCallback(
 		async (target: TransitionTrack, seconds: number, fromSong: Song) => {
 			if (crossfadeRef.current) return;
@@ -556,6 +614,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
 			const state: CrossfadeState = {
 				advance: null,
+				controller: new AbortController(),
 				deckIndex,
 				fromSong,
 				phase: "preload",
@@ -582,7 +641,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			try {
 				state.incoming = await loadTrack(deck, target.song, {
 					intent: "preload",
-					isCurrent,
+					signal: state.controller.signal,
 					volume: getVolume,
 					onPlaybackError: fail,
 				});
@@ -606,7 +665,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		const seconds = settings.crossfade
 			? clampCrossfadeSeconds(settings.crossfadeSeconds)
 			: 0;
-		const preloadWithoutFade = IS_ANDROID && activeSleepTimer !== null;
 		const activeEl = decksRef.current[activeDeckRef.current]?.ref.current;
 		if (roomRole || !isPlaying || !currentSong || !activeEl) {
 			abortCrossfade();
@@ -618,7 +676,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 		if (state?.phase === "transitioning" && state.endedAt !== undefined) return;
 		const target = nextTransitionTrack(activeSleepTimer?.mode === "queue");
 		if (
-			(!seconds && !preloadWithoutFade) ||
 			!target ||
 			sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length)
 		) {
@@ -816,12 +873,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	const playSong = useCallback(
 		async (song: Song, exact = false) => {
 			abortCrossfade();
-			const request = ++loadRequestRef.current;
+			const request = cancelTrackLoad();
+			const controller = new AbortController();
+			loadControllerRef.current = controller;
+			const { signal } = controller;
 			preparingTrackRef.current = request;
 			const deck = decksRef.current[activeDeckRef.current];
 			deck.reset();
 			setIsPlaying(false);
-			const isCurrent = () => request === loadRequestRef.current;
 			setCurrentSong(song);
 			setVideoInfo(null);
 			try {
@@ -832,13 +891,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 					description,
 				} = await loadTrack(deck, song, {
 					intent: exact ? "prepare" : "play",
-					isCurrent,
+					signal,
 					volume: getVolume,
 					onPlaybackError: (error) => {
 						setIsPlaying(false);
 						console.error("[player] Active track failed:", error);
 					},
 				});
+				signal.throwIfAborted();
 
 				if (streamInfo && (played.id !== song.id || description)) {
 					const enrich = (entry: Song) => {
@@ -863,17 +923,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setVideoInfo(streamInfo ?? null);
 				setIsPlaying(!exact && deck.ref.current?.paused === false);
 			} catch (error) {
-				if (isCurrent()) {
+				if (!signal.aborted) {
 					setIsPlaying(false);
 					console.error("[player] Failed to play song:", error);
 				}
 				if (exact) throw error;
 			} finally {
+				if (loadControllerRef.current === controller)
+					loadControllerRef.current = null;
 				if (preparingTrackRef.current === request)
 					preparingTrackRef.current = null;
 			}
 		},
-		[abortCrossfade, getVolume],
+		[abortCrossfade, cancelTrackLoad, getVolume],
 	);
 	const resume = useCallback(() => {
 		if (!currentSong) return;
@@ -1055,6 +1117,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				await playSong(target.song);
 				return;
 			}
+			if (trigger === "skip" && handoffPreparedTrack(target)) return;
 			if (target.kind === "autoplay") {
 				setAutoplayTracks(tracks.autoplayTracks.slice(1));
 				setQueueState([...tracks.queue, target.song]);
@@ -1064,7 +1127,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setCurrentIndex(target.index);
 			await playSong(target.song);
 		},
-		[loadAutoplay, playSong],
+		[handoffPreparedTrack, loadAutoplay, playSong],
 	);
 
 	/**
@@ -1087,20 +1150,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			const queueTimer = sleepTimer.getSnapshot()?.mode === "queue";
 			const guest = listenRoom.getSnapshot().role === "guest";
 			if (
-				IS_ANDROID &&
 				!guest &&
-				state?.phase === "preload" &&
-				!sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length, endedAt)
-			) {
-				const target = nextTransitionTrack(queueTimer);
-				const deck = decksRef.current[state.deckIndex];
-				if (sameTarget(state.target, target) && deck.ready && state.incoming) {
-					state.seconds = 0;
-					state.endedAt = endedAt;
-					startTransition(state);
-					return;
-				}
-			}
+				!sleepTimer.shouldStopAtTrackEnd(currentIndex, queue.length, endedAt) &&
+				handoffPreparedTrack(nextTransitionTrack(queueTimer), endedAt)
+			)
+				return;
 			if (stopForSleepTimer(state?.endedAt ?? endedAt) || guest) return;
 			setIsPlaying(false);
 			void advance("ended");
@@ -1109,7 +1163,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			commitCrossfade,
 			advance,
 			nextTransitionTrack,
-			startTransition,
+			handoffPreparedTrack,
 			stopForSleepTimer,
 			currentIndex,
 			queue.length,
@@ -1119,11 +1173,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	// The provider owns both decks; free their streams when it goes away.
 	useEffect(() => {
 		return () => {
-			loadRequestRef.current++;
+			cancelTrackLoad();
 			abortCrossfade();
 			for (const deck of decksRef.current) deck.reset();
 		};
-	}, [abortCrossfade]);
+	}, [abortCrossfade, cancelTrackLoad]);
 
 	const previous = useCallback(async () => {
 		if (currentIndex > 0 || (repeatMode === "all" && queue.length > 0)) {
@@ -1205,7 +1259,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				// Removing the playing entry advances to what now occupies its
 				// slot, so audio and highlighted row stay in sync.
 				if (nextQueue.length === 0) {
-					loadRequestRef.current++;
+					cancelTrackLoad();
+					abortCrossfade();
 					setIsPlaying(false);
 					setCurrentSong(null);
 					setVideoInfo(null);
@@ -1221,7 +1276,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 				setCurrentIndex(currentIndex - 1);
 			}
 		},
-		[queue, currentIndex, playSong],
+		[queue, currentIndex, playSong, cancelTrackLoad, abortCrossfade],
 	);
 
 	const shuffleQueue = useCallback(() => {
@@ -1282,7 +1337,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 	);
 	const previewRoomTrack = useCallback(
 		(song: Song | null, songs: Song[], index: number) => {
-			loadRequestRef.current++;
+			cancelTrackLoad();
 			abortCrossfade();
 			decksRef.current[activeDeckRef.current].reset();
 			setIsPlaying(false);
@@ -1291,7 +1346,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 			setQueueState(songs);
 			setCurrentIndex(index);
 		},
-		[abortCrossfade],
+		[abortCrossfade, cancelTrackLoad],
 	);
 	const getPlaybackGeneration = useCallback(() => loadRequestRef.current, []);
 	const applyRoomQueue = useCallback((songs: Song[], index: number) => {

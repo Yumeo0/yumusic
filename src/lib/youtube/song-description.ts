@@ -4,7 +4,7 @@ import { titleNeedsDescription } from "@/lib/utils/description";
 import { LruCache } from "@/lib/utils/lru-cache";
 import { formatTitleParts, splitDualTitle } from "@/lib/utils/title";
 import { getYoutubeClient } from "./client-session";
-import { getTrackMeta } from "./track-meta";
+import { getTrackQueueMeta } from "./track-meta";
 import { isVideoId } from "./youtube.utils";
 
 /**
@@ -128,7 +128,7 @@ export function createSongRowEnrichment(deliver: DeliverEnrichment) {
 		return description ? { description } : null;
 	}, deliver);
 	const uploads = createEnrichmentQueue(async (videoId) => {
-		const meta = await getTrackMeta(videoId);
+		const meta = await getTrackQueueMeta(videoId);
 		return meta && !meta.album ? { upload: true } : null;
 	}, deliver);
 

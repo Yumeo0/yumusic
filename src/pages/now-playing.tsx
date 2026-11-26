@@ -33,6 +33,7 @@ import { SongContextMenu } from "@/components/song/song-menu";
 import { SongTitle } from "@/components/song/song-title";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useRoomRole } from "@/lib/listen-together/room";
+import type { LyricsProviderId } from "@/lib/lyrics/lyrics-providers";
 import { useLyricsMorph } from "@/lib/motion/lyrics-motion";
 import {
 	mergeTouchHandlers,
@@ -42,10 +43,14 @@ import {
 } from "@/lib/motion/queue-gesture";
 import type { Song } from "@/lib/music/song";
 import type { PlaybackMedia } from "@/lib/player/playback-deck";
-import { setQueueRevealTarget } from "@/lib/player/player-ui";
+import {
+	setQueueRevealTarget,
+	useNowPlayingOpen,
+} from "@/lib/player/player-ui";
 import { useMediaTime } from "@/lib/player/use-media-time";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
+import { DESKTOP_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 
 interface NowPlayingPageProps {
 	onClose: () => void;
@@ -290,6 +295,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						<NowPlayingLyrics
 							knownDuration={knownDuration}
 							media={activeMedia}
+							showOnMobile={showLyrics}
 							song={currentSong}
 						/>
 					</div>
@@ -925,15 +931,44 @@ function NowPlayingSeek({
 	);
 }
 
-/** Lyrics subscribe to the clock themselves so the fullscreen tree stays put. */
-function NowPlayingLyrics({
-	song,
-	media,
-	knownDuration,
-}: {
+interface TrackLyricsProps {
 	song: Song;
 	media: PlaybackMedia | null;
 	knownDuration?: number;
+}
+
+function NowPlayingLyrics({
+	showOnMobile,
+	...track
+}: TrackLyricsProps & { showOnMobile: boolean }) {
+	const { id } = track.song;
+	const open = useNowPlayingOpen();
+	const desktop = useMediaQuery(DESKTOP_QUERY);
+	const [selection, setSelection] = useState<{
+		songId: string;
+		provider: LyricsProviderId;
+	} | null>(null);
+	if (selection && selection.songId !== id) setSelection(null);
+	if (!open || (!desktop && !showOnMobile)) return null;
+	return (
+		<TrackLyrics
+			{...track}
+			onSelectSource={(provider) => setSelection({ songId: id, provider })}
+			selectedSource={selection?.songId === id ? selection.provider : null}
+		/>
+	);
+}
+
+/** Lyrics subscribe to the clock themselves so the fullscreen tree stays put. */
+function TrackLyrics({
+	song,
+	media,
+	knownDuration,
+	onSelectSource,
+	selectedSource,
+}: TrackLyricsProps & {
+	onSelectSource: (provider: LyricsProviderId) => void;
+	selectedSource: LyricsProviderId | null;
 }) {
 	const { seek } = usePlayer();
 	const { currentTime, duration } = useMediaTime(media, song.id, knownDuration);
@@ -945,6 +980,8 @@ function NowPlayingLyrics({
 			duration={duration}
 			media={media}
 			onSeekTime={seek}
+			onSelectSource={onSelectSource}
+			selectedSource={selectedSource}
 			songId={song.id}
 			title={song.title}
 		/>

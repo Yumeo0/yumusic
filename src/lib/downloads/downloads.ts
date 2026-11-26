@@ -11,7 +11,6 @@ import { bytesToBase64 } from "@/lib/utils/base64";
 import { applySongDescription } from "@/lib/utils/description";
 import { getPlaybackStream } from "@/lib/youtube/playback-stream";
 import { loadPlaylistView } from "@/lib/youtube/playlist-data";
-import { createSabrAudioSource } from "@/lib/youtube/sabr-source";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { canonicalPlaylistId } from "../youtube/playlist-id";
 
@@ -257,7 +256,10 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 	let token: string | null = null;
 	let lastProgressEmit = 0;
 	try {
-		const result = await getPlaybackStream(song.id);
+		const [result, { createSabrAudioSource }] = await Promise.all([
+			getPlaybackStream(song.id, signal),
+			import("@/lib/youtube/sabr-source"),
+		]);
 		signal.throwIfAborted();
 		const videoInfo = result.videoInfo;
 		// Keep the uploader description with the stored song: playback uses it

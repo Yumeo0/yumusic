@@ -23,6 +23,7 @@ import {
 	type LyricsSources,
 	loadLyricsSources,
 	lyricsProvider,
+	lyricsQueryKey,
 	pickProvider,
 } from "@/lib/lyrics/lyrics-providers";
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
@@ -43,6 +44,8 @@ interface LyricsPanelProps {
 	onSeekTime: (seconds: number) => void;
 	/** The playing media element — sampled per frame for the word fills. */
 	media?: PlaybackMedia | null;
+	selectedSource: LyricsProviderId | null;
+	onSelectSource: (provider: LyricsProviderId) => void;
 	className?: string;
 }
 
@@ -70,6 +73,8 @@ export function LyricsPanel({
 	currentTime,
 	onSeekTime,
 	media,
+	selectedSource,
+	onSelectSource,
 	className,
 }: LyricsPanelProps) {
 	const [settings] = useSettings();
@@ -79,22 +84,17 @@ export function LyricsPanel({
 		preferSyncedLyrics,
 		romanizeLyrics: romanize,
 	} = settings;
-	const requestKey = JSON.stringify([
+	const requestKey = lyricsQueryKey({
 		songId,
 		title,
 		artist,
 		duration,
-		lrclibLooseMatch,
-	]);
+		looseMatch: lrclibLooseMatch,
+	});
 	const [fetched, setFetched] = useState<{
 		key: string;
 		sources: LyricsSources;
 	} | null>(null);
-	const [manualView, setManualView] = useState<{
-		songId: string;
-		provider: LyricsProviderId;
-	} | null>(null);
-
 	useEffect(() => {
 		setFetched({ key: requestKey, sources: PENDING_SOURCES });
 		return loadLyricsSources(
@@ -111,25 +111,16 @@ export function LyricsPanel({
 		);
 	}, [requestKey, songId, title, artist, duration, lrclibLooseMatch]);
 
-	useEffect(() => {
-		setManualView((previous) =>
-			previous?.songId === songId ? previous : null,
-		);
-	}, [songId]);
-
 	const sources =
 		fetched?.key === requestKey ? fetched.sources : PENDING_SOURCES;
-	const preferred = manualView?.songId === songId ? manualView.provider : null;
 	const view =
-		preferred && sources[preferred]
-			? preferred
+		selectedSource && sources[selectedSource]
+			? selectedSource
 			: pickProvider(order, sources, preferSyncedLyrics);
 	const available = order.filter((id) => sources[id]).map(lyricsProvider);
 	const pending = order.some((id) => sources[id] === undefined);
 	const active = view ? sources[view] : null;
 	const attribution = view ? lyricsProvider(view).attribution : undefined;
-	const selectSource = (provider: LyricsProviderId) =>
-		setManualView({ songId, provider });
 	const kind = active ? lyricsKind(active) : null;
 
 	return (
@@ -150,7 +141,7 @@ export function LyricsPanel({
 					{view ? (
 						<LyricsSourceSelect
 							key={songId}
-							onChange={selectSource}
+							onChange={onSelectSource}
 							providers={available}
 							value={view}
 						/>
@@ -190,7 +181,7 @@ export function LyricsPanel({
 										: "text-muted-foreground hover:text-foreground",
 								)}
 								key={provider.id}
-								onClick={() => selectSource(provider.id)}
+								onClick={() => onSelectSource(provider.id)}
 								type="button"
 							>
 								{provider.label}

@@ -27,15 +27,27 @@ function collectQueueLengths(node: unknown, out: Map<string, string>): void {
  */
 export async function getTrackDurations(
 	videoIds: string[],
+	signal?: AbortSignal,
 ): Promise<Map<string, string>> {
 	const durations = new Map<string, string>();
 	if (videoIds.length === 0) return durations;
 	const client = await getYoutubeClient();
-	const response = await client.actions.execute("/music/get_queue", {
-		videoIds: videoIds.slice(0, MAX_QUEUE_IDS),
-		client: "YTMUSIC",
+	signal?.throwIfAborted();
+	// Actions.execute accepts a JSON payload. Use the session's HTTP client so
+	// a tab or query change can cancel the request itself.
+	const response = await client.session.http.fetch("/music/get_queue", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({
+			videoIds: videoIds.slice(0, MAX_QUEUE_IDS),
+			client: "YTMUSIC",
+			isAudioOnly: true,
+		}),
+		signal,
 	});
-	collectQueueLengths(response.data, durations);
+	const data: unknown = await response.json();
+	signal?.throwIfAborted();
+	collectQueueLengths(data, durations);
 	return durations;
 }
 

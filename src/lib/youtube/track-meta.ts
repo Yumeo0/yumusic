@@ -16,7 +16,7 @@ import { youtubeFetch } from "./youtube-fetch";
 export async function getSongVersion(
 	videoId: string,
 ): Promise<SongVersion | null> {
-	const meta = await getTrackMeta(videoId);
+	const meta = await getTrackQueueMeta(videoId);
 	return meta?.songVersion ?? null;
 }
 
@@ -35,28 +35,36 @@ export interface TrackMeta {
  * Session cache for queue metadata: it is locale-stable and costs a queue
  * fetch, so a track played, scrobbled and enriched only fetches it once.
  */
-const trackMetaCache = new LruCache<string, TrackMeta>(256);
-const trackMetaRequests = new Map<string, Promise<TrackMeta | null>>();
+type QueueMeta = Omit<TrackMeta, "originalTitle">;
+const queueMetaCache = new LruCache<string, QueueMeta>(256);
+const queueMetaRequests = new Map<string, Promise<QueueMeta | null>>();
+
+export function getTrackQueueMeta(videoId: string): Promise<QueueMeta | null> {
+	const known = queueMetaCache.get(videoId);
+	if (known) return Promise.resolve(known);
+	const pending = queueMetaRequests.get(videoId);
+	if (pending) return pending;
+	const request = fetchQueueMeta(videoId)
+		.then((meta) => {
+			if (meta) queueMetaCache.set(videoId, meta);
+			return meta;
+		})
+		.finally(() => queueMetaRequests.delete(videoId));
+	queueMetaRequests.set(videoId, request);
+	return request;
+}
 
 /**
  * Album and artist metadata for a track, taken from the selected entry of the
  * "Up next" queue (fetched in the app's current language). The original title
- * comes from oEmbed, which is locale-independent; failures resolve to null so
- * callers keep working without it.
+ * comes from oEmbed, which is locale-independent. Queue-derived playback
+ * decisions share the same queue result and can proceed while oEmbed loads.
  */
-export function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
-	const known = trackMetaCache.get(videoId);
-	if (known) return Promise.resolve(known);
-	const pending = trackMetaRequests.get(videoId);
-	if (pending) return pending;
-	const request = fetchTrackMeta(videoId)
-		.then((meta) => {
-			if (meta) trackMetaCache.set(videoId, meta);
-			return meta;
-		})
-		.finally(() => trackMetaRequests.delete(videoId));
-	trackMetaRequests.set(videoId, request);
-	return request;
+export async function getTrackMeta(videoId: string): Promise<TrackMeta | null> {
+	const meta = await getTrackQueueMeta(videoId);
+	if (!meta) return null;
+	const oembed = await getOembedMetadata(videoId, youtubeFetch);
+	return { ...meta, originalTitle: oembed?.title ?? undefined };
 }
 
 /** The song-version metadata the queue's counterpart entry carries. */
@@ -74,7 +82,7 @@ function toSongVersion(entry: YTNodes.PlaylistPanelVideo): SongVersion {
 	};
 }
 
-async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
+async function fetchQueueMeta(videoId: string): Promise<QueueMeta | null> {
 	try {
 		const client = await getYoutubeClient();
 		// Queue metadata needs no player response or playable stream. Fetch it
@@ -91,15 +99,11 @@ async function fetchTrackMeta(videoId: string): Promise<TrackMeta | null> {
 			videos.find((video) => video.selected);
 		if (!current) return null;
 		const versionEntry = songVersionEntryFromQueue(wrappers, videoId);
-		const oembed = await getOembedMetadata(videoId, (input, init) =>
-			youtubeFetch(input, init),
-		);
 		return {
 			album: current.album
 				? { name: current.album.name, id: current.album.id }
 				: undefined,
 			artists: queueArtists(current),
-			originalTitle: oembed?.title ?? undefined,
 			originalArtist: current.artists?.[0]?.name || undefined,
 			songVersion: versionEntry ? toSongVersion(versionEntry) : undefined,
 		};

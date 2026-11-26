@@ -62,6 +62,11 @@ type TabView =
 	| { status: "error" }
 	| { status: "ready"; entries: SearchEntry[] };
 
+interface CachedResults {
+	entries: SearchEntry[];
+	durationsLoaded: boolean;
+}
+
 const TABS: Array<{
 	id: SearchTab;
 	label: string;
@@ -341,21 +346,40 @@ function toEntries(search: YTMusic.Search, tab: SearchTab): SearchEntry[] {
  * Covers both list rows and the top-result card's associated songs; no-op
  * when every track already has a duration.
  */
-async function fillDurations(entries: SearchEntry[]): Promise<void> {
-	const missing = entries
-		.flatMap((entry) =>
-			entry.kind === "playable" ? [entry.song] : (entry.songs ?? []),
-		)
-		.filter((song) => !song.duration);
-	if (missing.length === 0) return;
-	try {
-		const durations = await getTrackDurations(missing.map((song) => song.id));
-		for (const song of missing) {
-			const duration = durations.get(song.id);
-			if (duration) song.duration = duration;
+async function fillDurations(
+	entries: SearchEntry[],
+	signal: AbortSignal,
+): Promise<SearchEntry[]> {
+	const missing = new Set<string>();
+	for (const entry of entries) {
+		if (entry.kind === "playable" && !entry.song.duration)
+			missing.add(entry.song.id);
+		for (const song of entry.songs ?? []) {
+			if (!song.duration) missing.add(song.id);
 		}
+	}
+	if (missing.size === 0) return entries;
+	try {
+		const durations = await getTrackDurations([...missing], signal);
+		if (durations.size === 0) return entries;
+		const fill = (song: Song) => {
+			const duration = song.duration ? undefined : durations.get(song.id);
+			return duration ? { ...song, duration } : song;
+		};
+		return entries.map((entry) => {
+			const song = entry.kind === "playable" ? fill(entry.song) : undefined;
+			const songs = entry.songs?.map(fill);
+			let updated = entry;
+			if (entry.kind === "playable" && song && song !== entry.song)
+				updated = { ...entry, song };
+			if (songs?.some((item, index) => item !== entry.songs?.[index]))
+				updated = { ...updated, songs };
+			return updated;
+		});
 	} catch (error) {
-		console.warn("[search] could not load track lengths:", error);
+		if (!signal.aborted)
+			console.warn("[search] could not load track lengths:", error);
+		return entries;
 	}
 }
 
@@ -372,30 +396,43 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 	const versions = useSongVersionReplacements();
 	const navigate = useNavigate();
 	const [tab, setTab] = useState<SearchTab>("all");
-	const [view, setView] = useState<TabView>({ status: "loading" });
+	const [views, setViews] = useState<Partial<Record<SearchTab, TabView>>>({});
+	const view: TabView = views[tab] ?? { status: "loading" };
 	// Fetched tabs of the current query, so switching tabs back and forth does
 	// not re-query YouTube. The page is keyed by query, so caches never mix.
-	const cache = useRef(new Map<SearchTab, SearchEntry[]>());
+	const cache = useRef(new Map<SearchTab, CachedResults>());
 	const filter = TABS.find((entry) => entry.id === tab)?.type;
 
-	// Switch the visible tab and its content in one update, so the previous
-	// tab's rows never flash under the new tab while its fetch starts.
 	const selectTab = (next: SearchTab) => {
 		if (next === tab) return;
+		if (views[next]?.status === "error")
+			setViews((current) => ({ ...current, [next]: { status: "loading" } }));
 		setTab(next);
-		const cached = cache.current.get(next);
-		setView(
-			cached ? { status: "ready", entries: cached } : { status: "loading" },
-		);
 	};
 
 	useEffect(() => {
-		if (!query || cache.current.has(tab)) return;
-		let cancelled = false;
+		const cached = cache.current.get(tab);
+		if (!query || cached?.durationsLoaded) return;
+		const controller = new AbortController();
+		const { signal } = controller;
+		const setView = (next: TabView) => {
+			setViews((current) => ({ ...current, [tab]: next }));
+		};
+		const enrich = async (entries: SearchEntry[]) => {
+			const enriched = await fillDurations(entries, signal);
+			if (signal.aborted) return;
+			cache.current.set(tab, { entries: enriched, durationsLoaded: true });
+			if (enriched !== entries) setView({ status: "ready", entries: enriched });
+		};
 
 		(async () => {
 			try {
+				if (cached) {
+					await enrich(cached.entries);
+					return;
+				}
 				const youtube = await getYoutubeClient();
+				if (signal.aborted) return;
 				if (tab === "channel") {
 					const [web, music] = await Promise.allSettled([
 						youtube.search(query, { type: "channel" }),
@@ -416,8 +453,8 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 							)
 								entries.push(entry);
 						}
-					if (!cancelled) {
-						cache.current.set(tab, entries);
+					if (!signal.aborted) {
+						cache.current.set(tab, { entries, durationsLoaded: true });
 						setView({ status: "ready", entries });
 					}
 					return;
@@ -426,20 +463,19 @@ export default function SearchResults({ query }: SearchResultsPageProps) {
 					query,
 					filter ? { type: filter } : {},
 				);
+				if (signal.aborted) return;
 				const entries = toEntries(search, tab);
-				await fillDurations(entries);
-				if (cancelled) return;
-				cache.current.set(tab, entries);
+				cache.current.set(tab, { entries, durationsLoaded: false });
 				setView({ status: "ready", entries });
+				await enrich(entries);
 			} catch (err) {
+				if (signal.aborted) return;
 				console.error("Search error:", err);
-				if (!cancelled) setView({ status: "error" });
+				setView({ status: "error" });
 			}
 		})();
 
-		return () => {
-			cancelled = true;
-		};
+		return () => controller.abort();
 	}, [query, tab, filter]);
 
 	const loading = view.status === "loading";

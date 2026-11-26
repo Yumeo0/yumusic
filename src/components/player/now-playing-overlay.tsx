@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { lazy, memo, Suspense, useEffect, useRef, useState } from "react";
+import { usePlayer } from "@/contexts/player-context";
 import {
 	useNowPlayingMotion,
 	useNowPlayingSwipe,
@@ -10,10 +11,34 @@ import {
 	useNowPlayingOpen,
 	useQueueOpen,
 } from "@/lib/player/player-ui";
-import { NowPlayingPage } from "@/pages/now-playing";
+
+const NowPlayingPage = lazy(() =>
+	import("@/pages/now-playing").then(({ NowPlayingPage }) => ({
+		default: NowPlayingPage,
+	})),
+);
 
 export function NowPlayingOverlay() {
+	const { currentSong } = usePlayer();
 	const isNowPlayingOpen = useNowPlayingOpen();
+	const hasPlayer = currentSong !== null || isNowPlayingOpen;
+	const [requested, setRequested] = useState(hasPlayer);
+	// Load on first track selection so the gesture can measure the player
+	// before it opens. Retain the surface for later tracks and close animations.
+	if (hasPlayer && !requested) setRequested(true);
+	if (!requested) return null;
+	return (
+		<Suspense fallback={null}>
+			<NowPlayingSurface isNowPlayingOpen={isNowPlayingOpen} />
+		</Suspense>
+	);
+}
+
+const NowPlayingSurface = memo(function NowPlayingSurface({
+	isNowPlayingOpen,
+}: {
+	isNowPlayingOpen: boolean;
+}) {
 	const isQueueOpen = useQueueOpen();
 	const overlayRef = useRef<HTMLElement>(null);
 	useNowPlayingMotion(overlayRef, isNowPlayingOpen);
@@ -55,4 +80,4 @@ export function NowPlayingOverlay() {
 			/>
 		</section>
 	);
-}
+});

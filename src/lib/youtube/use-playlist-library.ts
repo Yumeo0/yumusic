@@ -7,7 +7,9 @@ import {
 import { loadPlaylistLibrary } from "./playlist-library";
 
 export function usePlaylistLibrary(active = true) {
-	const [playlists, setPlaylists] = useState<LibraryPlaylist[] | null>(null);
+	const [playlists, setPlaylists] = useState<LibraryPlaylist[] | null>(() =>
+		active ? (readLibraryCache()?.data ?? null) : null,
+	);
 	const [loading, setLoading] = useState(active);
 	const [failed, setFailed] = useState(false);
 	const requestRef = useRef(0);
@@ -38,7 +40,10 @@ export function usePlaylistLibrary(active = true) {
 				setPlaylists(cached.data);
 				setLoading(false);
 				setFailed(false);
-			} else void refresh();
+			} else {
+				setPlaylists(null);
+				void refresh();
+			}
 		});
 		return () => {
 			requestRef.current++;
@@ -46,5 +51,5 @@ export function usePlaylistLibrary(active = true) {
 		};
 	}, [active, refresh]);
 
-	return { playlists, loading, failed, refresh };
+	return { playlists, loading, failed: failed && playlists === null, refresh };
 }

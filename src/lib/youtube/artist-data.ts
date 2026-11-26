@@ -44,6 +44,10 @@ const artistCache = new LruCache<
 	{ timestamp: number; data: ArtistView }
 >(12);
 
+export function readCachedArtistView(id: string): ArtistView | null {
+	return artistCache.get(id)?.data ?? null;
+}
+
 export async function fetchArtistView(
 	id: string,
 	force = false,

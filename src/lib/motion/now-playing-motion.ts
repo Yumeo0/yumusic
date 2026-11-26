@@ -225,6 +225,7 @@ export function useNowPlayingSwipe(
 		y: number;
 		distance: number;
 		following: boolean;
+		driver: PlayerMotion | null;
 		velocity: GestureVelocity;
 	} | null>(null);
 	const suppressClick = useRef(false);
@@ -233,12 +234,16 @@ export function useNowPlayingSwipe(
 		gesture.current = null;
 		if (!current?.following) return;
 		const velocity = cancelled ? 0 : current.velocity.read();
-		motion?.settle(
+		const expanded =
 			!cancelled && current.distance + projectMomentum(velocity) >= 64
 				? opening
-				: !opening,
-			velocity * (opening ? -1 : 1),
-		);
+				: !opening;
+		if (current.driver && current.driver === motion) {
+			current.driver.settle(expanded, velocity * (opening ? -1 : 1));
+		} else {
+			// A first swipe can finish while the player surface is loading.
+			setNowPlayingOpen(expanded);
+		}
 	};
 	return {
 		onClickCapture: (event: React.MouseEvent) => {
@@ -274,6 +279,7 @@ export function useNowPlayingSwipe(
 				y: touch.clientY,
 				distance: 0,
 				following: false,
+				driver: null,
 				velocity,
 			};
 		},
@@ -295,16 +301,17 @@ export function useNowPlayingSwipe(
 					return;
 				}
 				if (Math.abs(dy) < 10) return;
-				if (!motion?.begin()) {
+				if (motion ? !motion.begin() : !opening) {
 					gesture.current = null;
 					return;
 				}
+				current.driver = motion;
 				current.following = true;
 				suppressClick.current = true;
 			}
 			current.distance = dy;
 			current.velocity.add(current.distance);
-			motion?.drag(current.distance, opening);
+			current.driver?.drag(current.distance, opening);
 		},
 		onTouchEnd: () => finish(false),
 		onTouchCancel: () => finish(true),

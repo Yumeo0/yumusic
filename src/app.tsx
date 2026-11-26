@@ -7,7 +7,7 @@ import {
 	SettingsIcon,
 	X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
 	HashRouter,
@@ -52,11 +52,23 @@ import { IS_MOBILE, proxiedImageUrl } from "./lib/utils/tauri";
 import { cn } from "./lib/utils/utils";
 import { canonicalPlaylistId } from "./lib/youtube/playlist-id";
 import { useYouTubeSession } from "./lib/youtube/use-youtube-session";
-import ArtistPage, { ArtistCategoryPage } from "./pages/artist";
 import HomePage from "./pages/home";
-import ListenTogetherPage from "./pages/listen-together";
-import PlaylistsPage, { PlaylistDetails } from "./pages/playlists";
-import SettingsPage from "./pages/settings";
+
+const loadArtist = () => import("./pages/artist");
+const loadPlaylists = () => import("./pages/playlists");
+const loadSettings = () => import("./pages/settings");
+const ArtistPage = lazy(loadArtist);
+const ArtistCategoryPage = lazy(() =>
+	loadArtist().then(({ ArtistCategoryPage }) => ({
+		default: ArtistCategoryPage,
+	})),
+);
+const ListenTogetherPage = lazy(() => import("./pages/listen-together"));
+const PlaylistsPage = lazy(loadPlaylists);
+const PlaylistDetails = lazy(() =>
+	loadPlaylists().then(({ PlaylistDetails }) => ({ default: PlaylistDetails })),
+);
+const SettingsPage = lazy(loadSettings);
 
 function Layout() {
 	const account = useYouTubeSession();
@@ -213,31 +225,36 @@ function AppShell({
 						{/* Extra top/bottom room on mobile: status-bar safe area,
 						    plus nav bar + player clearance */}
 						<div className="max-md:pt-(--safe-area-top) pb-44 md:pb-32">
-							<div className="animate-page-in" key={location.pathname}>
-								<Routes>
-									<Route element={<HomePage />} path="/" />
-									<Route element={<HomePage />} path="/home" />
-									<Route element={<ListenTogetherPage />} path="/listen" />
-									<Route element={<PlaylistsPage />} path="/playlists" />
-									<Route element={<PlaylistDetails />} path="/playlists/:id" />
-									<Route element={<ArtistPage />} path="/artist/:id" />
-									<Route
-										element={<ArtistCategoryPage />}
-										path="/artist/:id/category/:category"
-									/>
-									<Route
-										element={
-											<SettingsPage
-												handleLogin={handleLogin}
-												handleLogout={handleLogout}
-												isLoggedIn={isLoggedIn}
-												userProfile={userProfile}
-											/>
-										}
-										path="/settings"
-									/>
-								</Routes>
-							</div>
+							<Suspense fallback={<RouteLoading />} key={location.pathname}>
+								<div className="animate-page-in">
+									<Routes>
+										<Route element={<HomePage />} path="/" />
+										<Route element={<HomePage />} path="/home" />
+										<Route element={<ListenTogetherPage />} path="/listen" />
+										<Route element={<PlaylistsPage />} path="/playlists" />
+										<Route
+											element={<PlaylistDetails />}
+											path="/playlists/:id"
+										/>
+										<Route element={<ArtistPage />} path="/artist/:id" />
+										<Route
+											element={<ArtistCategoryPage />}
+											path="/artist/:id/category/:category"
+										/>
+										<Route
+											element={
+												<SettingsPage
+													handleLogin={handleLogin}
+													handleLogout={handleLogout}
+													isLoggedIn={isLoggedIn}
+													userProfile={userProfile}
+												/>
+											}
+											path="/settings"
+										/>
+									</Routes>
+								</div>
+							</Suspense>
 						</div>
 					</ScrollArea>
 				</main>
@@ -257,6 +274,14 @@ function AppShell({
 				side="bottom"
 			/>
 		</>
+	);
+}
+
+function RouteLoading() {
+	return (
+		<p className="px-6 py-8 text-sm text-muted-foreground" role="status">
+			Loading…
+		</p>
 	);
 }
 
@@ -299,6 +324,7 @@ const destinations = [
 		path: "/playlists",
 		label: "Playlists",
 		icon: LibraryIcon,
+		load: loadPlaylists,
 		matches: (path: string, mobile: boolean) =>
 			mobile ? path.startsWith("/playlists") : path === "/playlists",
 	},
@@ -306,6 +332,7 @@ const destinations = [
 		path: "/settings",
 		label: "Settings",
 		icon: SettingsIcon,
+		load: loadSettings,
 		matches: (path: string) => path.startsWith("/settings"),
 	},
 ];
@@ -324,8 +351,9 @@ function MobileNav() {
 function NavigationItems({ mobile = false }: { mobile?: boolean }) {
 	const { pathname } = useLocation();
 	const navigate = useNavigate();
-	return destinations.map(({ path, label, icon: Icon, matches }) => {
+	return destinations.map(({ path, label, icon: Icon, load, matches }) => {
 		const active = matches(pathname, mobile);
+		const preload = load && (() => void load().catch(() => undefined));
 		return (
 			<button
 				aria-current={active ? "page" : undefined}
@@ -343,6 +371,8 @@ function NavigationItems({ mobile = false }: { mobile?: boolean }) {
 				)}
 				key={path}
 				onClick={() => navigate(path)}
+				onFocus={preload}
+				onPointerEnter={preload}
 				type="button"
 			>
 				<Icon className={mobile ? "size-5" : "size-4.5"} strokeWidth={2.2} />

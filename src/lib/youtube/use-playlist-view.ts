@@ -8,10 +8,11 @@ import {
 import { reconcilePinnedPlaylists } from "../stores/pinned";
 import {
 	applyPlaylistChange,
+	isFreshPlaylistView,
 	patchCachedPlaylistSongs,
 	playlistRevision,
-	readFreshPlaylistView,
 	readPlaylistView,
+	readWarmPlaylistView,
 	subscribeToPlaylistChanges,
 	writePlaylistView,
 } from "../stores/playlist-cache";
@@ -26,12 +27,15 @@ export function usePlaylistView(
 	onDelete: () => void,
 	playingId?: string,
 ) {
-	const [playlist, setPlaylist] = useState<PlaylistView | null>(null);
-	const [loading, setLoading] = useState(true);
+	const [playlist, setPlaylist] = useState<PlaylistView | null>(() => {
+		const cached = readWarmPlaylistView(id);
+		return cached ? forRoute(cached.data, id) : null;
+	});
+	const [loading, setLoading] = useState(playlist === null);
 	const [refreshing, setRefreshing] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const displayed = useRef<PlaylistView | null>(null);
+	const displayed = useRef(playlist);
 	const requestRef = useRef<AbortController | null>(null);
 	const cancelEnrichment = useRef<(() => void) | null>(null);
 	const pendingEnrichment = useRef(new Map<string, SongEnrichment>());
@@ -100,16 +104,15 @@ export function usePlaylistView(
 			flush();
 			setLoadingMore(false);
 			setError(null);
-			const fresh = force ? null : readFreshPlaylistView(id);
-			if (fresh) {
-				publishLoaded({ ...fresh, id });
+			const cached = readWarmPlaylistView(id) ?? readPlaylistView(id);
+			if (!force && isFreshPlaylistView(cached)) {
+				publishLoaded(forRoute(cached.data, id));
 				setLoading(false);
 				setRefreshing(false);
 				return;
 			}
 
-			const cached = readPlaylistView(id);
-			if (!displayed.current && cached) publish({ ...cached.data, id });
+			if (!displayed.current && cached) publish(forRoute(cached.data, id));
 			const hasContent = displayed.current !== null;
 			setLoading(!hasContent);
 			setRefreshing(hasContent);
@@ -236,4 +239,8 @@ export function usePlaylistView(
 		refresh,
 		removeTrack,
 	};
+}
+
+function forRoute(view: PlaylistView, id: string): PlaylistView {
+	return view.id === id ? view : { ...view, id };
 }

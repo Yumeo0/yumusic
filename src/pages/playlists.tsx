@@ -18,7 +18,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import { EqualizerBars } from "@/components/player/waveform";
@@ -75,6 +75,52 @@ const PLAYLIST_SORTS: Array<{ value: PlaylistSort; label: string }> = [
 	{ value: "longest", label: "Longest first" },
 ];
 
+const playlistCollator = new Intl.Collator(undefined, { sensitivity: "base" });
+const EMPTY_TRACKS: PlaylistTrack[] = [];
+
+interface IndexedTrack {
+	song: PlaylistTrack;
+	index: number;
+	key: string;
+}
+
+function indexTracks(songs: PlaylistTrack[]): IndexedTrack[] {
+	const occurrences = new Map<string, number>();
+	return songs.map((song, index) => {
+		if (song.entryId) return { song, index, key: `entry:${song.entryId}` };
+		const occurrence = occurrences.get(song.id) ?? 0;
+		occurrences.set(song.id, occurrence + 1);
+		return { song, index, key: `${song.id}#${occurrence}` };
+	});
+}
+
+function orderTracks(
+	tracks: IndexedTrack[],
+	sort: PlaylistSort,
+	displayTitle: (title: string) => string,
+): IndexedTrack[] {
+	if (sort === "newest") return tracks;
+	if (sort === "oldest") return [...tracks].reverse();
+	if (sort === "shortest" || sort === "longest") {
+		const lengths = tracks.map(({ song }) => parseDuration(song.duration));
+		const direction = sort === "shortest" ? 1 : -1;
+		return [...tracks].sort(
+			(a, b) =>
+				direction * (lengths[a.index] - lengths[b.index]) || a.index - b.index,
+		);
+	}
+	const byTitle = sort === "title-asc" || sort === "title-desc";
+	const names = tracks.map(({ song }) =>
+		byTitle ? displayTitle(song.title) : (song.artist ?? ""),
+	);
+	const direction = sort === "title-asc" || sort === "artist-asc" ? 1 : -1;
+	return [...tracks].sort(
+		(a, b) =>
+			direction * playlistCollator.compare(names[a.index], names[b.index]) ||
+			a.index - b.index,
+	);
+}
+
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
 	const [sort, setSort] = useState<PlaylistSort>("newest");
@@ -128,17 +174,43 @@ function PlaylistDetailsView({
 	const downloadJob = usePlaylistDownloadJob(id);
 	const downloaded = usePlaylistDownloaded(id);
 	const versions = useSongVersionReplacements();
+	const songs = playlist?.songs ?? EMPTY_TRACKS;
+	const tracks = useMemo(() => indexTracks(songs), [songs]);
+	const ordered = useMemo(
+		() => orderTracks(tracks, sort, displayTitle),
+		[tracks, sort, displayTitle],
+	);
+	const query = search.trim().toLowerCase();
+	const visible = useMemo(() => {
+		if (!query) return ordered;
+		return ordered.filter(({ song }) =>
+			[song.title, song.artist, ...(song.artists ?? []).map((a) => a.name)]
+				.filter(Boolean)
+				.some((text) => text.toLowerCase().includes(query)),
+		);
+	}, [ordered, query]);
+	const getRowKey = useCallback(
+		(index: number) => visible[index].key,
+		[visible],
+	);
+	const playOrder = useMemo(
+		() => ordered.map((entry) => entry.song),
+		[ordered],
+	);
+	const visiblePlayOrder = useMemo(
+		() =>
+			visible === ordered ? playOrder : visible.map((entry) => entry.song),
+		[ordered, playOrder, visible],
+	);
 
 	// Stable handlers for the memoized track rows: the latest visible list is
 	// read through a ref, so row props stay identical across batch appends.
-	const visibleRef = useRef<Array<{ song: Song; index: number }>>([]);
+	const visibleRef = useRef(visiblePlayOrder);
+	visibleRef.current = visiblePlayOrder;
 	const playQueueRef = useRef(playQueue);
 	playQueueRef.current = playQueue;
 	const playTrack = useCallback((position: number) => {
-		void playQueueRef.current(
-			visibleRef.current.map((entry) => entry.song),
-			position,
-		);
+		void playQueueRef.current(visibleRef.current, position);
 	}, []);
 
 	const onBack = () => navigate(-1);
@@ -196,78 +268,8 @@ function PlaylistDetailsView({
 		);
 	}
 
-	const { songs } = playlist;
 	const showCount =
 		songs.length > 0 && !/\d+\s+songs?\b/i.test(playlist.subtitle);
-
-	// Search filter — matches titles and artist names. Rows keep their original
-	// playlist position for numbering unless a sort is active. YouTube Music
-	// returns a playlist newest-first (new additions land at the top), so
-	// "newest" needs no work and "oldest" reverses it. Ties keep that order.
-	const query = search.trim().toLowerCase();
-	const ordered = songs.map((song, index) => ({ song, index }));
-	if (sort !== "newest") {
-		const titles = new Map<number, string>();
-		const titleKey = (entry: { song: Song; index: number }) => {
-			let key = titles.get(entry.index);
-			if (key === undefined) {
-				key = displayTitle(entry.song.title);
-				titles.set(entry.index, key);
-			}
-			return key;
-		};
-		const collator = (a: string, b: string) =>
-			a.localeCompare(b, undefined, { sensitivity: "base" });
-		ordered.sort((a, b) => {
-			let result = 0;
-			switch (sort) {
-				case "oldest":
-					result = b.index - a.index;
-					break;
-				case "title-asc":
-					result = collator(titleKey(a), titleKey(b));
-					break;
-				case "title-desc":
-					result = collator(titleKey(b), titleKey(a));
-					break;
-				case "artist-asc":
-					result = collator(a.song.artist ?? "", b.song.artist ?? "");
-					break;
-				case "artist-desc":
-					result = collator(b.song.artist ?? "", a.song.artist ?? "");
-					break;
-				case "shortest":
-					result =
-						parseDuration(a.song.duration) - parseDuration(b.song.duration);
-					break;
-				case "longest":
-					result =
-						parseDuration(b.song.duration) - parseDuration(a.song.duration);
-					break;
-			}
-			return result || a.index - b.index;
-		});
-	}
-	const visible = ordered.filter(({ song }) => {
-		if (!query) return true;
-		return [song.title, song.artist, ...(song.artists ?? []).map((a) => a.name)]
-			.filter(Boolean)
-			.some((text) => text.toLowerCase().includes(query));
-	});
-	// Stable row identity: the same track occurrence keeps its key across
-	// refetches, so an added/removed track doesn't remount the others.
-	const rowKeys = (() => {
-		const occurrence = new Map<string, number>();
-		return visible.map(({ song }) => {
-			if (song.entryId) return `entry:${song.entryId}`;
-			const count = occurrence.get(song.id) ?? 0;
-			occurrence.set(song.id, count + 1);
-			return `${song.id}#${count}`;
-		});
-	})();
-	visibleRef.current = visible;
-	/** Display order for "Play all", including rows hidden by the search. */
-	const playOrder = ordered.map((entry) => entry.song);
 	const activeSort =
 		PLAYLIST_SORTS.find((option) => option.value === sort)?.label ??
 		"Newest first";
@@ -555,9 +557,9 @@ function PlaylistDetailsView({
 						Loading more…
 					</p>
 				)}
-				<VirtualTrackList count={visible.length} getKey={(i) => rowKeys[i]}>
+				<VirtualTrackList count={visible.length} getKey={getRowKey}>
 					{(i) => {
-						const { song, index } = visible[i];
+						const { song, index, key } = visible[i];
 						// The row displays the album track when the video was
 						// resolved to one; removal and playlist edits stay keyed
 						// to the playlist's own entry.
@@ -569,7 +571,7 @@ function PlaylistDetailsView({
 								index={index}
 								isCurrent={currentSong?.id === displaySong.id}
 								isPlaying={currentSong?.id === displaySong.id && isPlaying}
-								key={rowKeys[i]}
+								key={key}
 								number={sort === "newest" ? index + 1 : i + 1}
 								onPlay={playTrack}
 								onQueue={addToQueue}
@@ -729,7 +731,7 @@ export default function PlaylistsPage() {
 	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const { playlists, loading, failed, refresh } = usePlaylistLibrary();
 
-	if (loading) {
+	if (loading && playlists === null) {
 		return (
 			<div className="mx-auto w-full max-w-5xl px-6 pt-6 sm:px-10 sm:pt-10">
 				<div className="shimmer-surface mb-8 h-8 w-48 rounded-lg" />

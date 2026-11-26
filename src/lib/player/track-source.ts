@@ -8,10 +8,8 @@ import {
 	getPlaybackStream,
 	getSongStream,
 } from "@/lib/youtube/playback-stream";
-import { createSabrAudioSource } from "@/lib/youtube/sabr-source";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
 import { applySongVersion } from "@/lib/youtube/song-version";
-import { getSongVersion } from "@/lib/youtube/track-meta";
 import { isVideoId } from "@/lib/youtube/youtube.utils";
 import type { DeckSource, PlaybackDeck } from "./playback-deck";
 
@@ -27,18 +25,15 @@ export async function loadTrack(
 	song: Song,
 	options: {
 		intent: "play" | "prepare" | "preload";
-		isCurrent: () => boolean;
+		signal: AbortSignal;
 		volume: () => number;
 		onPlaybackError: (error: unknown) => void;
 	},
 ): Promise<LoadedTrack> {
-	const ensureCurrent = () => {
-		if (!options.isCurrent())
-			throw new DOMException("Playback changed", "AbortError");
-	};
-	const mount = { ...options, autoPlay: options.intent === "play" };
+	const { signal, intent, volume, onPlaybackError } = options;
+	const mount = { volume, onPlaybackError, autoPlay: intent === "play" };
 	await hydrateDownloads();
-	ensureCurrent();
+	signal.throwIfAborted();
 	const entry = getDownloadEntry(song.id);
 	if (entry) {
 		const source: DeckSource = {
@@ -48,7 +43,7 @@ export async function loadTrack(
 		};
 		try {
 			await deck.mount(source, mount);
-			ensureCurrent();
+			signal.throwIfAborted();
 			return {
 				song: entry.description
 					? applySongDescription(song, entry.description)
@@ -57,7 +52,7 @@ export async function loadTrack(
 				artwork: entry.thumbnail ?? undefined,
 			};
 		} catch (error) {
-			ensureCurrent();
+			signal.throwIfAborted();
 			// Keep the file indexed so kept downloads do not re-download an entire playlist.
 			console.warn(
 				"[player] Could not play downloaded audio:",
@@ -68,19 +63,17 @@ export async function loadTrack(
 	}
 	if (!isVideoId(song.id))
 		throw new Error(`Invalid video id "${song.id}" for "${song.title}"`);
-	const exact = options.intent === "prepare";
-	const stream = exact
-		? { ...(await getSongStream(song.id)), videoId: song.id }
-		: await getPlaybackStream(song.id);
-	ensureCurrent();
-	if (stream.videoId !== song.id) {
-		const version = await getSongVersion(song.id);
-		ensureCurrent();
-		if (version) {
-			const played = applySongVersion(song, version);
-			rememberSongVersion(song, played);
-			song = played;
-		}
+	const [stream, { createSabrAudioSource }] = await Promise.all([
+		intent === "prepare"
+			? getSongStream(song.id, signal)
+			: getPlaybackStream(song.id, signal),
+		import("@/lib/youtube/sabr-source"),
+	]);
+	signal.throwIfAborted();
+	if (stream.songVersion) {
+		const played = applySongVersion(song, stream.songVersion);
+		rememberSongVersion(song, played);
+		song = played;
 	}
 	const description = stream.videoInfo.basic_info.short_description?.trim();
 	if (description) {
@@ -104,7 +97,7 @@ export async function loadTrack(
 			createSabrAudioSource(videoId, videoInfo, innertube, signal),
 	};
 	await deck.mount(source, mount);
-	ensureCurrent();
+	signal.throwIfAborted();
 	const best = biggestThumb(info.thumbnail);
 	// Keep the square artwork from music listings when YouTube returns a video thumbnail.
 	const artwork =

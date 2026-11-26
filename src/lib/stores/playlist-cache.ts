@@ -8,6 +8,7 @@ import {
 	applySongEnrichment,
 	type SongEnrichment,
 } from "../music/song-enrichment";
+import { LruCache } from "../utils/lru-cache";
 import { canonicalPlaylistId, playlistBrowseId } from "../youtube/playlist-id";
 
 /**
@@ -144,6 +145,20 @@ const playlistKeys = (id: string) => [
 	PLAYLIST_CACHE_PREFIX + playlistBrowseId(id),
 ];
 
+const warmPlaylistViews = new LruCache<
+	string,
+	CacheEntry<PlaylistView> & { libraryRevision: number; revision: number }
+>(12);
+
+/** First-render snapshots from this session, invalidated by account/library changes and edits. */
+export function readWarmPlaylistView(id: string) {
+	const cached = warmPlaylistViews.get(canonicalPlaylistId(id));
+	return cached?.libraryRevision === getLibraryRevision() &&
+		cached.revision === playlistRevision(id)
+		? cached
+		: null;
+}
+
 export function readPlaylistView(id: string) {
 	const [key, alias] = playlistKeys(id);
 	const saved = readCache<PlaylistView>(key);
@@ -163,7 +178,15 @@ export function writePlaylistView(
 	if (keepComplete && !view.complete && readPlaylistView(id)?.data.complete)
 		return;
 	const [key, alias] = playlistKeys(id);
-	if (writeCache(key, { ...view, id: canonicalPlaylistId(id) })) {
+	const canonicalId = canonicalPlaylistId(id);
+	const data = { ...view, id: canonicalId };
+	if (writeCache(key, data)) {
+		warmPlaylistViews.set(canonicalId, {
+			data,
+			timestamp: Date.now(),
+			libraryRevision: getLibraryRevision(),
+			revision: playlistRevision(id),
+		});
 		try {
 			localStorage.removeItem(alias);
 		} catch {
@@ -344,10 +367,13 @@ export function subscribeToLibraryChanges(listener: () => void): () => void {
 
 export function readFreshPlaylistView(id: string) {
 	const cached = readPlaylistView(id);
-	if (
-		!cached?.data.complete ||
-		Date.now() - cached.timestamp >= SYNC_INTERVAL_MS
-	)
-		return null;
-	return cached.data;
+	return isFreshPlaylistView(cached) ? cached.data : null;
+}
+
+export function isFreshPlaylistView(
+	cached: CacheEntry<PlaylistView> | null,
+): cached is CacheEntry<PlaylistView> {
+	return (
+		!!cached?.data.complete && Date.now() - cached.timestamp < SYNC_INTERVAL_MS
+	);
 }

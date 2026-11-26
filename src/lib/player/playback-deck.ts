@@ -30,6 +30,23 @@ export class PlaybackDeck {
 		return this.#mount?.ready ?? false;
 	}
 
+	async play() {
+		const media = this.ref.current;
+		if (!media) throw new Error("This track is unavailable on this device.");
+		try {
+			await media.play();
+			return true;
+		} catch (error) {
+			// A browser can leave a playable track paused until a user gesture.
+			if (
+				error instanceof Error &&
+				(error.name === "NotAllowedError" || error.name === "AbortError")
+			)
+				return false;
+			throw error;
+		}
+	}
+
 	reset() {
 		const mount = this.#mount;
 		this.#mount = null;
@@ -97,16 +114,7 @@ export class PlaybackDeck {
 			await waitForPlayable(media, readiness);
 			if (options.autoPlay && !native) {
 				media.volume = options.volume();
-				try {
-					await media.play();
-				} catch (error) {
-					// Browser autoplay restrictions can leave an otherwise playable track paused.
-					if (
-						!(error instanceof Error) ||
-						(error.name !== "NotAllowedError" && error.name !== "AbortError")
-					)
-						throw error;
-				}
+				await this.play();
 			}
 			signal.throwIfAborted();
 			mount.ready = true;

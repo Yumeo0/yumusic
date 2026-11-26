@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { type LrcLine, lyricsKind } from "./lyrics";
 import {
 	DEFAULT_LYRICS_PROVIDER_ORDER,
+	type LyricsSources,
+	loadLyricsSources,
 	normalizeProviderOrder,
 	pickProvider,
 } from "./lyrics-providers";
@@ -29,6 +31,51 @@ function plain(confirmed = true): TestLyrics {
 }
 
 const ORDER = ["lrclib", "musixmatch", "lrcred"] as const;
+
+test("reopening lyrics reuses pending and completed provider requests", async () => {
+	const query = {
+		songId: "test-lyrics",
+		title: "Example Song",
+		artist: "Example Artist",
+		duration: 120,
+		looseMatch: false,
+	};
+	let requests = 0;
+	const stubFetch = async (input: RequestInfo | URL) => {
+		if (!String(input).startsWith("https://lrclib.net/")) {
+			return Response.json({}, { status: 404 });
+		}
+		requests++;
+		return Response.json([
+			{ duration: 120, plainLyrics: "Cached lyrics", syncedLyrics: null },
+		]);
+	};
+	const fetch = spyOn(globalThis, "fetch").mockImplementation(
+		Object.assign(stubFetch, { preconnect: globalThis.fetch.preconnect }),
+	);
+	const open = () =>
+		new Promise<LyricsSources>((resolve) => {
+			const sources: LyricsSources = {};
+			loadLyricsSources(query, (id, lyrics) => {
+				sources[id] = lyrics;
+				if (
+					Object.keys(sources).length === DEFAULT_LYRICS_PROVIDER_ORDER.length
+				)
+					resolve(sources);
+			});
+		});
+	try {
+		let closedDeliveries = 0;
+		const close = loadLyricsSources(query, () => closedDeliveries++);
+		close();
+		expect((await open()).lrclib?.plain).toBe("Cached lyrics");
+		expect((await open()).lrclib?.plain).toBe("Cached lyrics");
+		expect(closedDeliveries).toBe(0);
+		expect(requests).toBe(1);
+	} finally {
+		fetch.mockRestore();
+	}
+});
 
 describe("Genius provider preferences", () => {
 	test("adds Genius after existing saved preferences without changing their order", () => {

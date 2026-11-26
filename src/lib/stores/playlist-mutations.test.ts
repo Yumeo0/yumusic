@@ -6,6 +6,7 @@ import { loadPlaylistLibrary } from "../youtube/playlist-library";
 import { removePlaylistTrack } from "../youtube/playlist-mutations";
 import {
 	addSongToCachedPlaylist,
+	invalidateLibraryCache,
 	LIBRARY_CACHE_KEY,
 	PLAYLIST_CACHE_PREFIX,
 	type PlaylistChange,
@@ -13,6 +14,7 @@ import {
 	readCache,
 	readLibraryCache,
 	readPlaylistView,
+	readWarmPlaylistView,
 	removeSongFromCachedPlaylist,
 	subscribeToLibraryChanges,
 	subscribeToPlaylistChanges,
@@ -66,6 +68,18 @@ const view: PlaylistView = {
 	complete: true,
 	editable: true,
 };
+
+test("warm detail views share route aliases and respect playlist and library invalidation", () => {
+	writePlaylistView("VLPLtest", view);
+	expect(readWarmPlaylistView("PLtest")?.data).toEqual(view);
+	addSongToCachedPlaylist("VLPLtest", song);
+	expect(readWarmPlaylistView("PLtest")).toBeNull();
+
+	writePlaylistView("PLtest", view);
+	expect(readWarmPlaylistView("VLPLtest")?.data).toEqual(view);
+	invalidateLibraryCache();
+	expect(readWarmPlaylistView("VLPLtest")).toBeNull();
+});
 
 test("confirmed edits update library and detail aliases before notifying open views", () => {
 	writeCache(LIBRARY_CACHE_KEY, [

@@ -1,4 +1,5 @@
-import { getTrackMeta } from "../youtube/track-meta";
+import { LruCache } from "../utils/lru-cache";
+import { getTrackQueueMeta } from "../youtube/track-meta";
 import {
 	type LyricsKind,
 	lyricsKind,
@@ -78,7 +79,7 @@ const providers = {
 		async load({ songId, title, artist }) {
 			const [{ fetchGeniusLyrics }, meta] = await Promise.all([
 				import("./genius"),
-				getTrackMeta(songId).catch(() => null),
+				getTrackQueueMeta(songId),
 			]);
 			return fetchGeniusLyrics(title, artist, meta?.album?.name);
 		},
@@ -106,6 +107,28 @@ export const DEFAULT_LYRICS_PROVIDER_ORDER = Object.keys(
 	providers,
 ) as LyricsProviderId[];
 
+const LYRICS_RETRY_MS = 5 * 60_000;
+const recentLyrics = new LruCache<
+	string,
+	{
+		retryAt: number;
+		requests: {
+			id: LyricsProviderId;
+			result: Promise<ProviderLyrics | null>;
+		}[];
+	}
+>(16);
+
+export function lyricsQueryKey(query: LyricsQuery): string {
+	return JSON.stringify([
+		query.songId,
+		query.title,
+		query.artist,
+		query.duration,
+		query.looseMatch,
+	]);
+}
+
 export function lyricsProvider(id: LyricsProviderId): LyricsProvider {
 	const { label, attribution, kinds } = providers[id];
 	return { id, label, attribution, kinds };
@@ -115,16 +138,24 @@ export function loadLyricsSources(
 	query: LyricsQuery,
 	deliver: (id: LyricsProviderId, lyrics: ProviderLyrics | null) => void,
 ) {
+	const key = lyricsQueryKey(query);
+	const now = Date.now();
+	let cached = recentLyrics.get(key);
+	if (!cached || cached.retryAt <= now) {
+		cached = {
+			retryAt: now + LYRICS_RETRY_MS,
+			requests: DEFAULT_LYRICS_PROVIDER_ORDER.map((id) => ({
+				id,
+				result: providers[id].load(query).catch(() => null),
+			})),
+		};
+		recentLyrics.set(key, cached);
+	}
 	let active = true;
-	for (const id of DEFAULT_LYRICS_PROVIDER_ORDER) {
-		void providers[id].load(query).then(
-			(result) => {
-				if (active) deliver(id, result);
-			},
-			() => {
-				if (active) deliver(id, null);
-			},
-		);
+	for (const { id, result } of cached.requests) {
+		void result.then((lyrics) => {
+			if (active) deliver(id, lyrics);
+		});
 	}
 	return () => {
 		active = false;

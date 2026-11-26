@@ -159,9 +159,12 @@ export async function loadArtistCategoryItems(
 	artistName: string,
 	artistId: string,
 	signal: AbortSignal,
+	onPage?: (items: ArtistShelfItem[], hasMore: boolean) => void,
 ) {
-	const nodes: Helpers.YTNode[] = [];
-	const seen = new Set<string>();
+	const items: ArtistShelfItem[] = [];
+	const seenItems = new Set<string>();
+	const seenTokens = new Set<string>();
+	signal.throwIfAborted();
 	let page = await endpoint.call(actions, { client: "YTMUSIC", parse: true });
 
 	for (;;) {
@@ -178,16 +181,30 @@ export async function loadArtistCategoryItems(
 		) {
 			throw new Error("YouTube Music returned an unloaded artist tab.");
 		}
-		for (const node of nextNodes) nodes.push(node);
-		if (!continuation) return artistShelfItems(nodes, artistName, artistId);
+		const batch = artistShelfItems(nextNodes, artistName, artistId).filter(
+			(item) => {
+				const key = item.song
+					? `song:${item.song.id}`
+					: (item.link ??
+						JSON.stringify([item.title, item.subtitle, item.thumbnail]));
+				if (seenItems.has(key)) return false;
+				seenItems.add(key);
+				return true;
+			},
+		);
+		items.push(...batch);
+		onPage?.(batch, Boolean(continuation));
+		if (!continuation) return items;
+		signal.throwIfAborted();
 
 		const token =
 			typeof continuation === "string"
 				? continuation
 				: continuation.payload?.token;
 		if (typeof token === "string") {
-			if (seen.has(token)) throw new Error("Artist continuation repeated.");
-			seen.add(token);
+			if (seenTokens.has(token))
+				throw new Error("Artist continuation repeated.");
+			seenTokens.add(token);
 		}
 		page =
 			typeof continuation === "string"

@@ -47,6 +47,22 @@ test("preparation waits for native playable data and leaves the deck paused", as
 	}
 });
 
+test("playing a prepared native deck uses the existing media id without reloading", async () => {
+	const { deck, media, commands, ready } = nativeDeck();
+	try {
+		const preparing = deck.mount(local, prepare);
+		const id = commands.find((command) => command.op === "load")?.id;
+		ready(id);
+		await preparing;
+		expect(await deck.play()).toBe(true);
+		expect(commands.filter((command) => command.op === "load")).toHaveLength(1);
+		expect(commands.at(-1)).toMatchObject({ op: "play", id });
+	} finally {
+		deck.reset();
+		media.dispose();
+	}
+});
+
 test("readiness from a superseded file cannot complete or reset its replacement", async () => {
 	const { deck, media, commands, ready } = nativeDeck();
 	try {

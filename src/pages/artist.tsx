@@ -35,23 +35,32 @@ import {
 	type ArtistShelfItem,
 	loadArtistCategoryItems,
 } from "@/lib/youtube/artist-category";
-import { type ArtistView, fetchArtistView } from "@/lib/youtube/artist-data";
+import {
+	type ArtistView,
+	fetchArtistView,
+	readCachedArtistView,
+} from "@/lib/youtube/artist-data";
 import { getYoutubeClient } from "@/lib/youtube/client-session";
 import { getMixSongs } from "@/lib/youtube/track-recommendations";
 
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();
+	return id ? <ArtistDetails id={id} key={id} /> : null;
+}
+
+function ArtistDetails({ id }: { id: string }) {
 	const navigate = useNavigate();
 	const { play, playQueue } = usePlayer();
-	const [artist, setArtist] = useState<ArtistView | null>(null);
-	const [loading, setLoading] = useState(true);
+	const [artist, setArtist] = useState<ArtistView | null>(() =>
+		readCachedArtistView(id),
+	);
+	const [loading, setLoading] = useState(artist === null);
 	const [error, setError] = useState<string | null>(null);
 	const [mixPending, setMixPending] = useState(false);
 	const artistName = artist?.name;
 
 	const requestId = useRef(0);
 	const fetchArtist = async (force = false) => {
-		if (!id) return;
 		const request = ++requestId.current;
 		try {
 			setLoading(true);
@@ -61,7 +70,8 @@ export default function ArtistPage() {
 		} catch (error) {
 			if (requestId.current !== request) return;
 			console.error("Error fetching artist:", error);
-			setError("Failed to load artist.");
+			if (artist) showToast("Could not refresh artist");
+			else setError("Failed to load artist.");
 		} finally {
 			if (requestId.current === request) setLoading(false);
 		}
@@ -92,7 +102,7 @@ export default function ArtistPage() {
 		}
 	};
 
-	if (loading) {
+	if (loading && !artist) {
 		return (
 			<div className="mx-auto w-full max-w-5xl px-6 pt-10 sm:px-10">
 				<div className="shimmer-surface h-9 w-24 rounded-full" />
@@ -144,11 +154,12 @@ export default function ArtistPage() {
 					</button>
 					<button
 						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
+						disabled={loading}
 						onClick={() => fetchArtist(true)}
 						title="Refresh artist"
 						type="button"
 					>
-						<RefreshCw className="size-4" />
+						<RefreshCw className={cn("size-4", loading && "animate-spin")} />
 					</button>
 				</div>
 			</div>
@@ -257,10 +268,27 @@ type CategoryState =
 			title: string;
 			artistName: string;
 			items: ArtistShelfItem[];
+			continuation: "loading" | "complete" | "error";
 	  };
 
 export function ArtistCategoryPage() {
 	const { id = "", category = "" } = useParams();
+	return (
+		<ArtistCategoryView
+			category={category}
+			id={id}
+			key={JSON.stringify([id, category])}
+		/>
+	);
+}
+
+function ArtistCategoryView({
+	id,
+	category,
+}: {
+	id: string;
+	category: string;
+}) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const page = useRef<HTMLDivElement>(null);
@@ -288,31 +316,47 @@ export function ArtistCategoryPage() {
 				}
 				const client = await getYoutubeClient();
 				signal.throwIfAborted();
-				const items = await loadArtistCategoryItems(
+				let items: ArtistShelfItem[] = [];
+				await loadArtistCategoryItems(
 					client.actions,
 					source.endpoint,
 					artist.name,
 					id,
 					signal,
+					(batch, hasMore) => {
+						if (batch.length > 0) items = [...items, ...batch];
+						if (items.length === 0 && hasMore) return;
+						setState({
+							status: "ready",
+							title: source.title,
+							artistName: artist.name,
+							items,
+							continuation: hasMore ? "loading" : "complete",
+						});
+					},
 				);
-				if (!signal.aborted) {
-					setState({
-						status: "ready",
-						title: source.title,
-						artistName: artist.name,
-						items,
-					});
-				}
 			} catch (error) {
 				if (signal.aborted) return;
 				console.error("Error fetching artist category:", error);
-				setState({ status: "error" });
+				setState((current) =>
+					current.status === "ready"
+						? { ...current, continuation: "error" }
+						: { status: "error" },
+				);
 			}
 		}
 
 		void loadCategory();
 		return () => controller.abort();
 	}, [id, category, attempt]);
+	const retry = () => {
+		setState((current) =>
+			current.status === "ready"
+				? { ...current, continuation: "loading" }
+				: { status: "loading" },
+		);
+		setAttempt((value) => value + 1);
+	};
 
 	const onBack = () => {
 		if (location.state?.fromArtist) {
@@ -350,23 +394,6 @@ export function ArtistCategoryPage() {
 						This category is unavailable.
 					</p>
 				)}
-				{state.status === "error" && (
-					<Alert variant="destructive">
-						<AlertTitle>Couldn’t load this category.</AlertTitle>
-						<AlertAction>
-							<Button
-								onClick={() => {
-									setState({ status: "loading" });
-									setAttempt((value) => value + 1);
-								}}
-								size="xs"
-								variant="outline"
-							>
-								Retry
-							</Button>
-						</AlertAction>
-					</Alert>
-				)}
 				{state.status === "ready" && (
 					<>
 						<h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
@@ -384,7 +411,34 @@ export function ArtistCategoryPage() {
 								<ArtistShelfCards grid items={state.items} />
 							)}
 						</div>
+						{state.continuation === "loading" && (
+							<p
+								className="mt-3 flex items-center gap-2 text-xs text-muted-foreground"
+								role="status"
+							>
+								<Loader2
+									aria-hidden="true"
+									className="size-3.5 animate-spin motion-reduce:animate-none"
+								/>
+								Loading more…
+							</p>
+						)}
 					</>
+				)}
+				{(state.status === "error" ||
+					(state.status === "ready" && state.continuation === "error")) && (
+					<Alert className="mt-3" variant="destructive">
+						<AlertTitle>
+							{state.status === "ready"
+								? "Couldn’t load more items."
+								: "Couldn’t load this category."}
+						</AlertTitle>
+						<AlertAction>
+							<Button onClick={retry} size="xs" variant="outline">
+								Retry
+							</Button>
+						</AlertAction>
+					</Alert>
 				)}
 			</div>
 		</div>

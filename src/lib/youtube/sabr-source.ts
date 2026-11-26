@@ -18,9 +18,10 @@ export async function createSabrAudioSource(
 	const serverAbrStreamingUrl = await innertube.session.player?.decipher(
 		streaming.server_abr_streaming_url,
 	);
-	const poToken = await botguardService.mintToken(videoId);
 	signal.throwIfAborted();
 	if (!serverAbrStreamingUrl) throw new Error("SABR streaming URL is missing");
+	const poToken = await botguardService.mintToken(videoId);
+	signal.throwIfAborted();
 	const config = {
 		videoId,
 		fetchFunction: youtubeFetch as typeof fetch,
