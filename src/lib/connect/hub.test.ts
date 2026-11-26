@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import type { Peer } from "peerjs";
 import { type PlaybackSnapshot, wireSong } from "../player/shared-playback";
-import { type DeviceAdapter, DeviceHub, type PlaybackDevice } from "./hub";
+import { type DeviceAdapter, type DeviceDestination, DeviceHub } from "./hub";
 import { deviceStatus, parseDeviceRequest } from "./protocol";
 
 // Use the installed PeerJS codec: BinaryPack turns undefined fields into null.
@@ -92,7 +92,7 @@ afterEach(() => {
 });
 function setup() {
 	const network = new Map<string, FakePeer>();
-	const rows = new Map<string, PlaybackDevice>();
+	const rows = new Map<string, DeviceDestination & { owner: string }>();
 	const make = async (owner = "owner", id = crypto.randomUUID()) => {
 		let track = structuredClone(playback);
 		let playing = true;
@@ -130,21 +130,20 @@ function setup() {
 		const hub = new DeviceHub(
 			id,
 			{
-				publish: async (peer_id, connection_token, state) => {
+				publish: async (peerId, connectionToken, status) => {
 					rows.set(id, {
-						user_id: owner,
+						owner,
 						id,
-						peer_id,
-						connection_token,
-						state: { ...state },
+						peerId,
+						connectionToken,
+						status,
 						name: id,
 						kind: "desktop",
-						last_seen: new Date().toISOString(),
 					});
-					return [...rows.values()].filter((r) => r.user_id === owner);
+					return [...rows.values()].filter((r) => r.owner === owner);
 				},
 				remove: async (token) => {
-					if (rows.get(id)?.connection_token === token) rows.delete(id);
+					if (rows.get(id)?.connectionToken === token) rows.delete(id);
 				},
 			},
 			adapter,
@@ -193,16 +192,23 @@ test("startup publishes automatically even when the peer opened before handlers 
 	const pc = await s.make();
 	expect(pc.hub.getSnapshot().status).toBe("online");
 	expect(s.rows.has(pc.id)).toBe(true);
-	expect(pc.hub.getSnapshot().devices.map((d) => d.id)).toEqual([pc.id]);
+	expect(pc.hub.getSnapshot().devices).toEqual([
+		{
+			id: pc.id,
+			name: pc.id,
+			kind: "desktop",
+			status: { playing: true, title: "Track", artist: "Artist", room: false },
+		},
+	]);
 });
 
 test("restarting a device replaces its entry and late old-session cleanup cannot delete it", async () => {
 	const s = setup();
 	const old = await s.make();
-	const oldToken = s.rows.get(old.id)?.connection_token;
+	const oldToken = s.rows.get(old.id)?.connectionToken;
 	const restarted = await s.make("owner", old.id);
 	expect(s.rows.size).toBe(1);
-	expect(s.rows.get(old.id)?.connection_token).not.toBe(oldToken);
+	expect(s.rows.get(old.id)?.connectionToken).not.toBe(oldToken);
 	old.hub.stop();
 	expect(s.rows.size).toBe(1);
 	await restarted.hub.refresh();
@@ -317,6 +323,9 @@ test("malformed transfer payloads are rejected and unknown fields stripped", () 
 	expect(
 		parseDeviceRequest({ type: "control", command: "deleteAccount" }),
 	).toBeNull();
+	expect(
+		parseDeviceRequest({ type: "control", command: ["pause"] }),
+	).toBeNull();
 	const parsed = parseDeviceRequest({
 		type: "transfer",
 		playback: {
@@ -401,7 +410,7 @@ test("an unconfirmed destination pauses when the source disconnects", async () =
 		conn.on("open", () =>
 			conn.send({
 				version: 1,
-				token: s.rows.get(b.id)?.connection_token,
+				token: s.rows.get(b.id)?.connectionToken,
 				request: { type: "transfer", playback },
 			}),
 		);

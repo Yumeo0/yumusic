@@ -9,17 +9,17 @@ import {
 	wireSong,
 } from "@/lib/player/shared-playback";
 import {
+	validFingerprint,
+	validPublicKey,
+	validSignature,
+} from "../../../supabase/functions/_shared/account-proof";
+import {
 	type ActionContext,
 	type GuestPermissions,
 	type RoomAction,
 	validPermissions,
 } from "./guest-permissions";
-import {
-	type JoinChallenge,
-	validNonce,
-	validPublicKey,
-	validSignature,
-} from "./identity";
+import { type JoinChallenge, validNonce } from "./identity";
 import { type RoomProfile, validProfile } from "./profile";
 
 export interface Participant {
@@ -79,8 +79,11 @@ const text = (v: unknown, max = 200) =>
 	typeof v === "string" && v.length <= max;
 const finite = (v: unknown): v is number =>
 	typeof v === "number" && Number.isFinite(v);
-export const validStatus = (v: unknown) =>
-	["listening", "buffering", "paused", "unavailable"].includes(String(v));
+const validStatus = (v: unknown): v is Participant["status"] =>
+	v === "listening" ||
+	v === "buffering" ||
+	v === "paused" ||
+	v === "unavailable";
 function validMembers(v: unknown): v is Participant[] {
 	return (
 		Array.isArray(v) &&
@@ -91,9 +94,7 @@ function validMembers(v: unknown): v is Participant[] {
 				text(m.id) &&
 				validProfile(m.profile) &&
 				validStatus(m.status) &&
-				(m.fingerprint === undefined ||
-					(typeof m.fingerprint === "string" &&
-						/^[a-f0-9]{64}$/.test(m.fingerprint))),
+				(m.fingerprint === undefined || validFingerprint(m.fingerprint)),
 		)
 	);
 }

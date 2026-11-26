@@ -1,4 +1,4 @@
-use crate::{http_client, login_session, po_token};
+use crate::{http_client, login_session, po_token, session_window::session_window};
 #[cfg(desktop)]
 #[path = "session_refresh.rs"]
 mod session_refresh;
@@ -10,27 +10,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::Value;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
-
-fn session_window<'a, R: tauri::Runtime>(
-	app: &'a AppHandle<R>,
-	label: &str,
-	url: Url,
-) -> WebviewWindowBuilder<'a, R, AppHandle<R>> {
-	let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url));
-	// WebView2 requires identical browser arguments for a shared user data folder.
-	match app
-		.config()
-		.app
-		.windows
-		.iter()
-		.find(|config| config.label == "main")
-		.and_then(|config| config.additional_browser_args.as_deref())
-	{
-		Some(args) => builder.additional_browser_args(args),
-		None => builder,
-	}
-}
+use tauri::{AppHandle, Manager, Url};
 
 static AUTH_REVISION: AtomicU64 = AtomicU64::new(0);
 // Keep the final recovery check/write atomic with logout and new logins.
@@ -109,25 +89,21 @@ pub async fn logout(app: AppHandle) -> Result<bool, String> {
 	{
 		// wry's delete_cookie is a no-op on Android. Clear the app-owned
 		// CookieManager directly, without touching localStorage or app settings.
-		let (tx, rx) = tokio::sync::oneshot::channel();
-		tauri_runtime_wry::wry::prelude::dispatch(move |env, _, _| {
-			let result = (|| {
-				let manager = env
-					.call_static_method(
-						"android/webkit/CookieManager",
-						"getInstance",
-						"()Landroid/webkit/CookieManager;",
-						&[],
-					)?
-					.l()?;
-				// The legacy synchronous API lets logout finish only after removal.
-				env.call_method(&manager, "removeAllCookie", "()V", &[])?;
-				env.call_method(&manager, "flush", "()V", &[])?;
-				Ok::<(), tauri_runtime_wry::wry::prelude::jni::errors::Error>(())
-			})();
-			let _ = tx.send(result.map_err(|e| e.to_string()));
-		});
-		rx.await.map_err(|e| e.to_string())??;
+		crate::android_activity::call(|env, _| {
+			let manager = env
+				.call_static_method(
+					"android/webkit/CookieManager",
+					"getInstance",
+					"()Landroid/webkit/CookieManager;",
+					&[],
+				)?
+				.l()?;
+			// The legacy synchronous API lets logout finish only after removal.
+			env.call_method(&manager, "removeAllCookie", "()V", &[])?;
+			env.call_method(&manager, "flush", "()V", &[])?;
+			Ok(())
+		})
+		.await?;
 	}
 	#[cfg(not(target_os = "android"))]
 	{
@@ -194,7 +170,10 @@ pub async fn validate_session(app: AppHandle) -> Result<Option<String>, String> 
 		|| async {
 			#[cfg(desktop)]
 			{
-				session_refresh::refresh(&app, &verifier, revision).await
+				session_refresh::refresh(&app, &verifier, || {
+					AUTH_REVISION.load(Ordering::SeqCst) == revision
+				})
+				.await
 			}
 			#[cfg(not(desktop))]
 			{

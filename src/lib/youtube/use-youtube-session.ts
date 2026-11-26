@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { invalidateLibraryCache } from "../stores/playlist-cache";
 import { showToast } from "../stores/toast";
 import { signInWithGoogle, signOutOfSync } from "../sync/sync";
 import {
 	getYouTubeSyncAccount,
 	setYouTubeSyncAccount,
 } from "../sync/youtube-account";
+import { getUserProfile } from "./account-profile";
 import { getYoutubeClient } from "./client-session";
 import { restoreSession } from "./restore-session";
-import { getUserProfile } from "./youtube-client";
 
 export function useYouTubeSession() {
 	const authRevision = useRef(0);
@@ -37,10 +38,8 @@ export function useYouTubeSession() {
 					return;
 				}
 				const { signedIn, profile } = await restoreSession(cookie, {
-					loadProfile: async (sessionCookie, refresh) => {
-						await getYoutubeClient(sessionCookie, refresh);
-						return getUserProfile();
-					},
+					loadProfile: async (sessionCookie, refresh) =>
+						getUserProfile(await getYoutubeClient(sessionCookie, refresh)),
 					validateSession: () => window.electron.validateSession(),
 				});
 				if (disposed || revision !== authRevision.current) return;
@@ -89,8 +88,9 @@ export function useYouTubeSession() {
 				setYouTubeSyncAccount(previousAccount);
 				return;
 			}
-			await getYoutubeClient(cookie, true);
-			const profile = await getUserProfile();
+			const profile = await getUserProfile(
+				await getYoutubeClient(cookie, true),
+			);
 			setIsLoggedIn(true);
 			setUserProfile(profile);
 			setYouTubeSyncAccount(
@@ -106,7 +106,7 @@ export function useYouTubeSession() {
 				}
 			}
 			// The native login command already verified the session with YouTube.
-			// Refetch all mounted views with the validated session.
+			invalidateLibraryCache();
 			window.location.reload();
 		} catch (error) {
 			setYouTubeSyncAccount(previousAccount);
@@ -126,6 +126,7 @@ export function useYouTubeSession() {
 		try {
 			await signOutOfSync();
 			await window.electron.logout();
+			invalidateLibraryCache();
 			setIsLoggedIn(false);
 			setUserProfile(null);
 			window.location.reload();

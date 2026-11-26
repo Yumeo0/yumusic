@@ -5,12 +5,9 @@ import { Input } from "@/components/ui/input";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
+import type { PlaylistEdit, PlaylistPrivacy } from "@/lib/youtube/playlist-api";
 import { fetchPlaylistEditMeta } from "@/lib/youtube/playlist-data";
 import { savePlaylistEdits } from "@/lib/youtube/playlist-mutations";
-import type {
-	PlaylistEdit,
-	PlaylistPrivacy,
-} from "@/lib/youtube/youtube-client";
 
 const MAX_COVER_BYTES = 2 * 1024 * 1024;
 

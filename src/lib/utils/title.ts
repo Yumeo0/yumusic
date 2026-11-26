@@ -1,4 +1,4 @@
-import type { TitleMode } from "../stores/settings";
+export type TitleMode = "both" | "original" | "translation";
 
 /**
  * Detects the "Original - Translation" dual-title form YouTube uses for

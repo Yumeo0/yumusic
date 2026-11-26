@@ -1,5 +1,4 @@
-/** Lyrics providers: metadata, ordering and display selection. */
-
+import { getTrackMeta } from "../youtube/track-meta";
 import {
 	type LyricsKind,
 	lyricsKind,
@@ -34,11 +33,8 @@ const providers = {
 		attribution: "YouTube Music",
 		kinds: ["synced", "plain"],
 		async load({ songId }) {
-			const { getSongLyrics } = await import("../youtube/youtube-client");
-			const result = await getSongLyrics(songId);
-			return result && (result.synced || result.plain)
-				? { synced: result.synced, plain: result.plain, confirmed: true }
-				: null;
+			const { getSongLyrics } = await import("./youtube");
+			return getSongLyrics(songId);
 		},
 	},
 	lrclib: {
@@ -80,11 +76,10 @@ const providers = {
 		attribution: "Genius",
 		kinds: ["plain"],
 		async load({ songId, title, artist }) {
-			const [{ fetchGeniusLyrics }, { getTrackMeta }] = await Promise.all([
+			const [{ fetchGeniusLyrics }, meta] = await Promise.all([
 				import("./genius"),
-				import("../youtube/youtube-client"),
+				getTrackMeta(songId).catch(() => null),
 			]);
-			const meta = await getTrackMeta(songId).catch(() => null);
 			return fetchGeniusLyrics(title, artist, meta?.album?.name);
 		},
 	},

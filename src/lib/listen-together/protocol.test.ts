@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	expectedPosition,
 	type PlaybackSnapshot,
+	sharedPlaybackQueue,
 	wireSong,
 } from "../player/shared-playback";
+import { actionContextError, queueKey } from "./guest-permissions";
 import { parseInvite, parseMessage, parseRoomAction } from "./protocol";
 
 const song = {
@@ -83,6 +85,28 @@ describe("room protocol", () => {
 		expect(
 			parse({ ...playback, song: { ...song, id: "differentid" } }),
 		).toBeNull();
+	});
+	test("room queue actions validate the played version while locating items in the host's queue", () => {
+		const previous = { ...song, id: "previous-id" };
+		const next = { ...song, id: "upcoming-id" };
+		const version = { ...song, id: "alternateid" };
+		const index = 120;
+		const source = [...Array(120).fill(previous), song, next];
+		const shared = sharedPlaybackQueue(source, index, song, version);
+		const original = { instance: "first", queueKey: queueKey(shared.queue) };
+		const action = { type: "remove", index: shared.index + 1 } as const;
+		expect(shared.queue[shared.index].id).toBe(version.id);
+		expect(source[(shared.sourceStart ?? -1) + action.index]).toBe(next);
+		expect(actionContextError(action, original, original)).toBeNull();
+		expect(
+			actionContextError(action, original, {
+				...original,
+				queueKey: queueKey(source),
+			}),
+		).toMatch(/queue changed/);
+		expect(
+			actionContextError(action, original, { ...original, instance: "next" }),
+		).toMatch(/track changed/);
 	});
 	test("rejects malformed messages, invalid positions, huge queues and URL injection", () => {
 		expect(parseMessage("broken json")).toBeNull();

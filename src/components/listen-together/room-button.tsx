@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils/utils";
 import { DESKTOP_QUERY, useMediaQuery } from "@/lib/utils/viewport";
 
 export const ROOM_DESKTOP_QUERY = "(min-width: 768px)";
-/** Player triggers share the responsive app-wide room surface. */
 export const roomDialogHandle = Dialog.createHandle();
 export const roomPopoverHandle = Popover.createHandle();
 

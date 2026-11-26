@@ -3,7 +3,7 @@ import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, formatDuration, hiResThumb } from "@/lib/utils/utils";
 import { getYoutubeClient } from "./client-session";
 import { rememberSongDescription } from "./song-description";
-import { getTrackMeta } from "./youtube-client";
+import { getTrackMeta } from "./track-meta";
 
 /** A pasted link's song plus the album metadata resolved for it. */
 export interface SongPreview {

@@ -1,23 +1,25 @@
-import type { Song } from "@/lib/music/song";
+import {
+	applySongEnrichment,
+	type SongEnrichment,
+} from "@/lib/music/song-enrichment";
 import { normalizeHomeSectionTitle } from "@/lib/stores/home-sections";
 import { getYoutubeClient } from "./client-session";
-import type { HomeSection } from "./feed-items";
 import {
+	type FeedItem,
 	feedItemKey,
+	type HomeFeed,
+	type HomeSection,
 	homeSectionsFromFeed,
-	withUpdatedSong,
 } from "./feed-items";
-import type { HomeFeed } from "./youtube-client";
+import { canonicalPlaylistId } from "./playlist-id";
 
-export const HOME_FEED_TTL_MS = 30 * 60 * 1000;
-/** Guard against an upstream feed that never ends. */
+const HOME_FEED_TTL_MS = 30 * 60 * 1000;
 const MAX_HOME_CONTINUATION_PAGES = 10;
 
-export interface HomeFeedSnapshot {
+interface CacheEntry {
 	feed: HomeFeed;
 	sections: HomeSection[];
-}
-interface CacheEntry extends HomeFeedSnapshot {
+	sectionKeys: Set<string>;
 	timestamp: number;
 	pages: number;
 }
@@ -26,11 +28,36 @@ function isFresh(entry: CacheEntry | null): entry is CacheEntry {
 	return !!entry && Date.now() - entry.timestamp < HOME_FEED_TTL_MS;
 }
 
+function sectionKey(section: HomeSection): string {
+	const first = section.items[0];
+	return `${normalizeHomeSectionTitle(section.title)}::${first ? feedItemKey(first) : ""}`;
+}
+
+function updateItems(
+	sections: HomeSection[],
+	update: (item: FeedItem) => FeedItem | null,
+): HomeSection[] {
+	let changed = false;
+	const next = sections.map((section) => {
+		let sectionChanged = false;
+		const items = section.items.flatMap((item) => {
+			const updated = update(item);
+			sectionChanged ||= updated !== item;
+			return updated ? [updated] : [];
+		});
+		if (!sectionChanged) return section;
+		changed = true;
+		return { ...section, items };
+	});
+	return changed ? next : sections;
+}
+
 /** Loads all page data independently of scrolling; artwork stays lazy-loaded. */
 export class HomeFeedCache {
 	private entry: CacheEntry | null = null;
-	private inFlight: Promise<HomeFeedSnapshot> | null = null;
+	private inFlight: Promise<HomeSection[]> | null = null;
 	private listeners = new Set<(sections: HomeSection[]) => void>();
+	private deletedPlaylistIds = new Set<string>();
 
 	constructor(
 		private fetchFeed: () => Promise<HomeFeed>,
@@ -41,71 +68,90 @@ export class HomeFeedCache {
 		return isFresh(this.entry) ? this.entry.sections : null;
 	}
 
-	async get(
-		onUpdate?: (sections: HomeSection[]) => void,
-	): Promise<HomeFeedSnapshot> {
-		if (onUpdate) this.listeners.add(onUpdate);
-		try {
-			if (isFresh(this.entry)) onUpdate?.(this.entry.sections);
-			if (!this.inFlight) {
-				this.inFlight = this.load().finally(() => {
-					this.inFlight = null;
-				});
-			}
-			return await this.inFlight;
-		} finally {
-			if (onUpdate) this.listeners.delete(onUpdate);
-		}
+	subscribe(onUpdate: (sections: HomeSection[]) => void) {
+		this.listeners.add(onUpdate);
+		return () => {
+			this.listeners.delete(onUpdate);
+		};
 	}
 
-	patchSong(updated: Song) {
+	get(): Promise<HomeSection[]> {
+		this.inFlight ??= this.load().finally(() => {
+			this.inFlight = null;
+		});
+		return this.inFlight;
+	}
+
+	patchSong(videoId: string, enrichment: SongEnrichment) {
 		if (!this.entry) return;
-		this.entry.sections = withUpdatedSong(this.entry.sections, updated);
+		const sections = updateItems(this.entry.sections, (item) => {
+			if (item.kind !== "song" || item.song.id !== videoId) return item;
+			const song = applySongEnrichment(item.song, enrichment);
+			return song === item.song ? item : { ...item, song };
+		});
+		if (sections !== this.entry.sections) this.publish(this.entry, sections);
 	}
 
-	private publish(sections: HomeSection[]) {
+	removePlaylist(id: string) {
+		this.deletedPlaylistIds.add(canonicalPlaylistId(id));
+		if (!this.entry) return;
+		const sections = this.removeDeletedPlaylists(this.entry.sections);
+		if (sections !== this.entry.sections) this.publish(this.entry, sections);
+	}
+
+	private removeDeletedPlaylists(sections: HomeSection[]): HomeSection[] {
+		if (this.deletedPlaylistIds.size === 0) return sections;
+		return updateItems(sections, (item) =>
+			(item.kind === "playlist" || item.kind === "album") &&
+			this.deletedPlaylistIds.has(canonicalPlaylistId(item.id))
+				? null
+				: item,
+		);
+	}
+
+	private publish(entry: CacheEntry, sections: HomeSection[]) {
+		entry.sections = sections;
 		for (const listener of this.listeners) listener(sections);
 	}
 
-	private async load(): Promise<HomeFeedSnapshot> {
+	private async load(): Promise<HomeSection[]> {
 		let entry = this.entry;
 		if (!isFresh(entry)) {
 			const feed = await this.fetchFeed();
+			const sections = this.parseFeed(feed);
 			entry = {
 				feed,
-				sections: this.parseFeed(feed),
+				sections: this.removeDeletedPlaylists(sections),
+				sectionKeys: new Set(sections.map(sectionKey)),
 				timestamp: Date.now(),
 				pages: 0,
 			};
 			this.entry = entry;
-			this.publish(entry.sections);
+			this.publish(entry, entry.sections);
 		}
-		const sectionKey = (section: HomeSection) =>
-			`${normalizeHomeSectionTitle(section.title)}::${
-				section.items[0] ? feedItemKey(section.items[0]) : ""
-			}`;
-		const seen = new Set(entry.sections.map(sectionKey));
 		while (
 			entry.feed.has_continuation &&
 			entry.pages < MAX_HOME_CONTINUATION_PAGES
 		) {
 			// Tokens depend on the preceding page. Continue even if the view unmounts.
 			const next = await entry.feed.getContinuation();
-			const sections = this.parseFeed(next).filter((section) => {
+			const added = this.parseFeed(next).filter((section) => {
 				const key = sectionKey(section);
-				if (seen.has(key)) return false;
-				seen.add(key);
+				if (entry.sectionKeys.has(key)) return false;
+				entry.sectionKeys.add(key);
 				return true;
 			});
 			entry.feed = next;
 			entry.pages++;
-			entry.sections = [...entry.sections, ...sections];
-			this.publish(entry.sections);
+			if (added.length > 0)
+				this.publish(entry, [
+					...entry.sections,
+					...this.removeDeletedPlaylists(added),
+				]);
 		}
-		const snapshot = entry;
 		// Empty responses should be retried on the next visit.
-		if (snapshot.sections.length === 0) this.entry = null;
-		return snapshot;
+		if (entry.sections.length === 0) this.entry = null;
+		return entry.sections;
 	}
 }
 
@@ -114,15 +160,13 @@ const cache = new HomeFeedCache(async () => {
 	return client.music.getHomeFeed();
 });
 
-export function readCachedHomeFeed(): HomeSection[] | null {
-	return cache.read();
-}
-
-/** Shared full-feed preload with progressive updates and a 30-minute cache. */
-export function getHomeFeed(onUpdate?: (sections: HomeSection[]) => void) {
-	return cache.get(onUpdate);
-}
-
-export function patchCachedHomeFeedSong(updated: Song) {
-	cache.patchSong(updated);
-}
+export const readCachedHomeFeed = () => cache.read();
+export const subscribeToHomeFeed = (
+	onUpdate: (sections: HomeSection[]) => void,
+) => cache.subscribe(onUpdate);
+export const getHomeFeed = () => cache.get();
+export const patchCachedHomeFeedSong = (
+	videoId: string,
+	enrichment: SongEnrichment,
+) => cache.patchSong(videoId, enrichment);
+export const removeHomeFeedPlaylist = (id: string) => cache.removePlaylist(id);

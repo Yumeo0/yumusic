@@ -1,6 +1,8 @@
 import { type YT, YTNodes } from "youtubei.js/web";
 import type { Song } from "@/lib/music/song";
+import { LruCache } from "../utils/lru-cache";
 import { biggestThumb, hiResThumb } from "../utils/utils";
+import { getYoutubeClient } from "./client-session";
 
 /** Profile headers keep the avatar in front of a separate wide banner. */
 export function channelProfileThumbnail(header: YTNodes.MusicVisualHeader) {
@@ -100,4 +102,27 @@ export function channelVideos(
 		});
 	}
 	return songs;
+}
+
+const artistAvatars = new LruCache<string, Promise<string | null>>(128);
+
+/** Loads the artist's channel avatar and shares the lookup across tracks. */
+export function getArtistAvatar(artistId: string): Promise<string | null> {
+	const cached = artistAvatars.get(artistId);
+	if (cached) return cached;
+
+	const request = getYoutubeClient()
+		.then(async (client) => {
+			const channel = await client.getChannel(artistId);
+			const url = biggestThumb(channel.metadata.avatar)?.url;
+			return url?.startsWith("//") ? `https:${url}` : (url ?? null);
+		})
+		.catch(() => {
+			if (artistAvatars.get(artistId) === request) {
+				artistAvatars.delete(artistId);
+			}
+			return null;
+		});
+	artistAvatars.set(artistId, request);
+	return request;
 }

@@ -7,19 +7,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use serde::{Deserialize, Serialize};
 
-/// Discord IPC client plus the application id it is connected to.
 #[cfg(not(target_os = "android"))]
-struct DiscordState {
-	client: Option<DiscordIpcClient>,
-	app_id: String,
-}
+static DISCORD: Mutex<Option<DiscordIpcClient>> = Mutex::new(None);
 
-#[cfg(not(target_os = "android"))]
-static DISCORD: Mutex<Option<DiscordState>> = Mutex::new(None);
-
-/// Discord application id shipped with the app; the presence renders under
-/// this identity. Users can override it in settings with their own app.
-const DEFAULT_APP_ID: &str = "1544382362924613854";
+const APPLICATION_ID: &str = "1544382362924613854";
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -58,43 +49,21 @@ fn now_ms() -> i64 {
 		.unwrap_or(0)
 }
 
-/// Connects (or re-connects when the app id changed) and returns the client.
-#[cfg(not(target_os = "android"))]
-fn connect<'a>(
-	state: &'a mut DiscordState,
-	app_id: &str,
-) -> Result<&'a mut DiscordIpcClient, String> {
-	if state.app_id != app_id {
-		if let Some(mut old) = state.client.take() {
-			let _ = old.close();
-		}
-		state.app_id = app_id.to_owned();
-	}
-	if state.client.is_none() {
-		let mut client = DiscordIpcClient::new(app_id);
-		client.connect().map_err(|e| e.to_string())?;
-		state.client = Some(client);
-	}
-	Ok(state.client.as_mut().expect("just connected"))
-}
-
-/// Sets the listening activity for the current track. No-ops (after clearing)
-/// when no Discord application id is configured.
 #[cfg(not(target_os = "android"))]
 fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
-	let state = guard.get_or_insert_with(|| DiscordState {
-		client: None,
-		app_id: String::new(),
-	});
-
-	let client = connect(state, DEFAULT_APP_ID)?;
+	let client = match guard.as_mut() {
+		Some(client) => client,
+		None => {
+			let mut client = DiscordIpcClient::new(APPLICATION_ID);
+			client.connect().map_err(|e| e.to_string())?;
+			guard.insert(client)
+		}
+	};
 
 	let artist_name = clamp(&track.artist, 128);
 	let mut assets = activity::Assets::new();
 	if let Some(cover) = &track.cover_url {
-		// The cover doubles as the album link; its tooltip shows the album
-		// while playing and a pause indicator while paused.
 		let large_text = if track.playing {
 			clamp(track.album.as_deref().unwrap_or(&track.title), 128)
 		} else {
@@ -157,28 +126,22 @@ fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 	client.set_activity(act).map_err(|e| e.to_string())
 }
 
-/// Removes the presence; safe to call when never connected.
 #[cfg(not(target_os = "android"))]
 fn clear_desktop_activity() -> Result<(), String> {
 	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
-	if let Some(state) = guard.as_mut() {
-		if let Some(client) = state.client.as_mut() {
-			client.clear_activity().map_err(|e| e.to_string())?;
-		}
+	if let Some(client) = guard.as_mut() {
+		client.clear_activity().map_err(|e| e.to_string())?;
 	}
 	Ok(())
 }
 
-/// Teardown on app exit: drop presence and close the IPC connection.
 pub fn shutdown() {
 	#[cfg(not(target_os = "android"))]
 	{
 		if let Ok(mut guard) = DISCORD.lock() {
-			if let Some(state) = guard.as_mut() {
-				if let Some(mut client) = state.client.take() {
-					let _ = client.clear_activity();
-					let _ = client.close();
-				}
+			if let Some(mut client) = guard.take() {
+				let _ = client.clear_activity();
+				let _ = client.close();
 			}
 		}
 	}
@@ -189,7 +152,7 @@ pub async fn set_discord_activity(track: TrackPresence) -> Result<(), String> {
 	#[cfg(target_os = "android")]
 	{
 		let data = serde_json::to_string(
-			&serde_json::json!({ "applicationId": DEFAULT_APP_ID, "track": track }),
+			&serde_json::json!({ "applicationId": APPLICATION_ID, "track": track }),
 		)
 		.map_err(|e| e.to_string())?;
 		android_presence(Some(data)).await
@@ -210,27 +173,20 @@ pub async fn clear_discord_activity() -> Result<(), String> {
 
 #[cfg(target_os = "android")]
 async fn android_presence(data: Option<String>) -> Result<(), String> {
-	use tauri_runtime_wry::wry::prelude::{dispatch, jni::objects::JValue};
-	let (tx, rx) = tokio::sync::oneshot::channel();
-	dispatch(move |env, activity, _| {
-		let result = (|| {
-			if let Some(data) = data {
-				let payload = env.new_string(data)?;
-				env.call_method(
-					activity,
-					"updateDiscordPresence",
-					"(Ljava/lang/String;)V",
-					&[JValue::Object(&payload)],
-				)?;
-			} else {
-				env.call_method(activity, "clearDiscordPresence", "()V", &[])?;
-			}
-			Ok::<(), tauri_runtime_wry::wry::prelude::jni::errors::Error>(())
-		})();
-		if result.is_err() {
-			let _ = env.exception_clear();
+	use tauri_runtime_wry::wry::prelude::jni::objects::JValue;
+	crate::android_activity::call(move |env, activity| {
+		if let Some(data) = data {
+			let payload = env.new_string(data)?;
+			env.call_method(
+				activity,
+				"updateDiscordPresence",
+				"(Ljava/lang/String;)V",
+				&[JValue::Object(&payload)],
+			)?;
+		} else {
+			env.call_method(activity, "clearDiscordPresence", "()V", &[])?;
 		}
-		let _ = tx.send(result.map_err(|e| e.to_string()));
-	});
-	rx.await.map_err(|e| e.to_string())?
+		Ok(())
+	})
+	.await
 }

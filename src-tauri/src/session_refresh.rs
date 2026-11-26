@@ -1,6 +1,6 @@
 //! Renew exported YouTube cookies through the existing browser session.
 use std::future::Future;
-use std::sync::{atomic::Ordering, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, Url};
@@ -20,9 +20,9 @@ pub fn cancel(app: &AppHandle) {
 pub async fn refresh(
 	app: &AppHandle,
 	verifier: &reqwest::Client,
-	revision: u64,
+	is_current: impl Fn() -> bool + Copy,
 ) -> Result<Option<String>, String> {
-	if !is_current(revision) {
+	if !is_current() {
 		return Err("Session recovery cancelled".into());
 	}
 	let finished = Arc::new(Mutex::new(None::<Url>));
@@ -56,24 +56,20 @@ pub async fn refresh(
 		let window = &window;
 		let finished = &*finished;
 		async move {
-			if !is_current(revision) {
+			if !is_current() {
 				return Err("Session recovery cancelled".into());
 			}
 			*finished.lock().unwrap() = None;
 			window.navigate(url).map_err(|e| e.to_string())?;
-			wait_for_cookies(window, verifier, finished, revision, timeout).await
+			wait_for_cookies(window, verifier, finished, is_current, timeout).await
 		}
 	})
 	.await;
 	let _ = window.destroy();
-	if !is_current(revision) {
+	if !is_current() {
 		return Err("Session recovery cancelled".into());
 	}
 	result
-}
-
-fn is_current(revision: u64) -> bool {
-	super::AUTH_REVISION.load(Ordering::SeqCst) == revision
 }
 
 async fn recover_by_navigation<F>(
@@ -99,13 +95,13 @@ async fn wait_for_cookies(
 	window: &tauri::WebviewWindow,
 	verifier: &reqwest::Client,
 	finished: &Mutex<Option<Url>>,
-	revision: u64,
+	is_current: impl Fn() -> bool,
 	timeout: Duration,
 ) -> Result<Option<String>, String> {
 	let mut rejected = false;
 	let result = tokio::time::timeout(timeout, async {
 		loop {
-			if !is_current(revision) || window.app_handle().get_webview_window(WINDOW).is_none() {
+			if !is_current() || window.app_handle().get_webview_window(WINDOW).is_none() {
 				return Err("Session recovery cancelled".into());
 			}
 			tokio::time::sleep(Duration::from_millis(500)).await;

@@ -2,7 +2,7 @@ import type { Song } from "@/lib/music/song";
 import type { RoomAction } from "./guest-permissions";
 
 /** Attribution belongs to a queue occurrence, never to the song's global metadata. */
-export function attributeSongs(songs: Song[], username: string): Song[] {
+function attributeSongs(songs: Song[], username: string): Song[] {
 	return songs.map((song) => ({ ...song, addedBy: username }));
 }
 

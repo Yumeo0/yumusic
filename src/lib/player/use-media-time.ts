@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listenRoom } from "../listen-together/room";
+import type { PlaybackMedia } from "./playback-deck";
 import { expectedPosition } from "./shared-playback";
 
 /**
@@ -12,7 +13,7 @@ import { expectedPosition } from "./shared-playback";
  * length shown in listings.
  */
 export function useMediaTime(
-	videoElementRef: React.RefObject<HTMLVideoElement | null> | null,
+	media: PlaybackMedia | null,
 	resetKey?: string,
 	knownDuration?: number,
 ) {
@@ -20,18 +21,12 @@ export function useMediaTime(
 	const [mediaDuration, setMediaDuration] = useState(0);
 
 	useEffect(() => {
-		// Skip only when no track has played yet (state is already zero)
 		if (resetKey === undefined) return;
 		setCurrentTime(0);
 		setMediaDuration(0);
 	}, [resetKey]);
 
-	// Re-attach on `resetKey` too: after a crossfade handover the active
-	// element behind `videoElementRef` changes without the ref itself doing
-	// so, and the media clock must follow the deck that is now audible.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is an intentional re-attach trigger, not a read value
 	useEffect(() => {
-		const videoEl = videoElementRef?.current;
 		const roomTime = () => {
 			const room = listenRoom.getSnapshot();
 			if (
@@ -49,29 +44,30 @@ export function useMediaTime(
 			return true;
 		};
 		const roomTimer = window.setInterval(roomTime, 250);
-		if (!videoEl) return () => window.clearInterval(roomTimer);
+		if (!media) return () => window.clearInterval(roomTimer);
 
-		const handleLoadedMetadata = () => {
-			if (Number.isFinite(videoEl.duration)) setMediaDuration(videoEl.duration);
-		};
-		const handleTimeUpdate = () => {
+		const update = () => {
 			if (roomTime()) return;
-			setCurrentTime(videoEl.currentTime);
-			if (Number.isFinite(videoEl.duration) && videoEl.duration > 0) {
-				setMediaDuration(videoEl.duration);
-			}
+			setCurrentTime(media.readyState > 0 ? media.currentTime : 0);
+			setMediaDuration(
+				media.readyState > 0 && Number.isFinite(media.duration)
+					? media.duration
+					: 0,
+			);
 		};
 
-		handleLoadedMetadata();
+		update();
 
-		videoEl.addEventListener("loadedmetadata", handleLoadedMetadata);
-		videoEl.addEventListener("timeupdate", handleTimeUpdate);
+		media.addEventListener("emptied", update);
+		media.addEventListener("loadedmetadata", update);
+		media.addEventListener("timeupdate", update);
 		return () => {
 			window.clearInterval(roomTimer);
-			videoEl.removeEventListener("loadedmetadata", handleLoadedMetadata);
-			videoEl.removeEventListener("timeupdate", handleTimeUpdate);
+			media.removeEventListener("emptied", update);
+			media.removeEventListener("loadedmetadata", update);
+			media.removeEventListener("timeupdate", update);
 		};
-	}, [videoElementRef, resetKey]);
+	}, [media]);
 
 	const duration =
 		knownDuration && knownDuration > 0 ? knownDuration : mediaDuration;

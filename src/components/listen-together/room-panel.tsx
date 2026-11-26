@@ -35,7 +35,7 @@ import { parseInvite } from "@/lib/listen-together/protocol";
 import { listenRoom, useListenRoom } from "@/lib/listen-together/room";
 import type { Song } from "@/lib/music/song";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
-import { getUserProfile } from "@/lib/youtube/youtube-client";
+import { getUserProfile } from "@/lib/youtube/account-profile";
 
 const button =
 	"inline-flex items-center justify-center gap-2 rounded-lg border border-foreground/10 px-4 py-2.5 text-sm font-medium transition-colors hover:bg-foreground/5 disabled:opacity-40";

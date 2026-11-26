@@ -22,7 +22,8 @@ import {
 	type DownloadStatus,
 	downloadSong,
 	removeDownloads,
-	useDownloads,
+	useDownloadEntry,
+	useDownloadStatus,
 } from "@/lib/downloads/downloads";
 import type { Song } from "@/lib/music/song";
 import { closeNowPlaying } from "@/lib/player/player-ui";
@@ -99,7 +100,6 @@ export function LinkPreviewDialog() {
 	const navigate = useNavigate();
 	const pasteRevision = useRef(0);
 	const { addToQueue, play, playNext } = usePlayer();
-	const downloads = useDownloads();
 	const [videoId, setVideoId] = useState<string | null>(null);
 	const [preview, setPreview] = useState<SongPreview | null>(null);
 	const [failed, setFailed] = useState(false);
@@ -184,10 +184,9 @@ export function LinkPreviewDialog() {
 	}, [videoId]);
 
 	const song = preview?.song ?? null;
-	const download = downloadAction(
-		song ? downloads.entries.get(song.id) : undefined,
-		song ? downloads.statuses.get(song.id) : undefined,
-	);
+	const entry = useDownloadEntry(song?.id);
+	const status = useDownloadStatus(song?.id);
+	const download = downloadAction(entry, status);
 	const details = [song?.duration, preview?.album?.name]
 		.filter((detail): detail is string => !!detail)
 		.join(" · ");
@@ -210,11 +209,10 @@ export function LinkPreviewDialog() {
 	};
 
 	const toggleDownload = (selected: Song) => {
-		if (downloads.entries.has(selected.id)) {
+		if (entry) {
 			void removeDownloads([selected.id]);
 			return;
 		}
-		const status = downloads.statuses.get(selected.id);
 		if (status?.phase === "downloading" || status?.phase === "queued") {
 			cancelDownload(selected.id);
 			return;

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { BufferingWatchdog } from "@/lib/listen-together/buffering-watchdog";
 import {
-	actionCategory,
+	actionContextError,
 	queueKey,
 } from "@/lib/listen-together/guest-permissions";
 import { listenRoom } from "@/lib/listen-together/room";
@@ -16,6 +16,30 @@ import {
 import { showToast } from "@/lib/stores/toast";
 import { formatTime } from "@/lib/utils/utils";
 
+function hostTrack(player: ReturnType<typeof usePlayer>) {
+	const { currentSong, playingVideoId, currentIndex, queue, duration } = player;
+	const queued = queue[currentIndex];
+	const song = currentSong
+		? {
+				...currentSong,
+				id: playingVideoId || currentSong.id,
+				duration:
+					currentSong.duration ||
+					(duration > 0 ? formatTime(duration) : undefined),
+				addedBy:
+					queued?.id === currentSong.id ? queued.addedBy : currentSong.addedBy,
+			}
+		: null;
+	return {
+		song,
+		instance: playbackInstance(
+			player.getPlaybackGeneration(),
+			currentIndex,
+			song?.id,
+		),
+	};
+}
+
 /** Reads media clocks outside React; frequent room ticks never rerender the app. */
 export function RoomPlaybackBridge() {
 	const player = usePlayer();
@@ -26,30 +50,19 @@ export function RoomPlaybackBridge() {
 		const releaseActions = listenRoom.setActionHandler(
 			async (action, context) => {
 				const { player: p, controls: c } = live.current;
-				const category = actionCategory(action);
-				const shared = listenRoom.getSnapshot().playback;
-				const currentInstance = playbackInstance(
-					p.getPlaybackGeneration(),
+				const track = hostTrack(p);
+				const shared = sharedPlaybackQueue(
+					p.queue,
 					p.currentIndex,
-					p.playingVideoId || p.currentSong?.id,
+					p.currentSong,
+					track.song,
 				);
-				if (
-					["skip", "remove", "reorder", "seek", "playback"].includes(
-						category,
-					) &&
-					context.instance !== currentInstance
-				)
-					throw new Error("The track changed. Please try again.");
-				const offset = shared ? Math.max(0, p.currentIndex - shared.index) : 0;
-				const window = p.queue.slice(
-					offset,
-					offset + (shared?.queue.length ?? 0),
-				);
-				if (
-					["remove", "reorder"].includes(category) &&
-					queueKey(window) !== context.queueKey
-				)
-					throw new Error("The queue changed. Please try again.");
+				const error = actionContextError(action, context, {
+					instance: track.instance,
+					queueKey: queueKey(shared.queue),
+				});
+				if (error) throw new Error(error);
+				const start = shared.sourceStart;
 				switch (action.type) {
 					case "autoplay":
 						if (
@@ -95,20 +108,21 @@ export function RoomPlaybackBridge() {
 						p.setRepeatMode(action.mode);
 						break;
 					case "remove":
-						if (!window[action.index])
+						if (start === null || !shared.queue[action.index])
 							throw new Error("That queue item no longer exists.");
-						p.removeFromQueueAt(offset + action.index);
+						p.removeFromQueueAt(start + action.index);
 						break;
 					case "shuffle":
 						p.shuffleQueue();
 						break;
 					case "reorder": {
-						if (action.order.length !== window.length)
+						if (start === null || action.order.length !== shared.queue.length)
 							throw new Error("The queue changed. Please try again.");
+						const end = start + shared.queue.length;
 						p.setQueue([
-							...p.queue.slice(0, offset),
-							...action.order.map((i) => window[i]),
-							...p.queue.slice(offset + window.length),
+							...p.queue.slice(0, start),
+							...action.order.map((i) => p.queue[start + i]),
+							...p.queue.slice(end),
 						]);
 						break;
 					}
@@ -159,24 +173,7 @@ export function RoomPlaybackBridge() {
 					media.readyState >= 3;
 				const position =
 					media && Number.isFinite(media.currentTime) ? media.currentTime : 0;
-				const actualSong = p.currentSong
-					? {
-							...p.currentSong,
-							duration:
-								p.currentSong.duration ||
-								(p.duration > 0 ? formatTime(p.duration) : undefined),
-							addedBy:
-								p.queue[p.currentIndex]?.id === p.currentSong.id
-									? p.queue[p.currentIndex].addedBy
-									: p.currentSong.addedBy,
-							id: p.playingVideoId || p.currentSong.id,
-						}
-					: null;
-				const instance = playbackInstance(
-					p.getPlaybackGeneration(),
-					p.currentIndex,
-					actualSong?.id,
-				);
+				const { instance, song: actualSong } = hostTrack(p);
 				const key = `${instance}:${playing}:${p.queue.length}:${p.repeatMode}`;
 				const jumped =
 					Math.abs(

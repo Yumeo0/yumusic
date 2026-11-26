@@ -1,7 +1,6 @@
 import { proxiedFetch, USER_AGENT } from "../utils/tauri";
 import { cleanSearchTitle, formatTitleParts } from "../utils/title";
-import type { LrcLine, LrcWord } from "./lyrics";
-import { lyricsKind } from "./lyrics";
+import { type LrcWord, lyricsKind, type ProviderLyrics } from "./lyrics";
 import { fieldMatches } from "./match";
 
 /**
@@ -19,13 +18,6 @@ const BASE = "https://lrc.red";
 
 /** The alignment model runs take a few seconds; fall back to plain past this. */
 const SYNC_TIMEOUT_MS = 30_000;
-
-export interface LrcRedLyrics {
-	synced: LrcLine[] | null;
-	plain: string | null;
-	/** Matched on artist + title (or authoritative), not a loose match. */
-	confirmed: boolean;
-}
 
 interface LrcRedHit {
 	isrc?: string;
@@ -129,7 +121,7 @@ function parseWords(
  */
 export function parseLrcRedSong(
 	song: LrcRedSong,
-): Omit<LrcRedLyrics, "confirmed"> | null {
+): Omit<ProviderLyrics, "confirmed"> | null {
 	const raw = Array.isArray(song.lyrics?.lines) ? song.lyrics.lines : [];
 	const lines = raw
 		.map((line) => {
@@ -331,7 +323,7 @@ export async function fetchLrcRedLyrics(
 	title: string,
 	artist: string,
 	durationSec = 0,
-): Promise<LrcRedLyrics | null> {
+): Promise<ProviderLyrics | null> {
 	const original = cleanSearchTitle(title, artist).trim();
 	// Dual titles clean down to their original side; the translation side is
 	// searched as well so a track filed under its translated name still

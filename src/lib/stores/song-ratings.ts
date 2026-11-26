@@ -1,14 +1,14 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { LruCache } from "@/lib/utils/lru-cache";
-import { isVideoId } from "@/lib/youtube/youtube.utils";
 import {
 	getSongRating,
 	type SongRating,
 	setSongRating,
-} from "@/lib/youtube/youtube-client";
+} from "@/lib/youtube/song-rating";
+import { isVideoId } from "@/lib/youtube/youtube.utils";
 import { showToast } from "./toast";
 
-export interface SongRatingState {
+interface SongRatingState {
 	/** The account's rating for the song. */
 	rating: SongRating;
 	/** True while an update is being sent to YouTube. */
@@ -192,7 +192,7 @@ export function loadSongRating(songId: string | null | undefined): void {
  * Applies a rating to a song on the YouTube account. Pressing the active
  * rating again clears it, matching YouTube Music's toggle.
  */
-export function rateSong(songId: string, next: "like" | "dislike"): void {
+function rateSong(songId: string, next: "like" | "dislike"): void {
 	if (!isVideoId(songId)) {
 		showToast("This song cannot be rated");
 		return;

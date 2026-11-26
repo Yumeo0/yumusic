@@ -9,8 +9,6 @@ const versionFiles = {
 	"src-tauri/Cargo.lock":
 		/(\[\[package\]\]\r?\nname = "app"\r?\nversion = ")[^"]+(?=")/,
 };
-export const versionPaths = Object.keys(versionFiles);
-
 export async function prepareVersionFiles(version: string, root = ROOT) {
 	if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))
 		throw new Error(`Invalid release version: ${version}`);

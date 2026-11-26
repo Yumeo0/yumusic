@@ -14,11 +14,9 @@ describe("player volume", () => {
 			expect(volumeForDevice(saved, false)).toBe(saved);
 		}
 	});
-	test("reaches full media output while retaining a quiet default", () => {
+	test("the volume slider reaches both mute and full media output", () => {
 		expect(linearToVolume(0)).toBe(0);
 		expect(linearToVolume(1)).toBe(1);
-		expect(MAX_VOLUME).toBe(1);
-		expect(DEFAULT_VOLUME).toBe(0.15);
 	});
 
 	test("gives quiet listening levels most of the lower half of the slider", () => {

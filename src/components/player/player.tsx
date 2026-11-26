@@ -7,7 +7,7 @@ import {
 	SkipBack,
 	SkipForward,
 } from "lucide-react";
-import { type RefObject, useRef } from "react";
+import { useRef } from "react";
 import { RoomButton } from "@/components/listen-together/room-button";
 import { RatingButtons } from "@/components/player/rating-buttons";
 import { RepeatButton } from "@/components/player/repeat-button";
@@ -20,6 +20,7 @@ import { useRoomRole } from "@/lib/listen-together/room";
 import { useMiniPlayerTrackSwipe } from "@/lib/motion/mini-player-swipe";
 import { useNowPlayingSwipe } from "@/lib/motion/now-playing-motion";
 import { playerSwipeHandlers } from "@/lib/motion/player-swipe-handlers";
+import type { PlaybackMedia } from "@/lib/player/playback-deck";
 import {
 	toggleNowPlaying,
 	toggleQueue,
@@ -45,7 +46,7 @@ export function Player() {
 		previous,
 		hasNext,
 		hasPrevious,
-		videoElementRef,
+		activeMedia,
 		duration: knownDuration,
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
@@ -85,8 +86,8 @@ export function Player() {
 			<div className="px-4 sm:px-5" onClick={(e) => e.stopPropagation()}>
 				<MiniProgress
 					knownDuration={knownDuration}
+					media={activeMedia}
 					songId={currentSong?.id ?? ""}
-					videoElementRef={videoElementRef}
 				/>
 			</div>
 
@@ -310,8 +311,6 @@ export function Player() {
 	);
 }
 
-type VideoRef = RefObject<HTMLVideoElement | null> | null;
-
 /**
  * Progress strip and timecodes subscribe to the media clock on their own, so
  * the blurred footer doesn't re-render (and re-filter its backdrop) several
@@ -319,25 +318,18 @@ type VideoRef = RefObject<HTMLVideoElement | null> | null;
  */
 function MiniProgress({
 	songId,
-	videoElementRef,
+	media,
 	knownDuration,
 }: {
 	songId: string;
-	videoElementRef: VideoRef;
+	media: PlaybackMedia | null;
 	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		songId,
-		knownDuration,
-	);
+	const { currentTime, duration } = useMediaTime(media, songId, knownDuration);
 	const { seek } = usePlayer();
 	const roomRole = useRoomRole();
 	const handleSeek = (percent: number) => {
-		const videoEl = videoElementRef?.current;
-		if (videoEl && duration > 0) {
-			seek(percent * duration);
-		}
+		if (duration > 0) seek(percent * duration);
 	};
 	return (
 		<div className="pt-1.5">

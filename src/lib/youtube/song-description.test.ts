@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Song } from "@/lib/music/song";
-import { needsUploadCheck } from "./song-description";
+import {
+	createSongRowEnrichment,
+	needsUploadCheck,
+	rememberSongDescription,
+} from "./song-description";
 
 function song(overrides: Partial<Song>): Song {
 	return {
@@ -35,4 +39,25 @@ describe("needsUploadCheck", () => {
 		expect(needsUploadCheck(song({ title, upload: true }))).toBe(false);
 		expect(needsUploadCheck(song({ title, upload: false }))).toBe(false);
 	});
+});
+
+test("progressive batches share in-flight work for the same video", async () => {
+	const id = "Enrichment1";
+	const description = "Background credits";
+	rememberSongDescription(id, description);
+	const delivered = Promise.withResolvers<void>();
+	const updates: unknown[] = [];
+	const enrichment = createSongRowEnrichment((videoId, patch) => {
+		updates.push([videoId, patch]);
+		delivered.resolve();
+	});
+	try {
+		enrichment.add([song({ id, thumbnail: "first" })]);
+		enrichment.add([song({ id, thumbnail: "second" })]);
+		await delivered.promise;
+		await Promise.resolve();
+		expect(updates).toEqual([[id, { description }]]);
+	} finally {
+		enrichment.cancel();
+	}
 });

@@ -21,7 +21,6 @@ export interface LrcWord {
  */
 export type LyricsKind = "plain" | "synced" | "word";
 
-/** Timing level of the lyrics a provider payload actually carries. */
 export function lyricsKind(lyrics: { synced: LrcLine[] | null }): LyricsKind {
 	if (!lyrics.synced) return "plain";
 	return lyrics.synced.some((line) => line.words && line.words.length > 0)
@@ -29,7 +28,6 @@ export function lyricsKind(lyrics: { synced: LrcLine[] | null }): LyricsKind {
 		: "synced";
 }
 
-/** What the display picker needs to know about a provider's lyrics. */
 export interface SelectableLyrics {
 	synced: LrcLine[] | null;
 	/** Matched on artist + title (or authoritative), not a loose match. */

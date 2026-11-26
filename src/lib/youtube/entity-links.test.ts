@@ -46,6 +46,23 @@ test("songs keep the preview even when their URL also includes a playlist", () =
 	).toMatchObject({ kind: "video", id: "miUn-GLcd3Q" });
 });
 
+test("video share links work across supported formats and inside messages", () => {
+	const id = "dQw4w9WgXcQ";
+	for (const input of [
+		`https://www.youtube.com/watch?v=${id}`,
+		`https://m.youtube.com/watch?v=${id}`,
+		`https://www.youtube.com/shorts/${id}`,
+		`https://www.youtube.com/live/${id}?feature=share`,
+		`https://www.youtube.com/embed/${id}`,
+		`youtu.be/${id}`,
+		`youtube.com/watch?v=${id}`,
+		`check this out https://youtu.be/${id} it's great`,
+		`(https://youtu.be/${id}).`,
+		`see <https://www.youtube.com/watch?v=${id}>`,
+	])
+		expect(findYouTubeLink(input)).toMatchObject({ kind: "video", id });
+});
+
 test("mobile entry links include Music home, search, library, podcasts and public mixes", async () => {
 	const resolve = async () => {
 		throw new Error("Direct links need no resolver");
@@ -74,6 +91,10 @@ test("foreign hosts, credentials, invalid ids and unrelated YouTube URLs are ign
 		"https://user:pass@youtube.com/@artist",
 		"https://youtube.com/results?search_query=test",
 		"https://youtube.com/playlist?list=bad%2Fid",
+		"https://example.com/watch?v=dQw4w9WgXcQ",
+		"https://youtube.com/watch?v=short",
+		"https://youtube.com/watch",
+		"just some text",
 	])
 		expect(findYouTubeLink(url)).toBeNull();
 });

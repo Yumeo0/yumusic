@@ -70,11 +70,10 @@ export function readRoomProfile(source: string): RoomProfile | null {
 export function saveRoomProfile(source: string, profile: RoomProfile) {
 	if (!validProfile(profile))
 		throw new Error("Enter a username of 1–40 characters and a valid picture.");
-	// Confirmation can still succeed for this session if storage is unavailable.
 	try {
 		replaceSavedRoomProfile({ source, profile });
 	} catch {
-		/* best effort */
+		// Confirmation can still succeed for this session if storage is unavailable.
 	}
 }
 

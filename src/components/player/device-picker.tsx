@@ -22,13 +22,17 @@ import { SongTitle } from "@/components/song/song-title";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { type DeviceCommand, deviceStatus } from "@/lib/connect/protocol";
+import {
+	MAX_DEVICE_NAME_LENGTH,
+	readDeviceName,
+	saveDeviceName,
+} from "@/lib/connect/device-name";
+import type { DeviceCommand } from "@/lib/connect/protocol";
 import { getDeviceHub, useDevices } from "@/lib/connect/store";
 import { useSystemVolume } from "@/lib/player/use-system-volume";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn } from "@/lib/utils/utils";
 import { audioPanelHandle } from "./audio-panel-handle";
-import { DEVICE_NAME_KEY, defaultDeviceName } from "./device-bridge";
 import { VolumeSlider } from "./volume-control";
 
 export function DeviceButton() {
@@ -70,9 +74,7 @@ export function DevicePanel() {
 	const state = useDevices();
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
-	const [name, setName] = useState(
-		() => localStorage.getItem(DEVICE_NAME_KEY) || defaultDeviceName(),
-	);
+	const [name, setName] = useState(readDeviceName);
 	const run = async (action: () => Promise<unknown> | undefined) => {
 		setError("");
 		setBusy(true);
@@ -87,18 +89,11 @@ export function DevicePanel() {
 		}
 	};
 	const source =
+		state.devices.find(({ status }) => status.playing && !status.room) ??
 		state.devices.find(
-			(d) => deviceStatus(d.state).playing && !deviceStatus(d.state).room,
+			({ id, status }) => id === state.id && status.title && !status.room,
 		) ??
-		state.devices.find(
-			(d) =>
-				d.id === state.id &&
-				deviceStatus(d.state).title &&
-				!deviceStatus(d.state).room,
-		) ??
-		state.devices.find(
-			(d) => deviceStatus(d.state).title && !deviceStatus(d.state).room,
-		);
+		state.devices.find(({ status }) => status.title && !status.room);
 	const command = (id: string, action: DeviceCommand) =>
 		void run(() => getDeviceHub()?.control(id, action));
 	return (
@@ -118,14 +113,11 @@ export function DevicePanel() {
 							<Input
 								aria-label="This device's name"
 								id={nameId}
-								maxLength={80}
+								maxLength={MAX_DEVICE_NAME_LENGTH}
 								onBlur={() => void getDeviceHub()?.refresh()}
 								onChange={(e) => {
 									setName(e.target.value);
-									localStorage.setItem(
-										DEVICE_NAME_KEY,
-										e.target.value.trim().slice(0, 80),
-									);
+									saveDeviceName(e.target.value);
 								}}
 								value={name}
 							/>
@@ -145,7 +137,7 @@ export function DevicePanel() {
 						className="flex flex-col gap-2"
 					>
 						{state.devices.map((d) => {
-							const status = deviceStatus(d.state);
+							const { status } = d;
 							const self = d.id === state.id;
 							const Icon = d.kind === "phone" ? Smartphone : Laptop;
 							const StatusIcon = status.room

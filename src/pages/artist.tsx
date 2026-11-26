@@ -37,7 +37,7 @@ import {
 } from "@/lib/youtube/artist-category";
 import { type ArtistView, fetchArtistView } from "@/lib/youtube/artist-data";
 import { getYoutubeClient } from "@/lib/youtube/client-session";
-import { getMixSongs } from "@/lib/youtube/youtube-client";
+import { getMixSongs } from "@/lib/youtube/track-recommendations";
 
 export default function ArtistPage() {
 	const { id } = useParams<{ id: string }>();

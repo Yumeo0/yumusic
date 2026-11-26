@@ -8,7 +8,7 @@
 import type { Song } from "@/lib/music/song";
 
 /** The queue-entry fields needed from a PlaylistPanelVideo. */
-export interface QueueEntry {
+interface QueueEntry {
 	video_id: string;
 	endpoint?: {
 		payload?: {
@@ -20,7 +20,7 @@ export interface QueueEntry {
 }
 
 /** The wrapper fields needed from a PlaylistPanelVideoWrapper. */
-export interface QueueWrapper<T extends QueueEntry = QueueEntry> {
+interface QueueWrapper<T extends QueueEntry = QueueEntry> {
 	primary: T | null;
 	counterpart?: T[];
 }
@@ -36,7 +36,7 @@ export interface SongVersion {
 }
 
 /** The queue entry's music video type, e.g. "MUSIC_VIDEO_TYPE_ATV". */
-export function musicVideoTypeOf(entry: QueueEntry): string | undefined {
+function musicVideoTypeOf(entry: QueueEntry): string | undefined {
 	return entry.endpoint?.payload?.watchEndpointMusicSupportedConfigs
 		?.watchEndpointMusicConfig?.musicVideoType;
 }

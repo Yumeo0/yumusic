@@ -1,5 +1,13 @@
 import type { Song } from "@/lib/music/song";
-import type { LibraryPlaylist, PlaylistView } from "../music/playlist";
+import type {
+	LibraryPlaylist,
+	PlaylistTrack,
+	PlaylistView,
+} from "../music/playlist";
+import {
+	applySongEnrichment,
+	type SongEnrichment,
+} from "../music/song-enrichment";
 import { canonicalPlaylistId, playlistBrowseId } from "../youtube/playlist-id";
 
 /**
@@ -164,15 +172,22 @@ export function writePlaylistView(
 	}
 }
 
-export const readLibraryCache = () =>
-	readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
-export const writeLibraryCache = (entries: LibraryPlaylist[]) =>
+export function readLibraryCache() {
+	const cached = readCache<LibraryPlaylist[]>(LIBRARY_CACHE_KEY);
+	return cached &&
+		Array.isArray(cached.data) &&
+		Number.isFinite(cached.timestamp)
+		? cached
+		: null;
+}
+export function writeLibraryCache(entries: LibraryPlaylist[]) {
 	writeCache(LIBRARY_CACHE_KEY, entries);
+}
 
 const PLAYLIST_CHANGED_EVENT = "yumusic:playlist-changed";
 export type PlaylistChange = { id: string } & (
 	| { type: "add"; song: Song }
-	| { type: "remove"; songId: string; index: number }
+	| { type: "remove"; track: PlaylistTrack; occurrence: number }
 	| { type: "delete" }
 	| { type: "metadata"; patch: Pick<PlaylistView, "title" | "thumbnail"> }
 );
@@ -211,10 +226,16 @@ export function applyPlaylistChange(
 		case "add":
 			return { ...view, songs: [change.song, ...view.songs] };
 		case "remove": {
-			const index =
-				view.songs[change.index]?.id === change.songId
-					? change.index
-					: view.songs.findIndex((song) => song.id === change.songId);
+			const { track } = change;
+			let occurrence = change.occurrence;
+			let fallback = -1;
+			const matched = view.songs.findIndex((song, index) => {
+				if (song.id !== track.id) return false;
+				if (occurrence-- === 0 && (!track.entryId || !song.entryId))
+					fallback = index;
+				return !!track.entryId && song.entryId === track.entryId;
+			});
+			const index = matched < 0 ? fallback : matched;
 			return index < 0
 				? view
 				: { ...view, songs: view.songs.filter((_, i) => i !== index) };
@@ -224,10 +245,10 @@ export function applyPlaylistChange(
 
 export function removeSongFromCachedPlaylist(
 	id: string,
-	songId: string,
-	index: number,
+	track: PlaylistTrack,
+	occurrence: number,
 ) {
-	const change = { id, type: "remove", songId, index } as const;
+	const change = { id, type: "remove", track, occurrence } as const;
 	const cached = readPlaylistView(id);
 	if (cached) writePlaylistView(id, applyPlaylistChange(cached.data, change));
 	emitPlaylistChange(change);
@@ -250,7 +271,7 @@ export function patchCachedPlaylistMetadata(
 			),
 		);
 	emitPlaylistChange({ id, type: "metadata", patch });
-	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+	emitLibraryChange();
 }
 
 /** Drops a deleted playlist from the library list and its track cache. */
@@ -271,7 +292,7 @@ export function removePlaylistFromCaches(id: string) {
 		}
 	}
 	emitPlaylistChange({ id, type: "delete" });
-	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+	emitLibraryChange();
 }
 
 /**
@@ -281,18 +302,29 @@ export function removePlaylistFromCaches(id: string) {
  */
 export function patchCachedPlaylistSongs(
 	id: string,
-	updates: ReadonlyMap<string, Song>,
+	updates: ReadonlyMap<string, SongEnrichment>,
 ) {
 	if (updates.size === 0) return;
 	const cached = readPlaylistView(id);
 	if (!cached) return;
 	writePlaylistView(id, {
 		...cached.data,
-		songs: cached.data.songs.map((song) => updates.get(song.id) ?? song),
+		songs: cached.data.songs.map((song) => {
+			const update = updates.get(song.id);
+			return update ? applySongEnrichment(song, update) : song;
+		}),
 	});
 }
 
 const LIBRARY_CHANGED_EVENT = "yumusic:library-changed";
+let libraryRevision = 0;
+
+export const getLibraryRevision = () => libraryRevision;
+
+function emitLibraryChange() {
+	libraryRevision++;
+	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+}
 
 /** Drops the cached library list so mounted and future views refetch it. */
 export function invalidateLibraryCache() {
@@ -301,7 +333,7 @@ export function invalidateLibraryCache() {
 	} catch {
 		// best-effort
 	}
-	window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+	emitLibraryChange();
 }
 
 /** Subscribes to library invalidations; returns the unsubscribe function. */

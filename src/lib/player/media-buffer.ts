@@ -100,7 +100,7 @@ export interface AudioStreamSession {
 export async function mountBufferedAudio(
 	media: HTMLMediaElement,
 	createSession: (startTimeMs: number) => AudioStreamSession,
-	options: { signal: AbortSignal; duration: number; onReady: () => void },
+	options: { signal: AbortSignal; duration: number },
 ): Promise<void> {
 	const source = new MediaSource();
 	const objectUrl = URL.createObjectURL(source);
@@ -109,7 +109,6 @@ export async function mountBufferedAudio(
 	let controller = new AbortController();
 	let restartAt: number | null = null;
 	let loadingAt: number | null = 0;
-	let ready = false;
 	const abort = () => {
 		controller.abort();
 		void reader?.cancel().catch(() => undefined);
@@ -153,10 +152,6 @@ export async function mountBufferedAudio(
 						signal,
 					);
 					if (buffer.buffered.length > 0) loadingAt = null;
-					if (!ready && buffer.buffered.length > 0) {
-						ready = true;
-						options.onReady();
-					}
 					const before = media.currentTime - AUDIO_BUFFER_BEHIND;
 					if (
 						before > 0 &&

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { HomeSection } from "./feed-items";
+import type { FeedItem, HomeFeed, HomeSection } from "./feed-items";
 import { HomeFeedCache } from "./home-feed-cache";
-import type { HomeFeed } from "./youtube-client";
 
 const section = (title: string): HomeSection => ({
 	title,
@@ -34,7 +33,11 @@ describe("full homepage preload", () => {
 			return first;
 		}, parse);
 		const updates: number[] = [];
-		await cache.get((sections) => updates.push(sections.length));
+		const unsubscribe = cache.subscribe((sections) =>
+			updates.push(sections.length),
+		);
+		await cache.get();
+		unsubscribe();
 		expect(updates).toEqual([1, 2]);
 		expect(cache.read()?.map((row) => row.title)).toEqual(["First", "Last"]);
 		await cache.get();
@@ -53,7 +56,7 @@ describe("full homepage preload", () => {
 			});
 		}, parse);
 		const [a, b] = await Promise.all([cache.get(), cache.get()]);
-		expect(a.sections).toEqual(b.sections);
+		expect(a).toEqual(b);
 		expect(fetches).toBe(1);
 		expect(continuations).toBe(1);
 	});
@@ -70,7 +73,7 @@ describe("full homepage preload", () => {
 		);
 		await expect(cache.get()).rejects.toThrow("Offline");
 		expect(cache.read()).toEqual([section("First")]);
-		expect((await cache.get()).sections).toHaveLength(2);
+		expect(await cache.get()).toHaveLength(2);
 	});
 
 	test("deduplicates repeated continuation sections", async () => {
@@ -81,9 +84,80 @@ describe("full homepage preload", () => {
 				),
 			parse,
 		);
-		expect((await cache.get()).sections).toEqual([
-			section("First"),
-			section("Last"),
+		expect(await cache.get()).toEqual([section("First"), section("Last")]);
+	});
+
+	test("removes playlist aliases from cached and incoming shelves after a confirmed deletion", async () => {
+		const playlist = (id: string): FeedItem => ({
+			kind: "playlist",
+			id,
+			title: "Deleted",
+			subtitle: "",
+			thumbnail: "",
+		});
+		const first = section("First");
+		first.items.unshift(playlist("VLPLdeleted"));
+		const next = section("Next");
+		next.items.unshift(playlist("PLdeleted"));
+		const continuation = Promise.withResolvers<HomeFeed>();
+		const started = Promise.withResolvers<void>();
+		const cache = new HomeFeedCache(
+			async () =>
+				page([first], () => {
+					started.resolve();
+					return continuation.promise;
+				}),
+			parse,
+		);
+		const updates: HomeSection[][] = [];
+		const unsubscribe = cache.subscribe((sections) => updates.push(sections));
+		const preload = cache.get();
+		await started.promise;
+		cache.removePlaylist("PLdeleted");
+		expect(cache.read()).toEqual([section("First")]);
+		continuation.resolve(page([first, next]));
+		expect(await preload).toEqual([section("First"), section("Next")]);
+		expect(updates.slice(1)).toEqual([
+			[section("First")],
+			[section("First"), section("Next")],
+		]);
+		unsubscribe();
+	});
+
+	test("applies a song's enrichment to each occurrence with its own artwork and credits", async () => {
+		const id = "abcdefghijk";
+		const first: FeedItem = {
+			kind: "song",
+			song: { id, title: "Some Song", thumbnail: "first", artist: "One" },
+		};
+		const second: FeedItem = {
+			kind: "song",
+			song: { id, title: "Some Song", thumbnail: "second", artist: "Two" },
+		};
+		const cache = new HomeFeedCache(
+			async () => page([{ title: "Tracks", items: [first, second] }]),
+			parse,
+		);
+		await cache.get();
+		cache.patchSong(id, { upload: true });
+		cache.patchSong(id, { description: "Unstructured notes" });
+		expect(cache.read()?.[0]?.items).toEqual([
+			{
+				kind: "song",
+				song: {
+					...first.song,
+					upload: true,
+					description: "Unstructured notes",
+				},
+			},
+			{
+				kind: "song",
+				song: {
+					...second.song,
+					upload: true,
+					description: "Unstructured notes",
+				},
+			},
 		]);
 	});
 

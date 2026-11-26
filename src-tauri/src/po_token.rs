@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::AppHandle;
 #[cfg(not(target_os = "android"))]
-use tauri::{Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, Url};
 #[cfg(not(target_os = "android"))]
 use tokio::sync::oneshot;
 
@@ -39,6 +39,31 @@ pub struct PoToken {
 	context: Value,
 	account_index: u64,
 	cookie: String,
+}
+
+impl PoToken {
+	fn from_response(mut value: Value) -> Result<Self, String> {
+		if let Some(error) = value["error"].as_str() {
+			return Err(error.to_owned());
+		}
+		let token = value["token"]
+			.as_str()
+			.filter(|token| !token.is_empty())
+			.ok_or("YouTube did not return a PO token")?
+			.to_owned();
+		let context = value["context"].take();
+		if !context["client"]["visitorData"].is_string() {
+			return Err("YouTube did not return a visitor context".into());
+		}
+		Ok(Self {
+			token,
+			context,
+			account_index: value["accountIndex"].as_u64().unwrap_or(0),
+			cookie: crate::login_session::dedup_cookie_header(
+				value["cookie"].as_str().unwrap_or_default(),
+			),
+		})
+	}
 }
 
 // Minting is serialized so requests can reuse the ready minter.
@@ -88,8 +113,8 @@ async fn mint_in_window(app: AppHandle, binding: String) -> Result<PoToken, Stri
 	} else {
 		let callback = pending.clone();
 		let navigation_app = app.clone();
-		let url = WebviewUrl::External(Url::parse("https://www.youtube.com/robots.txt").unwrap());
-		let mut builder = WebviewWindowBuilder::new(&app, WINDOW, url)
+		let url = Url::parse("https://www.youtube.com/robots.txt").unwrap();
+		let builder = crate::session_window::session_window(&app, WINDOW, url)
 			.title("YouTube playback attestation")
 			.visible(false)
 			.focused(false)
@@ -128,16 +153,6 @@ async fn mint_in_window(app: AppHandle, binding: String) -> Result<PoToken, Stri
 						)
 					)
 			});
-		if let Some(args) = app
-			.config()
-			.app
-			.windows
-			.iter()
-			.find(|config| config.label == "main")
-			.and_then(|config| config.additional_browser_args.clone())
-		{
-			builder = builder.additional_browser_args(&args);
-		}
 		builder.build().map_err(|e| e.to_string())?
 	};
 	let id = NEXT_ID
@@ -176,36 +191,18 @@ async fn mint_in_window(app: AppHandle, binding: String) -> Result<PoToken, Stri
 			});
 		}
 	};
-	if let Some(error) = value.get("error").and_then(Value::as_str) {
-		return Err(error.to_owned());
-	}
-	let token = value
-		.get("token")
-		.and_then(Value::as_str)
-		.filter(|token| !token.is_empty())
-		.ok_or("YouTube did not return a PO token")?
-		.to_owned();
+	let mut token = PoToken::from_response(value)?;
 	let _ = window.hide();
-	let context = value
-		.get("context")
-		.filter(|context| context["client"]["visitorData"].is_string())
-		.ok_or("YouTube did not return a visitor context")?
-		.clone();
 	let url = Url::parse("https://www.youtube.com/").unwrap();
 	let cookies = window.cookies_for_url(url).map_err(|e| e.to_string())?;
-	let cookie = crate::login_session::dedup_cookie_header(
+	token.cookie = crate::login_session::dedup_cookie_header(
 		&cookies
 			.iter()
 			.map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
 			.collect::<Vec<_>>()
 			.join("; "),
 	);
-	Ok(PoToken {
-		token,
-		context,
-		account_index: value["accountIndex"].as_u64().unwrap_or(0),
-		cookie,
-	})
+	Ok(token)
 }
 
 pub fn reset(app: &AppHandle) {

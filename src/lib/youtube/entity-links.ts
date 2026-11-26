@@ -1,13 +1,24 @@
-import { extractVideoId } from "./youtube.utils";
+import { isVideoId } from "./youtube.utils";
 
-export type YouTubeLink = {
-	kind: "video" | "channel" | "collection" | "route";
-	url: string;
-	id?: string;
-	route?: string;
-};
-const entityId = (id: string | null | undefined) =>
-	!!id && /^[A-Za-z0-9_-]{1,200}$/.test(id);
+type YouTubeLink = { url: string } & (
+	| { kind: "video" | "collection"; id: string }
+	| { kind: "channel"; id?: string }
+	| { kind: "route"; route: string }
+);
+
+function isEntityId(id: string | null | undefined): id is string {
+	return !!id && /^[A-Za-z0-9_-]{1,200}$/.test(id);
+}
+
+function videoIdFromUrl(url: URL, host: string, path?: string, id?: string) {
+	if (host === "youtu.be") return isVideoId(path) ? path : null;
+	const fromQuery = url.searchParams.get("v");
+	if (isVideoId(fromQuery)) return fromQuery;
+	return (path === "shorts" || path === "live" || path === "embed") &&
+		isVideoId(id)
+		? id
+		: null;
+}
 
 function parseLink(text: string): YouTubeLink | null {
 	if (/\s|[<>"']/.test(text)) return null;
@@ -22,10 +33,10 @@ function parseLink(text: string): YouTubeLink | null {
 		const host = url.hostname.toLowerCase().replace(/^(?:www|m)\./, "");
 		if (!["youtube.com", "music.youtube.com", "youtu.be"].includes(host))
 			return null;
-		const video = extractVideoId(url.href);
+		const [path, id] = url.pathname.split("/").filter(Boolean);
+		const video = videoIdFromUrl(url, host, path, id);
 		if (video) return { kind: "video", id: video, url: url.href };
 		if (host === "youtu.be") return null;
-		const [path, id] = url.pathname.split("/").filter(Boolean);
 		if (host === "music.youtube.com") {
 			if (!path || ["home", "explore"].includes(path))
 				return { kind: "route", url: url.href, route: "/" };
@@ -41,18 +52,12 @@ function parseLink(text: string): YouTubeLink | null {
 				};
 			}
 		}
-		if (path === "podcast" && entityId(id))
+		if (path === "podcast" && isEntityId(id))
 			return { kind: "collection", id, url: url.href };
-		if (
-			["playlist", "watch"].includes(path) &&
-			entityId(url.searchParams.get("list"))
-		)
-			return {
-				kind: "collection",
-				id: url.searchParams.get("list") as string,
-				url: url.href,
-			};
-		if (path === "browse" && entityId(id)) {
+		const listId = url.searchParams.get("list");
+		if (["playlist", "watch"].includes(path) && isEntityId(listId))
+			return { kind: "collection", id: listId, url: url.href };
+		if (path === "browse" && isEntityId(id)) {
 			if (id === "FEmusic_home" || id === "FEmusic_explore")
 				return { kind: "route", url: url.href, route: "/" };
 			if (id === "FEmusic_library_landing")
@@ -61,7 +66,7 @@ function parseLink(text: string): YouTubeLink | null {
 			if (/^(?:MPR|VL|FEmusic_library_privately_owned_release)/.test(id))
 				return { kind: "collection", id, url: url.href };
 		}
-		if (path === "channel" && id?.startsWith("UC") && entityId(id))
+		if (path === "channel" && id?.startsWith("UC") && isEntityId(id))
 			return { kind: "channel", id, url: url.href };
 		if (
 			(path?.startsWith("@") && path.length > 1) ||
@@ -90,12 +95,11 @@ export async function youTubeLinkRoute(
 ): Promise<string> {
 	if (link.kind === "video")
 		throw new Error("Video links use the song preview.");
-	if (link.kind === "route" && link.route) return link.route;
+	if (link.kind === "route") return link.route;
 	const id = link.id ?? (await resolve(link.url)).payload?.browseId;
-	if (!entityId(id)) throw new Error("Could not resolve this YouTube link.");
-	if (link.kind === "channel" && id?.startsWith("UC"))
+	if (!isEntityId(id)) throw new Error("Could not resolve this YouTube link.");
+	if (link.kind === "channel" && id.startsWith("UC"))
 		return `/artist/${encodeURIComponent(id)}`;
-	if (link.kind === "collection")
-		return `/playlists/${encodeURIComponent(id as string)}`;
+	if (link.kind === "collection") return `/playlists/${encodeURIComponent(id)}`;
 	throw new Error("This link does not refer to a supported YouTube channel.");
 }

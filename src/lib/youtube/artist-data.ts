@@ -9,7 +9,7 @@ import {
 	channelVideos,
 } from "./channel-data";
 import { getYoutubeClient } from "./client-session";
-import { artistMixSource, type MixSource } from "./youtube-client";
+import { artistMixSource, type MixSource } from "./track-recommendations";
 
 // Auto-sync: fetch on first view, keep for the session, re-sync after 24h.
 const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;

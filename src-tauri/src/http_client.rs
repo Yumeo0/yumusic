@@ -5,36 +5,25 @@ pub async fn builder() -> Result<reqwest::ClientBuilder, String> {
 	let builder = reqwest::Client::builder().http1_only();
 	#[cfg(target_os = "android")]
 	{
-		use tauri_runtime_wry::wry::prelude::{
-			dispatch,
-			jni::{
-				errors::Error,
-				objects::{JByteArray, JObjectArray},
-			},
-		};
+		use tauri_runtime_wry::wry::prelude::jni::objects::{JByteArray, JObjectArray};
 		static ROOTS: tokio::sync::OnceCell<Vec<reqwest::Certificate>> =
 			tokio::sync::OnceCell::const_new();
 		let roots = ROOTS
 			.get_or_try_init(|| async {
-				let (sender, receiver) = tokio::sync::oneshot::channel();
-				dispatch(move |env, activity, _| {
-					let result = (|| {
-						let array = env
-							.call_method(activity, "trustedRootCertificates", "()[[B", &[])?
-							.l()?;
-						let array = JObjectArray::from(array);
-						let mut roots = Vec::new();
-						for index in 0..env.get_array_length(&array)? {
-							let cert = env.get_object_array_element(&array, index)?;
-							let cert = JByteArray::from(cert);
-							roots.push(env.convert_byte_array(&cert)?);
-							env.delete_local_ref(cert)?;
-						}
-						Ok::<_, Error>(roots)
-					})();
-					let _ = sender.send(result.map_err(|e| e.to_string()));
-				});
-				let certs = receiver.await.map_err(|e| e.to_string())??;
+				let certs = crate::android_activity::call(|env, activity| {
+					let array = env
+						.call_method(activity, "trustedRootCertificates", "()[[B", &[])?
+						.l()?;
+					let array = JObjectArray::from(array);
+					let mut roots = Vec::new();
+					for index in 0..env.get_array_length(&array)? {
+						let cert = JByteArray::from(env.get_object_array_element(&array, index)?);
+						roots.push(env.convert_byte_array(&cert)?);
+						env.delete_local_ref(cert)?;
+					}
+					Ok(roots)
+				})
+				.await?;
 				if certs.is_empty() {
 					return Err("Android returned no trusted certificates".to_string());
 				}

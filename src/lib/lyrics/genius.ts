@@ -28,7 +28,7 @@ interface GeniusSearch {
 	};
 }
 
-export interface GeniusLyrics {
+interface GeniusLyrics {
 	synced: null;
 	plain: string;
 	confirmed: boolean;

@@ -22,12 +22,10 @@ import { formatArtistName } from "@/lib/utils/title";
 import { biggestThumb, cn, hiResThumb } from "@/lib/utils/utils";
 import { channelSearchEntries } from "@/lib/youtube/channel-data";
 import { songFromMusicRow } from "@/lib/youtube/music-row";
+import { getTrackDurations } from "@/lib/youtube/search";
+import { getArtistMixSongs } from "@/lib/youtube/track-recommendations";
 import { getYoutubeClient } from "../../lib/youtube/client-session";
 import { isVideoId, videoIdOf } from "../../lib/youtube/youtube.utils";
-import {
-	getArtistMixSongs,
-	getTrackDurations,
-} from "../../lib/youtube/youtube-client";
 
 interface SearchResultsPageProps {
 	query: string;

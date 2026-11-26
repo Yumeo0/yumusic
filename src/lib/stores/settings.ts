@@ -6,9 +6,8 @@ import {
 } from "../lyrics/lyrics-providers";
 import { normalizeRepeatMode, type RepeatMode } from "../player/repeat";
 import { notifySyncChange } from "../sync/events";
+import type { TitleMode } from "../utils/title";
 import { normalizeHiddenHomeSections } from "./home-sections";
-
-export type TitleMode = "both" | "original" | "translation";
 
 /** Crossfade length bounds, in seconds. */
 export const CROSSFADE_MIN_SECONDS = 1;
@@ -110,15 +109,23 @@ export function getSettings(): Settings {
 	}
 }
 
+function notifySettingsChange() {
+	window.dispatchEvent(new Event(SETTINGS_EVENT));
+	notifySyncChange();
+}
+
+export function replaceSettings(settings: Settings) {
+	localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+	notifySettingsChange();
+}
+
 export function updateSettings(patch: Partial<Settings>): Settings {
 	const next = { ...getSettings(), ...patch };
 	try {
-		localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+		replaceSettings(next);
 	} catch {
-		// best-effort
+		notifySettingsChange();
 	}
-	window.dispatchEvent(new Event(SETTINGS_EVENT));
-	notifySyncChange();
 	return next;
 }
 

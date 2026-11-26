@@ -22,8 +22,8 @@ import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { formatArtistName } from "@/lib/utils/title";
 import { cn } from "@/lib/utils/utils";
 import type { FeedItem } from "@/lib/youtube/feed-items";
+import { getSearchCompletions } from "@/lib/youtube/search";
 import { getSearchRecommendations } from "@/lib/youtube/search-recommendations";
-import { getSearchCompletions } from "@/lib/youtube/youtube-client";
 
 /** Quiet period before asking YouTube for completions. */
 const COMPLETION_DELAY_MS = 180;

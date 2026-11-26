@@ -1,13 +1,11 @@
 import type { Song } from "@/lib/music/song";
-import {
-	applySongDescription,
-	titleNeedsDescription,
-} from "@/lib/utils/description";
+import type { SongEnrichment } from "@/lib/music/song-enrichment";
+import { titleNeedsDescription } from "@/lib/utils/description";
 import { LruCache } from "@/lib/utils/lru-cache";
 import { formatTitleParts, splitDualTitle } from "@/lib/utils/title";
 import { getYoutubeClient } from "./client-session";
+import { getTrackMeta } from "./track-meta";
 import { isVideoId } from "./youtube.utils";
-import { getTrackMeta } from "./youtube-client";
 
 /**
  * Background song enrichment for list rows. Video descriptions resolve song
@@ -57,58 +55,6 @@ export function rememberSongDescription(videoId: string, description: string) {
 	if (description) resolved.set(videoId, description);
 }
 
-/** Concurrent description fetches; prefetching is background work. */
-const CONCURRENCY = 2;
-/** Pause between requests per worker, so a long playlist stays polite. */
-const REQUEST_GAP_MS = 250;
-
-function delay(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Fetches descriptions for the given songs and reports every enriched song
- * through `onUpdate`. Only tracks whose title parsing is ambiguous are
- * fetched (see `titleNeedsDescription`) — a description adds nothing to a
- * title that already parses cleanly. Songs whose description was already
- * fetched this session are enriched from the cache without a request, so
- * their credits reach every list they appear in. `skipIds` excludes tracks
- * that will be enriched by playback anyway (the currently playing song).
- *
- * Runs in the background with a small concurrency limit; returns a function
- * that cancels the remaining fetches (in-flight ones keep running and stay
- * cached).
- */
-function enrichSongsWithDescriptions(
-	songs: Song[],
-	onUpdate: (song: Song) => void,
-	skipIds?: ReadonlySet<string>,
-): () => void {
-	const queue = songs.filter(
-		(song) =>
-			isVideoId(song.id) &&
-			!song.description &&
-			!skipIds?.has(song.id) &&
-			(titleNeedsDescription(song) || resolved.has(song.id)),
-	);
-	let cancelled = false;
-	const worker = async () => {
-		while (!cancelled) {
-			const song = queue.shift();
-			if (!song) return;
-			const description = await fetchSongDescription(song.id);
-			if (cancelled || !description) continue;
-			const updated = applySongDescription(song, description);
-			if (updated !== song) onUpdate(updated);
-			await delay(REQUEST_GAP_MS);
-		}
-	};
-	void Promise.all(Array.from({ length: CONCURRENCY }, worker));
-	return () => {
-		cancelled = true;
-	};
-}
-
 /**
  * Whether a list row could still be an uploader video: its title reads as an
  * original/translation pair (the raw title and the parsed display differ),
@@ -123,61 +69,97 @@ export function needsUploadCheck(song: Song): boolean {
 	);
 }
 
-/**
- * Marks list rows as uploader videos when their track metadata has no release
- * (album) behind it — such titles are the uploader's own string and are shown
- * as-is (see the `upload` field on `Song`). Runs in the background with the
- * same request pacing as the description prefetch.
- */
-function enrichSongsWithUploads(
-	songs: Song[],
-	onUpdate: (song: Song) => void,
-): () => void {
-	const queue = songs.filter(
-		(song) => isVideoId(song.id) && needsUploadCheck(song),
-	);
+const CONCURRENCY = 2;
+const REQUEST_GAP_MS = 250;
+
+type DeliverEnrichment = (videoId: string, enrichment: SongEnrichment) => void;
+
+function createEnrichmentQueue(
+	load: (videoId: string) => Promise<SongEnrichment | null>,
+	deliver: DeliverEnrichment,
+) {
+	const queued = new Set<string>();
+	const active = new Set<string>();
+	let workers = 0;
 	let cancelled = false;
-	const worker = async () => {
-		while (!cancelled) {
-			const song = queue.shift();
-			if (!song) return;
-			const meta = await getTrackMeta(song.id);
-			if (!cancelled && meta && !meta.album) {
-				onUpdate({ ...song, upload: true });
+
+	async function work() {
+		workers++;
+		try {
+			while (!cancelled) {
+				const videoId = queued.values().next().value;
+				if (!videoId) return;
+				queued.delete(videoId);
+				active.add(videoId);
+				try {
+					const enrichment = await load(videoId);
+					if (!cancelled && enrichment) deliver(videoId, enrichment);
+				} catch (error) {
+					console.warn("[descriptions] could not enrich song:", videoId, error);
+				} finally {
+					active.delete(videoId);
+				}
+				// Pace every provider attempt, including empty or failed responses.
+				if (!cancelled)
+					await new Promise((resolve) => setTimeout(resolve, REQUEST_GAP_MS));
 			}
-			await delay(REQUEST_GAP_MS);
+		} finally {
+			workers--;
 		}
-	};
-	void Promise.all(Array.from({ length: CONCURRENCY }, worker));
-	return () => {
-		cancelled = true;
+	}
+
+	return {
+		add(videoId: string) {
+			if (cancelled || active.has(videoId)) return;
+			queued.add(videoId);
+			while (queued.size > 0 && workers < CONCURRENCY) void work();
+		},
+		cancel() {
+			cancelled = true;
+			queued.clear();
+		},
 	};
 }
 
-// Description and upload requests can finish in either order for the same song.
+/** Each provider keeps its own request budget across progressive page loads. */
+export function createSongRowEnrichment(deliver: DeliverEnrichment) {
+	const descriptions = createEnrichmentQueue(async (videoId) => {
+		const description = await fetchSongDescription(videoId);
+		return description ? { description } : null;
+	}, deliver);
+	const uploads = createEnrichmentQueue(async (videoId) => {
+		const meta = await getTrackMeta(videoId);
+		return meta && !meta.album ? { upload: true } : null;
+	}, deliver);
+
+	return {
+		add(songs: Song[], playingId?: string) {
+			for (const song of songs) {
+				if (!isVideoId(song.id)) continue;
+				// Playback supplies its own description for the current song.
+				if (
+					song.id !== playingId &&
+					!song.description &&
+					(titleNeedsDescription(song) || resolved.has(song.id))
+				) {
+					descriptions.add(song.id);
+				}
+				if (needsUploadCheck(song)) uploads.add(song.id);
+			}
+		},
+		cancel() {
+			descriptions.cancel();
+			uploads.cancel();
+		},
+	};
+}
+
 export function enrichSongRows(
 	songs: Song[],
-	onUpdate: (song: Song) => void,
+	deliver: DeliverEnrichment,
 	playingId?: string,
 ) {
-	const latest = new Map<string, Song>();
-	const deliver = (song: Song) => {
-		latest.set(song.id, song);
-		onUpdate(song);
-	};
-	const stopDescriptions = enrichSongsWithDescriptions(
-		songs,
-		(song) => {
-			const upload = latest.get(song.id)?.upload ?? song.upload;
-			deliver(upload === undefined ? song : { ...song, upload });
-		},
-		playingId ? new Set([playingId]) : undefined,
-	);
-	const stopUploads = enrichSongsWithUploads(songs, (song) => {
-		deliver({ ...(latest.get(song.id) ?? song), upload: song.upload });
-	});
-	return () => {
-		stopDescriptions();
-		stopUploads();
-	};
+	const enrichment = createSongRowEnrichment(deliver);
+	enrichment.add(songs, playingId);
+	return enrichment.cancel;
 }

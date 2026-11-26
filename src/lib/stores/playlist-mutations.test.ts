@@ -1,5 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import type { PlaylistView } from "../music/playlist";
+import * as youtubeSession from "../youtube/client-session";
+import * as playlistApi from "../youtube/playlist-api";
+import { loadPlaylistLibrary } from "../youtube/playlist-library";
+import { removePlaylistTrack } from "../youtube/playlist-mutations";
 import {
 	addSongToCachedPlaylist,
 	LIBRARY_CACHE_KEY,
@@ -7,10 +11,14 @@ import {
 	type PlaylistChange,
 	patchCachedPlaylistMetadata,
 	readCache,
+	readLibraryCache,
 	readPlaylistView,
+	removeSongFromCachedPlaylist,
 	subscribeToLibraryChanges,
 	subscribeToPlaylistChanges,
 	writeCache,
+	writeLibraryCache,
+	writePlaylistView,
 } from "./playlist-cache";
 
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
@@ -120,4 +128,78 @@ test("uncached playlists still notify mounted views without changing other playl
 	addSongToCachedPlaylist("PLtest", song);
 	expect(notifications).toBe(1);
 	expect(readCache(`${PLAYLIST_CACHE_PREFIX}PLtest`)).toBeNull();
+});
+
+test("a completed library refresh preserves an edit confirmed while the request was running", async () => {
+	const old = {
+		id: "PLtest",
+		title: "Old title",
+		subtitle: "Playlist",
+		thumbnail: null,
+	};
+	writeLibraryCache([old]);
+	const response = Promise.withResolvers<(typeof old)[]>();
+	const fetch = spyOn(playlistApi, "fetchLibraryPlaylists").mockReturnValue(
+		response.promise,
+	);
+	try {
+		const grid = loadPlaylistLibrary(true);
+		const dialog = loadPlaylistLibrary(true);
+		patchCachedPlaylistMetadata(old.id, {
+			title: "New title",
+			thumbnail: "new-cover",
+		});
+		response.resolve([old]);
+		for (const pending of [grid, dialog]) {
+			expect(await pending).toEqual([
+				{ ...old, title: "New title", thumbnail: "new-cover" },
+			]);
+		}
+		expect(fetch).toHaveBeenCalledTimes(1);
+		expect(readLibraryCache()?.data[0]?.title).toBe("New title");
+	} finally {
+		fetch.mockRestore();
+	}
+});
+
+test("removal uses the selected entry's identity after another row shifts its index", () => {
+	const earlier = { ...song, entryId: "earlier" };
+	const selected = { ...song, entryId: "selected" };
+	const later = { ...song, entryId: "later" };
+	writePlaylistView("PLtest", { ...view, songs: [earlier, selected, later] });
+	removeSongFromCachedPlaylist("PLtest", selected, 2);
+	expect(readPlaylistView("VLPLtest")?.data.songs).toEqual([earlier, later]);
+});
+
+test("a refused remote removal leaves the cached track intact", async () => {
+	const selected = { ...song, entryId: "selected" };
+	writePlaylistView("PLtest", { ...view, songs: [selected] });
+	let requestedId: unknown;
+	const client = {
+		actions: {
+			async execute(
+				_path: string,
+				payload: { actions: { setVideoId: string }[] },
+			) {
+				requestedId = payload.actions[0]?.setVideoId;
+				return {
+					success: true,
+					status_code: 200,
+					data: { status: "STATUS_FAILED" },
+				};
+			},
+		},
+	} as unknown as Awaited<ReturnType<typeof youtubeSession.getYoutubeClient>>;
+	const mock = spyOn(youtubeSession, "getYoutubeClient").mockResolvedValue(
+		client,
+	);
+	try {
+		await expect(removePlaylistTrack("PLtest", selected, 0)).rejects.toThrow(
+			"Playlist edit failed",
+		);
+		expect(requestedId).toBe("selected");
+		expect(readPlaylistView("PLtest")?.data.songs).toEqual([selected]);
+	} finally {
+		mock.mockRestore();
+	}
 });

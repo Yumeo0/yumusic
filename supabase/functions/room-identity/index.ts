@@ -1,5 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
-import { verifyAccountBinding } from "../_shared/account-proof.ts";
+import {
+	validFingerprint,
+	verifyAccountBinding,
+} from "../_shared/account-proof.ts";
 
 const cors = {
 	"Access-Control-Allow-Origin": "*",
@@ -29,7 +32,7 @@ Deno.serve(async (request: Request) => {
 			// A targeted lookup reveals only an opaque account ID for a known
 			// public key fingerprint. Never expose a directory, emails or tokens.
 			const fingerprint = new URL(request.url).searchParams.get("fingerprint");
-			if (!fingerprint || !/^[a-f0-9]{64}$/.test(fingerprint))
+			if (!validFingerprint(fingerprint))
 				return reply(400, { error: "Invalid fingerprint" });
 			const { data, error } = await admin
 				.from("room_devices")
@@ -53,10 +56,7 @@ Deno.serve(async (request: Request) => {
 		if (body.length > 4096) return reply(413, { error: "Request too large" });
 		const input = JSON.parse(body);
 		if (request.method === "DELETE") {
-			if (
-				typeof input.fingerprint !== "string" ||
-				!/^[a-f0-9]{64}$/.test(input.fingerprint)
-			)
+			if (!validFingerprint(input.fingerprint))
 				return reply(400, { error: "Invalid fingerprint" });
 			const { error } = await admin
 				.from("room_devices")

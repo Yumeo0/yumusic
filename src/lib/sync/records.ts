@@ -6,6 +6,7 @@ export interface EditVersion {
 	edit_id?: string;
 }
 export const ZERO_EDIT_ID = "00000000-0000-0000-0000-000000000000";
+export const TRUSTED_RECORD_PREFIX = "trusted/";
 export function compareEdits(a: EditVersion, b: EditVersion): number {
 	const time = (a.modified_at ?? 0) - (b.modified_at ?? 0);
 	if (time !== 0) return Math.sign(time);
@@ -29,6 +30,7 @@ export interface Journal {
 	revisions: Record<string, number>;
 	pending: Record<string, PendingRecord>;
 	clock?: number;
+	projection?: { baseline: Snapshot; applying: boolean };
 }
 /** JSONB reorders object keys. Their order is not an edit; array order is. */
 export function sameValue(
@@ -79,6 +81,24 @@ export function captureChanges(
 	snapshot: Snapshot,
 	editedAt = Date.now(),
 ) {
+	const projection = journal.projection;
+	if (projection) {
+		const { baseline, applying } = projection;
+		const desired = journal.snapshot;
+		const edited = { ...desired };
+		for (const key of new Set([
+			...Object.keys(baseline),
+			...Object.keys(snapshot),
+		])) {
+			if (sameValue(baseline[key], snapshot[key])) continue;
+			// A crash during projection leaves changes to its target keys ambiguous.
+			if (applying && !sameValue(baseline[key], desired[key])) continue;
+			if (Object.hasOwn(snapshot, key)) edited[key] = snapshot[key];
+			else delete edited[key];
+		}
+		journal.projection = { baseline: snapshot, applying: false };
+		snapshot = edited;
+	}
 	for (const key of new Set([
 		...Object.keys(journal.snapshot),
 		...Object.keys(snapshot),
@@ -107,7 +127,7 @@ export function receiveRecords(journal: Journal, records: RemoteRecord[]) {
 			pending &&
 			pending.origin !== "initial" &&
 			compareEdits(pending, record) > 0 &&
-			(!record.key.startsWith("trusted/") ||
+			(!record.key.startsWith(TRUSTED_RECORD_PREFIX) ||
 				pending.revision === record.revision)
 		)
 			continue;
@@ -131,7 +151,7 @@ export function acceptWrite(
 		pending &&
 		pending.origin !== "initial" &&
 		compareEdits(pending, record) > 0 &&
-		(!key.startsWith("trusted/") || compareEdits(sent, record) === 0)
+		(!key.startsWith(TRUSTED_RECORD_PREFIX) || compareEdits(sent, record) === 0)
 	) {
 		pending.revision = record.revision;
 		return;

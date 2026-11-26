@@ -1,26 +1,11 @@
 import { Volume1, Volume2, VolumeX } from "lucide-react";
-import { useEffect, useId, useRef } from "react";
+import { useId } from "react";
 import { usePlayerVolume } from "@/contexts/player-context";
-import {
-	DEFAULT_VOLUME,
-	linearToVolume,
-	volumeToLinear,
-} from "@/lib/player/volume";
+import { linearToVolume, volumeToLinear } from "@/lib/player/volume";
 
-// Keep the unmute level when the popover unmounts between openings.
-let lastAudibleVolume = DEFAULT_VOLUME;
-
-/** Always-visible horizontal slider, with a separate mute action. */
 export function VolumeSlider() {
-	const { volume, setVolume } = usePlayerVolume();
+	const { volume, setVolume, toggleMute } = usePlayerVolume();
 	const id = useId();
-	const lastAudible = useRef(volume > 0 ? volume : lastAudibleVolume);
-	useEffect(() => {
-		if (volume > 0) {
-			lastAudible.current = volume;
-			lastAudibleVolume = volume;
-		}
-	}, [volume]);
 	const linear = volumeToLinear(volume);
 	const Icon = volume === 0 ? VolumeX : linear < 0.45 ? Volume1 : Volume2;
 	return (
@@ -37,7 +22,7 @@ export function VolumeSlider() {
 				<button
 					aria-label={volume === 0 ? "Unmute" : "Mute"}
 					className="grid size-9 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
-					onClick={() => setVolume(volume > 0 ? 0 : lastAudible.current)}
+					onClick={toggleMute}
 					title={volume === 0 ? "Unmute" : "Mute"}
 					type="button"
 				>

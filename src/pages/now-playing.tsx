@@ -41,8 +41,8 @@ import {
 	useQueueSheetGesture,
 } from "@/lib/motion/queue-gesture";
 import type { Song } from "@/lib/music/song";
+import type { PlaybackMedia } from "@/lib/player/playback-deck";
 import { setQueueRevealTarget } from "@/lib/player/player-ui";
-import { nextQueueIndex } from "@/lib/player/repeat";
 import { useMediaTime } from "@/lib/player/use-media-time";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { cn, formatDuration, formatTime } from "@/lib/utils/utils";
@@ -73,33 +73,30 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		currentIndex,
 		repeatMode,
 		autoplayTracks,
+		upcomingTrack,
 		next,
 		previous,
 		hasNext,
 		hasPrevious,
 		play,
 		playAutoplayAt,
-		videoElementRef,
+		activeMedia,
 		duration: knownDuration,
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
 
-	// The up-next stack tucks up to three upcoming tracks under the next card
-	// and slides them out on hover. It reserves no height: the stack grows to
-	// fit its cards when revealed, pushing the content below it. When the queue
-	// has nothing left, repeat wraps it before falling back to autoplay.
-	const nextQueueStart = nextQueueIndex(
-		currentIndex,
-		queue.length,
-		repeatMode,
-		true,
-	);
-	const hasQueuedNext = nextQueueStart !== null && nextQueueStart >= 0;
-	const upNext = hasQueuedNext
-		? repeatMode === "one" && currentSong
-			? [currentSong]
-			: queue.slice(nextQueueStart, nextQueueStart + 3)
-		: autoplayTracks.slice(0, 3);
+	const nextQueueStart =
+		upcomingTrack?.kind === "queue" ? upcomingTrack.index : currentIndex;
+	const hasQueuedNext =
+		upcomingTrack?.kind === "queue" || upcomingTrack?.kind === "repeat";
+	const upNext =
+		upcomingTrack?.kind === "repeat"
+			? [upcomingTrack.song]
+			: upcomingTrack?.kind === "queue"
+				? queue.slice(nextQueueStart, nextQueueStart + 3)
+				: upcomingTrack?.kind === "autoplay"
+					? autoplayTracks.slice(0, 3)
+					: [];
 	const upNextTucked = upNext.slice(1);
 	const upNextIsAutoplay = !hasQueuedNext && upNext.length > 0;
 
@@ -292,8 +289,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 					<div className="min-h-0 flex-1">
 						<NowPlayingLyrics
 							knownDuration={knownDuration}
+							media={activeMedia}
 							song={currentSong}
-							videoElementRef={videoElementRef}
 						/>
 					</div>
 
@@ -306,7 +303,7 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 							</p>
 							{hasQueuedNext ? (
 								<p className="text-[11px] text-muted-foreground/60">
-									{repeatMode === "one"
+									{upcomingTrack?.kind === "repeat"
 										? "Loop single song"
 										: repeatMode === "all"
 											? "Loop playlist"
@@ -323,7 +320,11 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 										onPlay={() =>
 											hasQueuedNext ? play(upNext[0]) : playAutoplayAt(0)
 										}
-										queueIndex={hasQueuedNext ? nextQueueStart : undefined}
+										queueIndex={
+											hasQueuedNext && nextQueueStart >= 0
+												? nextQueueStart
+												: undefined
+										}
 										song={upNext[0]}
 									/>
 								</div>
@@ -487,8 +488,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 								<div className="w-full max-w-md">
 									<NowPlayingSeek
 										knownDuration={knownDuration}
+										media={activeMedia}
 										songId={currentSong.id}
-										videoElementRef={videoElementRef}
 									/>
 								</div>
 								<TransportRow
@@ -604,8 +605,8 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 						<div className="w-full max-w-md">
 							<NowPlayingSeek
 								knownDuration={knownDuration}
+								media={activeMedia}
 								songId={currentSong.id}
-								videoElementRef={videoElementRef}
 							/>
 						</div>
 						<TransportRow
@@ -629,8 +630,6 @@ export const NowPlayingPage = memo(function NowPlayingPage({
 		</div>
 	);
 });
-
-type VideoRef = RefObject<HTMLVideoElement | null> | null;
 
 /**
  * Measures the morphing stage's title, controls and queue pill into CSS
@@ -879,25 +878,18 @@ function TransportRow({
  */
 function NowPlayingSeek({
 	songId,
-	videoElementRef,
+	media,
 	knownDuration,
 }: {
 	songId: string;
-	videoElementRef: VideoRef;
+	media: PlaybackMedia | null;
 	knownDuration?: number;
 }) {
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		songId,
-		knownDuration,
-	);
+	const { currentTime, duration } = useMediaTime(media, songId, knownDuration);
 	const { seek } = usePlayer();
 	const roomRole = useRoomRole();
 	const handleSeek = (percent: number) => {
-		const videoEl = videoElementRef?.current;
-		if (videoEl && duration > 0) {
-			seek(percent * duration);
-		}
+		if (duration > 0) seek(percent * duration);
 	};
 	return (
 		<>
@@ -936,36 +928,25 @@ function NowPlayingSeek({
 /** Lyrics subscribe to the clock themselves so the fullscreen tree stays put. */
 function NowPlayingLyrics({
 	song,
-	videoElementRef,
+	media,
 	knownDuration,
 }: {
 	song: Song;
-	videoElementRef: VideoRef;
+	media: PlaybackMedia | null;
 	knownDuration?: number;
 }) {
 	const { seek } = usePlayer();
-	const { currentTime, duration } = useMediaTime(
-		videoElementRef,
-		song.id,
-		knownDuration,
-	);
-	const onSeekTime = useCallback(
-		(seconds: number) => {
-			const videoEl = videoElementRef?.current;
-			if (videoEl) seek(seconds);
-		},
-		[videoElementRef, seek],
-	);
+	const { currentTime, duration } = useMediaTime(media, song.id, knownDuration);
 	return (
 		<LyricsPanel
 			artist={song.artist}
 			className="mx-auto w-full max-w-xl"
 			currentTime={currentTime}
 			duration={duration}
-			onSeekTime={onSeekTime}
+			media={media}
+			onSeekTime={seek}
 			songId={song.id}
 			title={song.title}
-			videoRef={videoElementRef}
 		/>
 	);
 }

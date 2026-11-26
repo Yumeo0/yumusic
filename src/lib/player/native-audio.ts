@@ -62,6 +62,7 @@ export class NativeAudioElement extends EventTarget {
 	private level = 0.1;
 	private speed = 1;
 	private seekTarget: number | null = null;
+	private loaded = false;
 	private onReady: (() => void) | null = null;
 	private onStream: ((epoch: number, position: number) => void) | null = null;
 	private onFailure: ((error: Error) => void) | null = null;
@@ -112,7 +113,7 @@ export class NativeAudioElement extends EventTarget {
 		this.ahead = state.buffered ?? 0;
 		this.paused = state.paused ?? true;
 		this.ended = state.ended ?? false;
-		this.readyState = state.ready ? 4 : this.onReady ? 0 : 2;
+		this.readyState = state.ready ? 4 : this.loaded ? 2 : 0;
 		if (state.duration && state.duration !== this.duration) {
 			this.duration = state.duration;
 			this.emit("durationchange");
@@ -126,12 +127,13 @@ export class NativeAudioElement extends EventTarget {
 			this.seeking = false;
 			this.emit("seeked");
 		}
-		if (state.ready && this.onReady) {
+		if (state.ready && !this.loaded) {
+			this.loaded = true;
 			const ready = this.onReady;
 			this.onReady = null;
 			this.emit("loadedmetadata");
 			this.emit("canplay");
-			ready();
+			ready?.();
 		}
 		if (wasPaused !== this.paused) this.emit(this.paused ? "pause" : "play");
 		this.emit("timeupdate");
@@ -184,8 +186,6 @@ export class NativeAudioElement extends EventTarget {
 		this.error = { code: 3, message: failure.message };
 		this.paused = true;
 		this.readyState = 0;
-		// A normal load marks React as playing before the native deck is ready.
-		// Even a failure before the first play event must clear that intent.
 		this.emit("pause");
 		this.emit("error");
 		this.onFailure?.(failure);
@@ -227,24 +227,31 @@ export class NativeAudioElement extends EventTarget {
 	}
 	load() {
 		if (this.src) return;
+		const hadSource = this.id.length > 0;
 		void this.command("stop").catch((error) =>
 			console.warn("[audio] Could not stop the previous track:", error),
 		);
 		this.id = "";
 		this.crossfade = null;
 		this.error = null;
+		this.loaded = false;
+		this.position = this.ahead = this.duration = 0;
+		this.seekTarget = null;
+		this.seeking = this.ended = false;
 		this.readyState = 0;
 		this.paused = true;
+		if (hadSource) this.emit("emptied");
 	}
 
 	private async begin(
 		data: Record<string, unknown>,
 		duration: number,
-		ready: () => void,
+		ready: (() => void) | null,
 	) {
 		this.id = crypto.randomUUID();
 		this.src = `native:${this.id}`;
 		this.error = null;
+		this.loaded = false;
 		this.position = this.ahead = 0;
 		this.seekTarget = null;
 		this.seeking = this.ended = false;
@@ -252,8 +259,9 @@ export class NativeAudioElement extends EventTarget {
 		this.readyState = 0;
 		this.duration = duration;
 		this.onReady = ready;
+		const mountId = this.id;
 		await this.command("load", { ...data, duration, volume: this.level });
-		await this.command("rate", { value: this.speed });
+		if (this.id === mountId) await this.command("rate", { value: this.speed });
 	}
 
 	async mountStream(
@@ -261,7 +269,7 @@ export class NativeAudioElement extends EventTarget {
 		options: {
 			signal: AbortSignal;
 			duration: number;
-			onReady: () => void;
+			onReady?: () => void;
 			autoPlay?: boolean;
 		},
 	) {
@@ -299,7 +307,7 @@ export class NativeAudioElement extends EventTarget {
 		const started = this.begin(
 			{ mime, autoPlay: !!options.autoPlay },
 			options.duration,
-			options.onReady,
+			options.onReady ?? null,
 		);
 		const mountId = this.id;
 		try {
@@ -399,7 +407,7 @@ export class NativeAudioElement extends EventTarget {
 }
 
 export function nativeAudio(
-	media: HTMLMediaElement,
+	media: HTMLMediaElement | NativeAudioElement,
 ): NativeAudioElement | null {
 	return media instanceof NativeAudioElement ? media : null;
 }

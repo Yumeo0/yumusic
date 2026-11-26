@@ -41,8 +41,8 @@ describe("Genius provider preferences", () => {
 		] as const;
 		expect(normalizeProviderOrder(saved)).toEqual([...saved, "genius"]);
 	});
-	test("keeps the requested default order with Genius before VocaDB", () => {
-		expect(DEFAULT_LYRICS_PROVIDER_ORDER).toEqual([
+	test("starts new settings with the default provider order", () => {
+		expect(normalizeProviderOrder(undefined)).toEqual([
 			"youtube",
 			"lrclib",
 			"musixmatch",
@@ -50,12 +50,12 @@ describe("Genius provider preferences", () => {
 			"genius",
 			"vocadb",
 		]);
-		expect(normalizeProviderOrder(["genius", "genius", "invalid"])[0]).toBe(
+	});
+	test("drops duplicate and unknown saved ids before filling the order", () => {
+		expect(normalizeProviderOrder(["genius", "genius", "invalid"])).toEqual([
 			"genius",
-		);
-		expect(normalizeProviderOrder(undefined)).toEqual(
-			DEFAULT_LYRICS_PROVIDER_ORDER,
-		);
+			...DEFAULT_LYRICS_PROVIDER_ORDER.filter((id) => id !== "genius"),
+		]);
 	});
 });
 

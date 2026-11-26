@@ -1,7 +1,6 @@
 import { type FeedItem, feedItemKey } from "./feed-items";
 import { getHomeFeed } from "./home-feed-cache";
 
-/** How many personalised entries the search bar suggests. */
 const MAX_RECOMMENDATIONS = 8;
 
 /**
@@ -11,7 +10,7 @@ const MAX_RECOMMENDATIONS = 8;
  * an extra request and both views agree on what is recommended.
  */
 export async function getSearchRecommendations(): Promise<FeedItem[]> {
-	const { sections } = await getHomeFeed();
+	const sections = await getHomeFeed();
 	const items: FeedItem[] = [];
 	const seen = new Set<string>();
 	for (const section of sections) {

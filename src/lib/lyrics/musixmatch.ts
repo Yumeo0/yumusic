@@ -1,4 +1,5 @@
 import { proxiedFetch } from "../utils/tauri";
+import { parseLrc } from "./lrc";
 import type { LrcLine, LrcWord } from "./lyrics";
 import { fieldMatches } from "./match";
 
@@ -99,8 +100,6 @@ interface MxmTrack {
 	has_richsync?: number;
 }
 
-const LRC_TIME = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
-
 /** Parses Musixmatch's `subtitle_format=mxm` body (JSON) into timed lines. */
 function parseMxmSubtitle(body: string): LrcLine[] {
 	try {
@@ -120,25 +119,7 @@ function parseMxmSubtitle(body: string): LrcLine[] {
 	} catch {
 		// not JSON — fall through to LRC parsing
 	}
-	return parseLrc(body);
-}
-
-/** Parses classic LRC ("[00:12.34] line") — some responses use this format. */
-function parseLrc(body: string): LrcLine[] {
-	const lines: LrcLine[] = [];
-	for (const raw of body.split("\n")) {
-		const stamps = [...raw.matchAll(LRC_TIME)];
-		if (stamps.length === 0) continue;
-		const text = raw.replace(LRC_TIME, "").trim();
-		if (!text) continue;
-		for (const stamp of stamps) {
-			const minutes = Number.parseInt(stamp[1], 10);
-			const seconds = Number.parseInt(stamp[2], 10);
-			const frac = stamp[3] ? Number.parseInt(stamp[3].padEnd(3, "0"), 10) : 0;
-			lines.push({ time: minutes * 60 + seconds + frac / 1000, text });
-		}
-	}
-	return lines.sort((a, b) => a.time - b.time);
+	return parseLrc(body).filter((line) => line.text);
 }
 
 /**

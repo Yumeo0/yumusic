@@ -22,6 +22,7 @@ const SHARED_QUEUE_HISTORY = 100;
 export function sharedQueueWindow<T>(queue: T[], index: number) {
 	const start = Math.max(0, index - SHARED_QUEUE_HISTORY);
 	return {
+		start,
 		queue: queue.slice(start, start + SHARED_QUEUE_LIMIT),
 		index: index - start,
 	};
@@ -33,7 +34,8 @@ export function sharedPlaybackQueue(
 	current: Song | null,
 	playingSong?: Song | null,
 ) {
-	if (current && queue[index]?.id !== current.id) {
+	const insertedCurrent = current && queue[index]?.id !== current.id;
+	if (insertedCurrent) {
 		queue = [current, ...queue];
 		index = 0;
 	}
@@ -41,6 +43,7 @@ export function sharedPlaybackQueue(
 	const currentTrack = playingSong === undefined ? current : playingSong;
 	return {
 		sourceIndex: index,
+		sourceStart: insertedCurrent ? null : visible.start,
 		index: current ? visible.index : -1,
 		queue: visible.queue.map((song, i) =>
 			wireSong(i === visible.index && playingSong ? playingSong : song),

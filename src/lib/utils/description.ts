@@ -393,10 +393,10 @@ function linkedArtistIds(song: Song, description: string): Map<string, string> {
  * description replaces the title. Returns the same object when the
  * description was already applied or adds nothing.
  */
-export function applySongDescription(
-	song: Song,
+export function applySongDescription<T extends Song>(
+	song: T,
 	description: string | null | undefined,
-): Song {
+): T {
 	const full = description?.trim();
 	if (!full) return song;
 	const text =
@@ -404,7 +404,7 @@ export function applySongDescription(
 			? full.slice(0, MAX_STORED_DESCRIPTION_LENGTH)
 			: full;
 	if (song.description === text) return song;
-	const next: Song = { ...song, description: text };
+	const next = { ...song, description: text };
 	const credits = parseDescriptionCredits(full, song.title);
 	if (!credits) return next;
 	if (credits.title) next.title = credits.title;

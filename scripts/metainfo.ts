@@ -1,18 +1,14 @@
-/** Adds release metadata before a version is tagged. Existing notes stay intact. */
+import { releaseVersion, validateReleaseDate } from "./release-metadata";
+
 export function addMetainfoRelease(
 	xml: string,
 	version: string,
 	date: string,
 ): string {
-	if (!/^\d+\.\d+\.\d+$/.test(version)) {
+	if (releaseVersion(version) !== version) {
 		throw new Error(`Invalid release version: ${version}`);
 	}
-	if (
-		!/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-		new Date(date).toISOString().slice(0, 10) !== date
-	) {
-		throw new Error(`Invalid release date: ${date}`);
-	}
+	validateReleaseDate(date);
 	if (!xml.includes("<releases>")) {
 		throw new Error("MetaInfo has no releases element");
 	}

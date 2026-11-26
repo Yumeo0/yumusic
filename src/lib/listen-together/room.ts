@@ -1,10 +1,10 @@
 import type { DataConnection, Peer, PeerOptions } from "peerjs";
 import { useSyncExternalStore } from "react";
-import type { Song } from "@/lib/music/song";
 import type { PlaybackSnapshot } from "../player/shared-playback";
 import {
 	type ActionContext,
 	actionCategory,
+	actionContextError,
 	actionSong,
 	defaultPermissions,
 	type GuestPermissions,
@@ -23,9 +23,11 @@ import {
 	verifyIdentity,
 } from "./identity";
 import {
+	accountTrustKey,
 	type JoinPolicy,
 	type JoinSettingsStorage,
 	joinSettingsStorage,
+	MAX_TRUSTED_PEOPLE,
 	type TrustedPerson,
 	validPolicy,
 } from "./join-settings";
@@ -466,7 +468,7 @@ export class ListenRoom {
 				return;
 			}
 			this.verified.set(connection, fingerprint);
-			if (accountId) this.accountTrust.set(id, `account:${accountId}`);
+			if (accountId) this.accountTrust.set(id, accountTrustKey(accountId));
 			else this.accountTrust.delete(id);
 			const member: Participant = {
 				id,
@@ -591,7 +593,7 @@ export class ListenRoom {
 			return;
 		const ownAccount =
 			this.identity?.accountId &&
-			this.accountTrust.get(id) === `account:${this.identity.accountId}`;
+			this.accountTrust.get(id) === accountTrustKey(this.identity.accountId);
 		const trusted =
 			!!ownAccount ||
 			this.state.trustedPeople.some(
@@ -655,7 +657,7 @@ export class ListenRoom {
 			(p) =>
 				p.fingerprint !== fingerprint && !replacedDevices.has(p.fingerprint),
 		);
-		if (people.length >= 100)
+		if (people.length >= MAX_TRUSTED_PEOPLE)
 			throw new Error(
 				"Remove a trusted person or device before adding another.",
 			);
@@ -803,7 +805,7 @@ export class ListenRoom {
 		}
 		try {
 			if (accountId)
-				this.accountTrust.set(pending.target, `account:${accountId}`);
+				this.accountTrust.set(pending.target, accountTrustKey(accountId));
 			else this.accountTrust.delete(pending.target);
 			this.rememberPerson(
 				this.accountTrust.get(pending.target) ?? fingerprint,
@@ -1072,9 +1074,6 @@ export class ListenRoom {
 			}
 		}
 	}
-	suggestSongs(songs: Song[]) {
-		return this.requestAction({ type: "add", songs });
-	}
 	private actionContext(): ActionContext {
 		return {
 			instance: this.state.playback?.instance ?? null,
@@ -1157,14 +1156,7 @@ export class ListenRoom {
 		}
 		const member = this.state.members.find((m) => m.id === connection.peer);
 		if (!member) return;
-		const current = this.actionContext();
-		const category = actionCategory(action);
-		if (
-			(["skip", "remove", "reorder", "seek", "playback"].includes(category) &&
-				context.instance !== current.instance) ||
-			(["remove", "reorder"].includes(category) &&
-				context.queueKey !== current.queueKey)
-		) {
+		if (actionContextError(action, context, this.actionContext())) {
 			this.send(connection, {
 				type: "action-result",
 				id,
@@ -1232,19 +1224,12 @@ export class ListenRoom {
 						throw new Error(
 							"The host changed the permissions for this action.",
 						);
-					const context = this.actionContext();
-					if (
-						["skip", "remove", "reorder", "seek", "playback"].includes(
-							category,
-						) &&
-						request.context.instance !== context.instance
-					)
-						throw new Error("The track changed. Please try again.");
-					if (
-						["remove", "reorder"].includes(category) &&
-						request.context.queueKey !== context.queueKey
-					)
-						throw new Error("The queue changed. Please try again.");
+					const contextError = actionContextError(
+						request.action,
+						request.context,
+						this.actionContext(),
+					);
+					if (contextError) throw new Error(contextError);
 					if (!this.actionHandler)
 						throw new Error("The host player is not ready yet.");
 					await this.actionHandler(

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SyncEngine, type SyncTransport } from "./engine";
 import {
 	compareEdits,
@@ -62,22 +62,24 @@ function device(
 			persisted = structuredClone(journal);
 		},
 	});
+	const captureAt = (time?: number) => {
+		const clock =
+			time === undefined ? undefined : spyOn(Date, "now").mockReturnValue(time);
+		try {
+			engine.capture();
+		} finally {
+			clock?.mockRestore();
+		}
+	};
 	return {
 		engine,
 		edit: (next: Snapshot, time?: number) => {
 			local = { ...local, ...next };
-			engine.capture();
-			if (time !== undefined)
-				for (const key of Object.keys(next)) {
-					const pending = engine.journal.pending[key];
-					if (pending) pending.modified_at = time;
-				}
+			captureAt(time);
 		},
 		remove: (key: string, time?: number) => {
 			delete local[key];
-			engine.capture();
-			if (time !== undefined && engine.journal.pending[key])
-				engine.journal.pending[key].modified_at = time;
+			captureAt(time);
 		},
 		read: () => local,
 		saved: () => persisted,
@@ -330,6 +332,127 @@ describe("account sync", () => {
 		await restart.engine.sync();
 		expect(restart.saved().pending).toEqual({});
 		expect(s.records.get("settings/cleanTitles")?.revision).toBe(1);
+	});
+
+	test("a partial local projection survives restart without publishing stale values as edits", async () => {
+		const cloud = server();
+		const desired = { title: true, fade: 8, repeat: "all", autoplay: true };
+		const pc = device(cloud.transport, desired);
+		await pc.engine.sync();
+
+		let local: Snapshot = {
+			title: false,
+			fade: 3,
+			repeat: "off",
+			autoplay: true,
+		};
+		let saved = createJournal(local);
+		let storageFull = true;
+		const writes: string[] = [];
+		const transport: SyncTransport = {
+			...cloud.transport,
+			write: (key, pending) => {
+				writes.push(key);
+				return cloud.transport.write(key, pending);
+			},
+		};
+		const open = () =>
+			new SyncEngine(structuredClone(saved), transport, {
+				read: () => ({ ...local }),
+				apply: (next) => {
+					local.title = next.title;
+					if (storageFull) throw new Error("settings storage is full");
+					local = { ...next };
+				},
+				save: (journal) => {
+					saved = structuredClone(journal);
+				},
+			});
+		const mobile = open();
+		local.autoplay = false;
+		mobile.capture();
+		await expect(mobile.sync()).rejects.toThrow("storage is full");
+		expect(local).toEqual({
+			title: true,
+			fade: 3,
+			repeat: "off",
+			autoplay: false,
+		});
+		expect(writes).toEqual([]);
+		mobile.stop();
+
+		// This edit happened after the failed write, so it can be distinguished
+		// even when it targets a setting the partial projection missed.
+		local.repeat = "one";
+		storageFull = false;
+		const restarted = open();
+		await restarted.sync();
+		await restarted.sync();
+		expect(local).toEqual({
+			title: true,
+			fade: 8,
+			repeat: "one",
+			autoplay: false,
+		});
+		expect(writes.sort()).toEqual(["autoplay", "repeat"]);
+		expect(cloud.records.get("fade")).toMatchObject({ value: 8, revision: 1 });
+		expect(cloud.records.get("repeat")).toMatchObject({
+			value: "one",
+			revision: 2,
+		});
+	});
+
+	test("an interrupted projection conservatively retries affected keys and retains unrelated edits", async () => {
+		const cloud = server();
+		const pc = device(cloud.transport, {
+			volume: 7,
+			title: "remote",
+			autoplay: true,
+		});
+		await pc.engine.sync();
+
+		let local: Snapshot = { volume: 2, title: "local", autoplay: true };
+		let saved = createJournal(local);
+		let failProjection = true;
+		let canSave = true;
+		const open = () =>
+			new SyncEngine(structuredClone(saved), cloud.transport, {
+				read: () => ({ ...local }),
+				apply: (next) => {
+					if (failProjection) {
+						// The old process reached the first store and exited before it
+						// could persist what had successfully landed there.
+						local.title = "normalized-remote";
+						canSave = false;
+						throw new Error("projection interrupted");
+					}
+					local = { ...next };
+				},
+				save: (journal) => {
+					if (!canSave) throw new Error("checkpoint unavailable");
+					saved = structuredClone(journal);
+				},
+			});
+		const mobile = open();
+		await expect(mobile.sync()).rejects.toThrow("checkpoint unavailable");
+		mobile.stop();
+		local.autoplay = false;
+		failProjection = false;
+		canSave = true;
+		await open().sync();
+		expect(local).toEqual({ volume: 7, title: "remote", autoplay: false });
+		expect(cloud.records.get("volume")).toMatchObject({
+			value: 7,
+			revision: 1,
+		});
+		expect(cloud.records.get("title")).toMatchObject({
+			value: "remote",
+			revision: 1,
+		});
+		expect(cloud.records.get("autoplay")).toMatchObject({
+			value: false,
+			revision: 2,
+		});
 	});
 
 	test("edits made during a network request stay pending for the next sync", async () => {

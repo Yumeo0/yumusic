@@ -38,7 +38,7 @@ function needsRomanization(lines: string[]): boolean {
  * reading matches its original line, the result is empty: showing the same
  * text twice adds nothing.
  */
-export async function romanizeLines(
+async function romanizeLines(
 	lines: string[],
 	signal?: AbortSignal,
 ): Promise<Map<number, string>> {
@@ -57,16 +57,6 @@ export async function romanizeLines(
 		if (readingKey(reading) !== readingKey(lines[i] ?? "")) return map;
 	}
 	return EMPTY;
-}
-
-export async function romanizeLine(text: string): Promise<string | null> {
-	try {
-		const [result] = await romanizer.request([text]);
-		const trimmed = result?.trim();
-		return trimmed && readingKey(trimmed) !== readingKey(text) ? trimmed : null;
-	} catch {
-		return null;
-	}
 }
 
 /**

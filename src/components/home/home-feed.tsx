@@ -41,23 +41,21 @@ import {
 	feedItemKey,
 	feedSongs,
 	type HomeSection,
-	withUpdatedSong,
 } from "@/lib/youtube/feed-items";
 import {
 	getHomeFeed,
 	patchCachedHomeFeedSong,
 	readCachedHomeFeed,
+	subscribeToHomeFeed,
 } from "@/lib/youtube/home-feed-cache";
-import { enrichSongRows } from "@/lib/youtube/song-description";
+import { createSongRowEnrichment } from "@/lib/youtube/song-description";
 
-/** Matches Tailwind's `md` breakpoint; below it the feed uses compact rows. */
 /** Devices with a touchscreen — the only ones that can swipe rows. */
 const TOUCH_QUERY = "(any-pointer: coarse)";
 /** Rows per home section on phones before "Show more". */
 const MOBILE_SECTION_PREVIEW = 5;
 const SWIPE_HINT_KEY = "yumusic:swipe-queue-hint";
 
-/** Per-section menu; currently exposes hiding the row. */
 function SectionMenu({ title, onHide }: { title: string; onHide: () => void }) {
 	return (
 		<Menu.Root>
@@ -383,22 +381,6 @@ export function HomeFeed() {
 	// Video cards already resolved to their song version while playing.
 	const versions = useSongVersionReplacements();
 
-	const removeFeedItem = (id: string) =>
-		setSections((prev) =>
-			prev
-				? prev.map((section) => ({
-						...section,
-						items: section.items.filter(
-							(entry) =>
-								entry.kind === "song" ||
-								entry.kind === "artist" ||
-								entry.kind === "navigation" ||
-								entry.id !== id,
-						),
-					}))
-				: prev,
-		);
-
 	const dismissSwipeHint = () => {
 		setSwipeHint(false);
 		try {
@@ -454,29 +436,20 @@ export function HomeFeed() {
 	useEffect(() => {
 		let cancelled = false;
 		let totalSections = 0;
-		const cancels: Array<() => void> = [];
-		const applyUpdatedSong = (updated: Song): void => {
-			setSections((prev) => (prev ? withUpdatedSong(prev, updated) : prev));
-			// Keep the cached feed in step with what the view resolved, so
-			// reopening within the TTL skips the enrichment request entirely.
-			patchCachedHomeFeedSong(updated);
-		};
-		const enrich = (list: HomeSection[]) => {
-			const songs = feedSongs(list);
-			if (songs.length === 0) return;
-			cancels.push(
-				enrichSongRows(songs, applyUpdatedSong, playingIdRef.current),
-			);
-		};
-		setLoadingMore(true);
-		void getHomeFeed((loaded) => {
-			if (cancelled) return;
+		const enrichment = createSongRowEnrichment(patchCachedHomeFeedSong);
+		const receive = (loaded: HomeSection[]) => {
 			const added = loaded.slice(totalSections);
 			totalSections = loaded.length;
 			setSections(loaded);
 			setFailed(false);
-			enrich(added);
-		})
+			if (added.length > 0)
+				enrichment.add(feedSongs(added), playingIdRef.current);
+		};
+		const unsubscribe = subscribeToHomeFeed(receive);
+		const cached = readCachedHomeFeed();
+		if (cached) receive(cached);
+		setLoadingMore(true);
+		void getHomeFeed()
 			.catch((error) => {
 				console.warn("[HomeFeed] failed to preload recommendations:", error);
 				// Keep any sections already loaded if a later page fails.
@@ -494,7 +467,8 @@ export function HomeFeed() {
 
 		return () => {
 			cancelled = true;
-			for (const cancel of cancels) cancel();
+			unsubscribe();
+			enrichment.cancel();
 		};
 	}, []);
 
@@ -556,36 +530,41 @@ export function HomeFeed() {
 		);
 	}
 
-	const visibleSections = sections.filter(
-		(section) =>
+	const sectionEntries = sections
+		.map((section, index) => ({ section, index }))
+		.filter(({ section }) => section.items.length > 0);
+	const visibleSections = sectionEntries.filter(
+		({ section }) =>
 			!isHomeSectionHidden(section.title, settings.hiddenHomeSections),
 	);
-	const firstSongSection = visibleSections.findIndex((section) =>
+	const firstSongSection = visibleSections.find(({ section }) =>
 		section.items.some((item) => item.kind === "song"),
-	);
+	)?.index;
 
 	return (
 		<div>
-			{visibleSections.length === 0 && !loadingMore && (
-				<p className="py-6 text-sm text-muted-foreground/70">
-					All home sections are hidden. Restore them in Settings → Home feed.
-				</p>
-			)}
-			{visibleSections.map((section, si) => {
-				const sectionKey = `feed-section-${si}`;
+			{visibleSections.length === 0 &&
+				sectionEntries.length > 0 &&
+				!loadingMore && (
+					<p className="py-6 text-sm text-muted-foreground/70">
+						All home sections are hidden. Restore them in Settings → Home feed.
+					</p>
+				)}
+			{visibleSections.map(({ section, index: sectionIndex }, visibleIndex) => {
+				const sectionKey = `feed-section-${sectionIndex}`;
 				const expanded = expandedSections.has(sectionKey);
 				const shownItems =
 					isMobile && !expanded
 						? section.items.slice(0, MOBILE_SECTION_PREVIEW)
 						: section.items;
-				const showHint = swipeEnabled && si === firstSongSection && swipeHint;
+				const showHint =
+					swipeEnabled && sectionIndex === firstSongSection && swipeHint;
 
 				return (
 					<section
 						className="animate-track-in pb-3"
-						// biome-ignore lint/suspicious/noArrayIndexKey: home feed sections may repeat titles
-						key={`feed-${section.title}-${si}`}
-						style={{ animationDelay: `${Math.min(si * 40, 160)}ms` }}
+						key={`feed-${section.title}-${sectionIndex}`}
+						style={{ animationDelay: `${Math.min(visibleIndex * 40, 160)}ms` }}
 					>
 						<div className="group/section mb-4 flex items-center gap-2">
 							<h2 className="text-sm font-medium text-muted-foreground">
@@ -599,142 +578,100 @@ export function HomeFeed() {
 								/>
 							)}
 						</div>
-						{isMobile ? (
-							<div className="space-y-0.5">
-								{showHint && <SwipeQueueHint onDismiss={dismissSwipeHint} />}
-								{shownItems.map((item, i) => {
-									// A video resolved to its album track while playing
-									// is shown and played as that song.
-									const song =
-										item.kind === "song"
-											? (versions.get(item.song.id) ?? item.song)
-											: null;
-									const onOpen =
-										item.kind === "song"
-											? () => playFromSection(section, i, song ?? item.song)
-											: item.kind === "artist"
-												? () => navigate(`/artist/${item.id}`)
-												: item.kind === "navigation"
-													? () =>
-															navigate(`/?q=${encodeURIComponent(item.label)}`)
-													: () => navigate(`/playlists/${item.id}`);
-									const key = `${feedItemKey(item)}-${i}`;
-									if (item.kind === "song") {
-										const row = (
-											<FeedRow
-												isCurrent={currentSong?.id === (song ?? item.song).id}
-												item={{
-													...item,
-													song: song ?? item.song,
-												}}
-												onClick={onOpen}
-												swipeEnabled={swipeEnabled}
-											/>
-										);
-										return (
-											<SongContextMenu key={key} song={song ?? item.song}>
-												{swipeEnabled ? (
-													<SwipeToQueue
-														onQueue={() => queueSong(song ?? item.song)}
-														song={song ?? item.song}
-													>
-														{row}
-													</SwipeToQueue>
-												) : (
-													row
-												)}
-											</SongContextMenu>
-										);
+						<div
+							className={
+								isMobile
+									? "space-y-0.5"
+									: "-mx-1 flex gap-4 overflow-x-auto px-1 pb-2"
+							}
+						>
+							{showHint && <SwipeQueueHint onDismiss={dismissSwipeHint} />}
+							{shownItems.map((item, index) => {
+								const shown =
+									item.kind === "song"
+										? { ...item, song: versions.get(item.song.id) ?? item.song }
+										: item;
+								const onOpen = () => {
+									switch (shown.kind) {
+										case "song":
+											playFromSection(section, index, shown.song);
+											break;
+										case "artist":
+											navigate(`/artist/${shown.id}`);
+											break;
+										case "navigation":
+											navigate(`/?q=${encodeURIComponent(shown.label)}`);
+											break;
+										case "album":
+										case "playlist":
+											navigate(`/playlists/${shown.id}`);
+											break;
 									}
-									if (item.kind === "playlist" || item.kind === "album") {
-										return (
-											<PlaylistContextMenu
-												isPinned={isPinned(item.id)}
-												key={key}
-												onDeleted={() => removeFeedItem(item.id)}
-												onTogglePinned={() =>
-													togglePinned({
-														id: item.id,
-														thumbnail: item.thumbnail,
-														title: item.title,
-													})
-												}
-												playlist={item}
-											>
-												<FeedRow item={item} onClick={onOpen} />
-											</PlaylistContextMenu>
-										);
-									}
-									return <FeedRow item={item} key={key} onClick={onOpen} />;
-								})}
-								{section.items.length > MOBILE_SECTION_PREVIEW && (
-									<button
-										aria-expanded={expanded}
-										className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-foreground/5 hover:text-foreground"
-										onClick={() => toggleSection(sectionKey)}
-										type="button"
-									>
-										{expanded ? (
-											<ChevronUp className="size-3.5" />
-										) : (
-											<ChevronDown className="size-3.5" />
-										)}
-										{expanded ? "Show less" : "Show more"}
-									</button>
-								)}
-							</div>
-						) : (
-							<div className="-mx-1 flex gap-4 overflow-x-auto px-1 pb-2">
-								{section.items.map((item, i) => {
-									// A video resolved to its album track while playing
-									// is shown and played as that song.
-									const song =
-										item.kind === "song"
-											? (versions.get(item.song.id) ?? item.song)
-											: null;
-									const onOpen =
-										item.kind === "song"
-											? () => playFromSection(section, i, song ?? item.song)
-											: item.kind === "artist"
-												? () => navigate(`/artist/${item.id}`)
-												: item.kind === "navigation"
-													? () =>
-															navigate(`/?q=${encodeURIComponent(item.label)}`)
-													: () => navigate(`/playlists/${item.id}`);
-									const key = `${feedItemKey(item)}-${i}`;
-									if (item.kind === "song") {
-										return (
-											<SongContextMenu key={key} song={song ?? item.song}>
-												<FeedCard
-													item={{ ...item, song: song ?? item.song }}
-													onClick={onOpen}
-												/>
-											</SongContextMenu>
-										);
-									}
-									if (item.kind === "playlist" || item.kind === "album") {
-										return (
-											<PlaylistContextMenu
-												isPinned={isPinned(item.id)}
-												key={key}
-												onDeleted={() => removeFeedItem(item.id)}
-												onTogglePinned={() =>
-													togglePinned({
-														id: item.id,
-														thumbnail: item.thumbnail,
-														title: item.title,
-													})
-												}
-												playlist={item}
-											>
-												<FeedCard item={item} onClick={onOpen} />
-											</PlaylistContextMenu>
-										);
-									}
-									return <FeedCard item={item} key={key} onClick={onOpen} />;
-								})}
-							</div>
-						)}
+								};
+								const key = `${feedItemKey(item)}-${index}`;
+								const card = isMobile ? (
+									<FeedRow
+										isCurrent={
+											shown.kind === "song" && currentSong?.id === shown.song.id
+										}
+										item={shown}
+										key={key}
+										onClick={onOpen}
+										swipeEnabled={shown.kind === "song" && swipeEnabled}
+									/>
+								) : (
+									<FeedCard item={shown} key={key} onClick={onOpen} />
+								);
+								if (shown.kind === "song") {
+									const { song } = shown;
+									return (
+										<SongContextMenu key={key} song={song}>
+											{swipeEnabled ? (
+												<SwipeToQueue
+													onQueue={() => queueSong(song)}
+													song={song}
+												>
+													{card}
+												</SwipeToQueue>
+											) : (
+												card
+											)}
+										</SongContextMenu>
+									);
+								}
+								if (shown.kind === "playlist" || shown.kind === "album") {
+									const { id, thumbnail, title } = shown;
+									return (
+										<PlaylistContextMenu
+											isPinned={isPinned(id)}
+											key={key}
+											onTogglePinned={() =>
+												togglePinned({ id, thumbnail, title })
+											}
+											playlist={shown}
+										>
+											{card}
+										</PlaylistContextMenu>
+									);
+								}
+								return card;
+							})}
+							{isMobile && section.items.length > MOBILE_SECTION_PREVIEW && (
+								<button
+									aria-expanded={expanded}
+									className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-medium text-muted-foreground transition-colors duration-150 hover:bg-foreground/5 hover:text-foreground"
+									onClick={() => toggleSection(sectionKey)}
+									type="button"
+								>
+									{expanded ? (
+										<ChevronUp className="size-3.5" />
+									) : (
+										<ChevronDown className="size-3.5" />
+									)}
+									{expanded ? "Show less" : "Show more"}
+								</button>
+							)}
+						</div>
 					</section>
 				);
 			})}

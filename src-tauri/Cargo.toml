@@ -45,6 +45,8 @@ reqwest = { version = "0.13", default-features = false, features = [
   "rustls",
 ] }
 tokio = { version = "1", features = ["sync", "time", "net", "io-util"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
 discord-rich-presence = "1.1.0"
 
 # Self-updating is desktop-only; mobile builds must not pull the plugins in.

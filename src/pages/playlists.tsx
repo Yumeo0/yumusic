@@ -18,7 +18,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { PlaylistDownloadOffIcon } from "@/components/downloads/playlist-download-off-icon";
 import { EqualizerBars } from "@/components/player/waveform";
@@ -35,47 +35,24 @@ import { SongTitle } from "@/components/song/song-title";
 import { Input } from "@/components/ui/input";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import {
-	syncDownloadedPlaylist,
 	togglePlaylistDownload,
 	usePlaylistDownloaded,
 	usePlaylistDownloadJob,
 } from "@/lib/downloads/downloads";
-import type { LibraryPlaylist, PlaylistView } from "@/lib/music/playlist";
+import type { PlaylistTrack } from "@/lib/music/playlist";
 import type { Song } from "@/lib/music/song";
 import { shuffleFrom } from "@/lib/player/shuffle";
 import { shareLink } from "@/lib/services/share";
-import {
-	reconcilePinnedPlaylists,
-	usePinnedPlaylists,
-} from "@/lib/stores/pinned";
-import {
-	applyPlaylistChange,
-	patchCachedPlaylistSongs,
-	playlistRevision,
-	readFreshPlaylistView,
-	readLibraryCache,
-	readPlaylistView,
-	SYNC_INTERVAL_MS,
-	subscribeToLibraryChanges,
-	subscribeToPlaylistChanges,
-	writeLibraryCache,
-	writePlaylistView,
-} from "@/lib/stores/playlist-cache";
+import { usePinnedPlaylists } from "@/lib/stores/pinned";
 import { useSongVersionReplacements } from "@/lib/stores/song-versions";
 import { showToast } from "@/lib/stores/toast";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { useDisplayTitle } from "@/lib/utils/use-song-title";
 import { cn, parseDuration } from "@/lib/utils/utils";
-import {
-	cleanSubtitle,
-	loadPlaylistView,
-	mergePlaylistSongs,
-} from "@/lib/youtube/playlist-data";
 import { canonicalPlaylistId } from "@/lib/youtube/playlist-id";
-import { removePlaylistTrack } from "@/lib/youtube/playlist-mutations";
-import { enrichSongRows } from "@/lib/youtube/song-description";
+import { usePlaylistLibrary } from "@/lib/youtube/use-playlist-library";
+import { usePlaylistView } from "@/lib/youtube/use-playlist-view";
 import { isAlbumId } from "@/lib/youtube/youtube.utils";
-import { getLibraryPlaylists } from "../lib/youtube/youtube-client";
 
 type PlaylistSort =
 	| "newest"
@@ -100,27 +77,57 @@ const PLAYLIST_SORTS: Array<{ value: PlaylistSort; label: string }> = [
 
 export function PlaylistDetails() {
 	const { id } = useParams<{ id: string }>();
+	const [sort, setSort] = useState<PlaylistSort>("newest");
+	const [searchOpen, setSearchOpen] = useState(false);
+	return id ? (
+		<PlaylistDetailsView
+			id={id}
+			key={id}
+			searchOpen={searchOpen}
+			setSearchOpen={setSearchOpen}
+			setSort={setSort}
+			sort={sort}
+		/>
+	) : null;
+}
+
+function PlaylistDetailsView({
+	id,
+	searchOpen,
+	setSearchOpen,
+	setSort,
+	sort,
+}: {
+	id: string;
+	searchOpen: boolean;
+	setSearchOpen: (open: boolean) => void;
+	setSort: (sort: PlaylistSort) => void;
+	sort: PlaylistSort;
+}) {
 	const navigate = useNavigate();
 	const { play, playQueue, addToQueue, currentSong } = usePlayer();
 	const { isPlaying } = usePlayerControls();
-	const [playlist, setPlaylist] = useState<PlaylistView | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [refreshing, setRefreshing] = useState(false);
-	const [loadingMore, setLoadingMore] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const onDelete = useCallback(
+		() => navigate("/playlists", { replace: true }),
+		[navigate],
+	);
+	const {
+		playlist,
+		loading,
+		refreshing,
+		loadingMore,
+		error,
+		refresh,
+		removeTrack,
+	} = usePlaylistView(id, onDelete, currentSong?.id);
 	const [search, setSearch] = useState("");
-	const [searchOpen, setSearchOpen] = useState(false);
-	const [sort, setSort] = useState<PlaylistSort>("newest");
 	const displayTitle = useDisplayTitle();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
 	const [editOpen, setEditOpen] = useState(false);
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const downloadJob = usePlaylistDownloadJob(id);
-	const downloaded = usePlaylistDownloaded(id ?? "");
-	// Video entries already resolved to their song version while playing.
+	const downloaded = usePlaylistDownloaded(id);
 	const versions = useSongVersionReplacements();
-	/** Video id currently playing; prefetch skips it (playback enriches it). */
-	const playingId = currentSong?.id;
 
 	// Stable handlers for the memoized track rows: the latest visible list is
 	// read through a ref, so row props stay identical across batch appends.
@@ -134,199 +141,6 @@ export function PlaylistDetails() {
 		);
 	}, []);
 
-	// ── Background enrichment ────────────────────────────────────
-	// Uploader descriptions carry the real song credits ("Singer: X /
-	// Song: Y"); they resolve in the background, update the rendered rows and
-	// are patched into the playlist cache so the next visit skips the fetch.
-	// Uploader-video detection runs alongside it: reuploads (no release) keep
-	// their raw titles, which the rows must know about.
-	const enrichmentCancelRef = useRef<(() => void) | null>(null);
-	const pendingSongsRef = useRef(new Map<string, Song>());
-	const flushTimerRef = useRef<number | null>(null);
-
-	const flushEnrichedSongs = useCallback(() => {
-		flushTimerRef.current = null;
-		const pending = pendingSongsRef.current;
-		if (!id || pending.size === 0) return;
-		patchCachedPlaylistSongs(id, pending);
-		pending.clear();
-	}, [id]);
-
-	const applyEnrichedSong = useCallback(
-		(updated: Song) => {
-			setPlaylist((prev) =>
-				prev && prev.id === id
-					? {
-							...prev,
-							songs: prev.songs.map((song) =>
-								song.id === updated.id ? updated : song,
-							),
-						}
-					: prev,
-			);
-			// Cache writes are batched: one localStorage write per song
-			// would re-serialize the whole playlist on every arrival.
-			pendingSongsRef.current.set(updated.id, updated);
-			if (flushTimerRef.current === null) {
-				flushTimerRef.current = window.setTimeout(flushEnrichedSongs, 1500);
-			}
-		},
-		[id, flushEnrichedSongs],
-	);
-
-	const startEnrichment = useCallback(
-		(songs: Song[]) => {
-			enrichmentCancelRef.current?.();
-			enrichmentCancelRef.current = enrichSongRows(
-				songs,
-				applyEnrichedSong,
-				playingId,
-			);
-		},
-		[applyEnrichedSong, playingId],
-	);
-
-	// Leaving the playlist (or switching to another one) stops the prefetch
-	// and flushes whatever resolved so far into the cache.
-	useEffect(() => {
-		return () => {
-			enrichmentCancelRef.current?.();
-			if (flushTimerRef.current !== null) {
-				window.clearTimeout(flushTimerRef.current);
-				flushTimerRef.current = null;
-			}
-			flushEnrichedSongs();
-		};
-	}, [flushEnrichedSongs]);
-
-	const requestRef = useRef<AbortController | null>(null);
-	const fetchPlaylist = async (force = false) => {
-		if (!id) return;
-		requestRef.current?.abort();
-		const request = new AbortController();
-		requestRef.current = request;
-		const revision = playlistRevision(id);
-		const keepEditedView = () => {
-			if (playlistRevision(id) === revision) return false;
-			const latest = readPlaylistView(id);
-			if (!latest) return false;
-			setPlaylist({ ...latest.data, id });
-			request.abort();
-			setLoading(false);
-			setRefreshing(false);
-			setLoadingMore(false);
-			return true;
-		};
-
-		const fresh = force ? null : readFreshPlaylistView(id);
-		setLoadingMore(false);
-		setError(null);
-		if (fresh) {
-			setPlaylist({ ...fresh, id });
-			setLoading(false);
-			setRefreshing(false);
-			syncDownloadedPlaylist(id, fresh.title, fresh.songs);
-			startEnrichment(fresh.songs);
-			return;
-		}
-
-		const cached = readPlaylistView(id);
-		const hasContent = !!cached || playlist?.id === id;
-		setLoading(!hasContent);
-		setRefreshing(hasContent);
-		if (cached)
-			setPlaylist((prev) => (prev?.id === id ? prev : { ...cached.data, id }));
-
-		try {
-			const view = await loadPlaylistView(id, {
-				signal: request.signal,
-				onFirstPage: (first) => {
-					if (keepEditedView()) return;
-					// Refresh keeps previous rows visible until all pages arrive.
-					if (!hasContent) setPlaylist(first);
-					setLoading(false);
-					setLoadingMore(!first.complete);
-				},
-				onContinuation: (batch) => {
-					if (keepEditedView() || hasContent) return;
-					setPlaylist((prev) =>
-						prev?.id === id
-							? { ...prev, songs: [...prev.songs, ...batch] }
-							: prev,
-					);
-				},
-			});
-			if (keepEditedView()) return;
-			if (!view) {
-				if (hasContent) showToast("Could not refresh playlist");
-				else
-					setError(
-						isAlbumId(id)
-							? "Failed to load album."
-							: "Failed to load playlist.",
-					);
-				return;
-			}
-
-			setPlaylist((prev) =>
-				hasContent && prev?.id === id
-					? { ...view, songs: mergePlaylistSongs(prev.songs, view.songs) }
-					: view,
-			);
-			if (playlistRevision(id) === revision)
-				writePlaylistView(id, view, { keepComplete: true });
-			startEnrichment(view.songs);
-			syncDownloadedPlaylist(id, view.title, view.songs);
-		} catch (err) {
-			if (request.signal.aborted) return;
-			console.error("Error fetching playlist:", err);
-			if (hasContent) showToast("Could not refresh playlist");
-			else setError("Failed to load playlist.");
-		} finally {
-			if (!request.signal.aborted) {
-				setLoading(false);
-				setRefreshing(false);
-				setLoadingMore(false);
-			}
-		}
-	};
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: a new route id owns a new request.
-	useEffect(() => {
-		void fetchPlaylist();
-		setSearch("");
-		return () => requestRef.current?.abort();
-	}, [id]);
-	useEffect(() => {
-		if (!id) return;
-		return subscribeToPlaylistChanges(id, (change) => {
-			if (change.type === "delete") {
-				requestRef.current?.abort();
-				navigate("/playlists", { replace: true });
-				return;
-			}
-			setPlaylist((prev) => {
-				if (!prev || prev.id !== id) return prev;
-				const next = applyPlaylistChange(prev, change);
-				// A first page can be visible before it has a cache entry.
-				if (!readPlaylistView(id)) writePlaylistView(id, next);
-				return next;
-			});
-		});
-	}, [id, navigate]);
-
-	// The pinned sidebar entry stores its cover from pin time; refresh it
-	// whenever this page has fresher metadata (cached or fetched) so a dead
-	// or outdated URL heals even for playlists that aren't in the library.
-	useEffect(() => {
-		if (!id || !playlist) return;
-		reconcilePinnedPlaylists([
-			{ id, title: playlist.title, thumbnail: playlist.thumbnail },
-		]);
-	}, [id, playlist]);
-
-	// Return to wherever the user came from (home, search, an artist, another
-	// playlist…), not a fixed destination.
 	const onBack = () => navigate(-1);
 
 	const sharePlaylist = () => {
@@ -338,23 +152,17 @@ export function PlaylistDetails() {
 		});
 	};
 
-	/**
-	 * Removes one playlist entry. The row index keeps a duplicated video from
-	 * clearing every occurrence locally; the server removes the entry matched
-	 * by its set-video id.
-	 */
 	const removeSong = useCallback(
-		async (song: Song, index: number) => {
-			if (!id) return;
+		async (song: PlaylistTrack, index: number) => {
 			try {
-				await removePlaylistTrack(id, song.id, index);
+				await removeTrack(song, index);
 				showToast("Removed from playlist");
 			} catch (error) {
 				console.error("[YuMusic] remove from playlist failed:", error);
 				showToast("Could not remove from playlist");
 			}
 		},
-		[id],
+		[removeTrack],
 	);
 
 	if (loading) {
@@ -451,6 +259,7 @@ export function PlaylistDetails() {
 	const rowKeys = (() => {
 		const occurrence = new Map<string, number>();
 		return visible.map(({ song }) => {
+			if (song.entryId) return `entry:${song.entryId}`;
 			const count = occurrence.get(song.id) ?? 0;
 			occurrence.set(song.id, count + 1);
 			return `${song.id}#${count}`;
@@ -513,7 +322,7 @@ export function PlaylistDetails() {
 					<button
 						className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
 						disabled={refreshing}
-						onClick={() => fetchPlaylist(true)}
+						onClick={() => void refresh(true)}
 						title="Refresh playlist"
 						type="button"
 					>
@@ -818,7 +627,7 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 	onRemove,
 }: {
 	/** The playlist's own entry, used when removing it. */
-	song: Song;
+	song: PlaylistTrack;
 	/** The song as shown and queued: its album track, when one was resolved. */
 	displaySong: Song;
 	/** Display position, used to start playback at this row. */
@@ -831,7 +640,7 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 	editable: boolean;
 	onPlay: (position: number) => void;
 	onQueue: (songs: Song[]) => void;
-	onRemove?: (song: Song, index: number) => void;
+	onRemove?: (song: PlaylistTrack, index: number) => void;
 }) {
 	return (
 		<SongContextMenu
@@ -918,66 +727,7 @@ const PlaylistTrackRow = memo(function PlaylistTrackRow({
 export default function PlaylistsPage() {
 	const navigate = useNavigate();
 	const { isPinned, togglePinned } = usePinnedPlaylists();
-	const [playlists, setPlaylists] = useState<LibraryPlaylist[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-
-	const fetchPlaylists = async (force = false) => {
-		const cached = readLibraryCache();
-		// An empty cached list is treated as absent: it usually means a fetch
-		// raced the login cookie, and caching it for 24h would pin the
-		// "no playlists" state even after the session is available.
-		const cacheUsable = !!cached && cached.data.length > 0;
-		if (
-			!force &&
-			cached &&
-			cacheUsable &&
-			Date.now() - cached.timestamp < SYNC_INTERVAL_MS
-		) {
-			setPlaylists(cached.data);
-			setLoading(false);
-			return;
-		}
-
-		try {
-			setLoading(true);
-			setError(null);
-			const list = (await getLibraryPlaylists(force)).map((playlist) => ({
-				...playlist,
-				subtitle: cleanSubtitle(playlist.subtitle),
-			}));
-			setPlaylists(list);
-			reconcilePinnedPlaylists(list);
-			if (list.length > 0) writeLibraryCache(list);
-		} catch (err) {
-			console.error("Error fetching playlists:", err);
-			// Stale cache beats an error screen
-			if (cacheUsable && cached) setPlaylists(cached.data);
-			else setError("Failed to load playlists.");
-		} finally {
-			setLoading(false);
-		}
-	};
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylists changes on every re-render and should not be used as a hook dependency.
-	useEffect(() => {
-		fetchPlaylists();
-	}, []);
-
-	// A playlist was created (or the library otherwise changed) elsewhere:
-	// bypass the cache and refresh the grid in place.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: fetchPlaylists changes on every re-render and should not be used as a hook dependency.
-	useEffect(
-		() =>
-			subscribeToLibraryChanges(() => {
-				const cached = readLibraryCache();
-				if (cached) {
-					setPlaylists(cached.data);
-					reconcilePinnedPlaylists(cached.data);
-				} else void fetchPlaylists(true);
-			}),
-		[],
-	);
+	const { playlists, loading, failed, refresh } = usePlaylistLibrary();
 
 	if (loading) {
 		return (
@@ -998,10 +748,12 @@ export default function PlaylistsPage() {
 		);
 	}
 
-	if (error) {
+	if (failed) {
 		return (
 			<div className="mx-auto w-full max-w-5xl px-6 pt-6 sm:px-10 sm:pt-10">
-				<h2 className="text-lg font-semibold text-destructive">{error}</h2>
+				<h2 className="text-lg font-semibold text-destructive">
+					Failed to load playlists.
+				</h2>
 			</div>
 		);
 	}
@@ -1013,7 +765,7 @@ export default function PlaylistsPage() {
 				<button
 					className="grid size-9 place-items-center rounded-full text-muted-foreground transition-colors duration-200 hover:bg-foreground/8 hover:text-foreground"
 					disabled={loading}
-					onClick={() => fetchPlaylists(true)}
+					onClick={() => void refresh(true)}
 					title="Refresh library"
 					type="button"
 				>
@@ -1022,15 +774,10 @@ export default function PlaylistsPage() {
 			</div>
 
 			<div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-				{playlists.map((item, index) => (
+				{playlists?.map((item, index) => (
 					<PlaylistContextMenu
 						isPinned={isPinned(item.id)}
 						key={item.id}
-						onDeleted={() =>
-							setPlaylists((prev) =>
-								prev.filter((playlist) => playlist.id !== item.id),
-							)
-						}
 						onTogglePinned={() =>
 							togglePinned({
 								id: item.id,
@@ -1108,7 +855,7 @@ export default function PlaylistsPage() {
 					</PlaylistContextMenu>
 				))}
 			</div>
-			{playlists.length === 0 && (
+			{playlists?.length === 0 && (
 				<p className="py-12 text-sm text-muted-foreground">
 					No playlists found in your library yet.
 				</p>

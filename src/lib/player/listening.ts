@@ -20,10 +20,15 @@ export function scrobbleThresholdSeconds(duration: number): number {
 
 export type ListeningEvent = "established" | "scrobbled";
 
-type Listener = (event: ListeningEvent, songId: string) => void;
+type Listener = (
+	event: ListeningEvent,
+	songId: string,
+	startedAt: number,
+) => void;
 
 class ListeningSession {
 	#songId: string | null = null;
+	#startedAt = 0;
 	#duration = 0;
 	#elapsed = 0;
 	#established = false;
@@ -33,6 +38,7 @@ class ListeningSession {
 	/** A repeated song counts as a fresh listen even though its id is unchanged. */
 	reset() {
 		this.#songId = null;
+		this.#startedAt = 0;
 		this.#elapsed = 0;
 		this.#duration = 0;
 		this.#established = false;
@@ -46,13 +52,14 @@ class ListeningSession {
 	 * Infinity until its metadata (MediaSource) is ready, and letting that in
 	 * would pin the scrobble threshold to its 4-minute fallback forever.
 	 */
-	start(songId: string, duration = 0) {
+	start(songId: string, duration = 0, now = Date.now()) {
 		const seconds = Number.isFinite(duration) ? duration : 0;
 		if (this.#songId === songId) {
 			if (seconds > 0) this.#duration = seconds;
 			return;
 		}
 		this.#songId = songId;
+		this.#startedAt = Math.floor(now / 1000);
 		this.#duration = seconds;
 		this.#elapsed = 0;
 		this.#established = false;
@@ -93,7 +100,8 @@ class ListeningSession {
 
 	#emit(event: ListeningEvent) {
 		if (!this.#songId) return;
-		for (const listener of this.#listeners) listener(event, this.#songId);
+		for (const listener of this.#listeners)
+			listener(event, this.#songId, this.#startedAt);
 	}
 }
 

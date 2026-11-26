@@ -1,11 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-	createNonce,
-	generateRoomIdentity,
-	validPublicKey,
-	validSignature,
-	verifyIdentity,
-} from "./identity";
+import { createNonce, generateRoomIdentity, verifyIdentity } from "./identity";
 
 const profile = { username: "Friend", avatar: null };
 const challenge = () => ({
@@ -37,8 +31,6 @@ describe("signed room identities", () => {
 		const identity = await generateRoomIdentity();
 		const c = challenge();
 		const signature = await identity.sign(c, "invite", profile);
-		expect(validPublicKey(identity.publicKey)).toBe(true);
-		expect(validSignature(signature)).toBe(true);
 		expect(
 			await verifyIdentity(identity.publicKey, c, "invite", profile, signature),
 		).toBe(identity.fingerprint);

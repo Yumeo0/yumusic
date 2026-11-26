@@ -1,15 +1,9 @@
-// `bun release patch|minor|major [--no-push]`
-//
-// Bumps the app version everywhere it lives (package.json, the Tauri config,
-// Cargo.toml and Cargo.lock), commits it as "chore: release vX.Y.Z", tags the
-// commit and pushes the branch and tag so the release workflow builds and
-// publishes the signed bundles and updater manifest. Pass --no-push to keep
-// the commit and tag local.
+import { relative } from "node:path";
 import { file, fileURLToPath, write } from "bun";
 import { prepareReleaseChangelog } from "./changelog";
 import { runGit } from "./git";
 import { addMetainfoRelease } from "./metainfo";
-import { prepareVersionFiles, versionPaths } from "./stamp-version";
+import { prepareVersionFiles } from "./stamp-version";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const BUMPS = ["patch", "minor", "major"] as const;
@@ -77,16 +71,17 @@ const metainfo = addMetainfoRelease(
 	version,
 	date,
 );
-for (const { path, contents } of await prepareVersionFiles(version))
-	await write(path, contents);
-await write(metainfoPath, metainfo);
-await write(changelogPath, changelog);
+const changes = [
+	...(await prepareVersionFiles(version)),
+	{ path: metainfoPath, contents: metainfo },
+	{ path: changelogPath, contents: changelog },
+];
+for (const { path, contents } of changes) await write(path, contents);
 
 gitInherit(
 	"add",
-	"CHANGELOG.md",
-	...versionPaths,
-	"src-tauri/linux/dev.yumeo.yumusic.metainfo.xml",
+	"--",
+	...changes.map(({ path }) => relative(ROOT, fileURLToPath(path))),
 );
 gitInherit("commit", "-m", `chore: release ${tag}`);
 gitInherit("tag", tag);

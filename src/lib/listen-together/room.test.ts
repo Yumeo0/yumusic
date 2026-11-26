@@ -318,27 +318,30 @@ describe("PeerJS room lifecycle", () => {
 		await until(guest, (s) => s.status === "connected" && !!s.playback);
 		expect(guest.getSnapshot().playback?.autoplayQueue).toEqual(state.queue);
 		const applied: RoomAction[] = [];
+		let actionApplied = Promise.withResolvers<void>();
 		host.setActionHandler((action) => {
 			applied.push(action);
+			actionApplied.resolve();
 		});
 		for (const mode of ["allow", "suggest"] as const) {
 			host.setGuestPermissions({ ...defaultPermissions, add: mode });
-			await flush();
+			await until(guest, (s) => s.permissions.add === mode);
+			actionApplied = Promise.withResolvers<void>();
 			guest.requestAction({
 				type: "add",
 				songs: state.queue.map((song) => ({ ...song, addedBy: "Host" })),
 			});
-			await flush();
 			if (mode === "suggest") {
+				await until(host, (s) => s.requests.length === 1);
 				host.resolveRequest(host.getSnapshot().requests[0].id, true);
-				await flush();
 			}
+			await actionApplied.promise;
 		}
 		expect(
 			applied.map((action) => action.type === "add" && action.songs[0].addedBy),
 		).toEqual(["Guest", "Guest"]);
 		host.broadcastPlayback({ ...state, autoplayEnabled: false });
-		await flush();
+		await until(guest, (s) => s.playback?.autoplayEnabled === false);
 		expect(guest.getSnapshot().playback?.autoplayEnabled).toBe(false);
 		expect(guest.getSnapshot().playback?.autoplayQueue).toEqual([]);
 	});
@@ -506,11 +509,12 @@ describe("PeerJS room lifecycle", () => {
 		await host.connect(profile("Host"));
 		host.broadcastPlayback(state);
 		await guest.connect(profile("Guest"), host.getSnapshot().invite);
-		await until(guest, (s) => s.status === "connected");
-		await flush();
+		await until(guest, (s) => s.status === "connected" && !!s.playback);
 		const applied: RoomAction[] = [];
+		let actionApplied = Promise.withResolvers<void>();
 		host.setActionHandler((action) => {
 			applied.push(action);
+			actionApplied.resolve();
 		});
 		const actions: [PermissionCategory, RoomAction][] = [
 			[
@@ -528,18 +532,18 @@ describe("PeerJS room lifecycle", () => {
 		for (const [category, action] of actions) {
 			for (const mode of ["allow", "suggest", "deny"] as const) {
 				host.setGuestPermissions({ ...defaultPermissions, [category]: mode });
-				await flush();
+				await until(guest, (s) => s.permissions[category] === mode);
+				actionApplied = Promise.withResolvers<void>();
 				const previous = applied.length;
 				expect(guest.requestAction(action)).toBe(
 					mode === "deny" ? "denied" : "sent",
 				);
-				await flush();
 				if (mode === "suggest") {
+					await until(host, (s) => s.requests.length === 1);
 					expect(applied).toHaveLength(previous);
-					expect(host.getSnapshot().requests).toHaveLength(1);
 					host.resolveRequest(host.getSnapshot().requests[0].id, true);
-					await flush();
 				}
+				if (mode !== "deny") await actionApplied.promise;
 				expect(applied).toHaveLength(previous + (mode === "deny" ? 0 : 1));
 			}
 		}
@@ -622,7 +626,7 @@ describe("PeerJS room lifecycle", () => {
 		await host.connect(profile("Host"));
 		await guest.connect(profile("Guest"), host.getSnapshot().invite);
 		await until(guest, (s) => s.status === "connected");
-		guest.suggestSongs(state.queue);
+		guest.requestAction({ type: "add", songs: state.queue });
 		await until(host, (s) => s.requests.length > 0);
 		host.setGuestPermissions({ ...defaultPermissions, add: "deny" });
 		await flush();
@@ -789,11 +793,11 @@ describe("PeerJS room lifecycle", () => {
 		await flush();
 		expect(host.getSnapshot().members).toHaveLength(2);
 		guest.setProfile(profile("New name"));
-		await flush();
+		await until(guest, (s) => s.members[1]?.profile.username === "New name");
 		expect(host.getSnapshot().members[1].profile.username).toBe("New name");
 		expect(guest.getSnapshot().members[1].profile.username).toBe("New name");
-		guest.suggestSongs([state.song as NonNullable<typeof state.song>]);
-		await flush();
+		guest.requestAction({ type: "add", songs: state.queue });
+		await until(host, (s) => s.requests.length === 1);
 		expect(host.getSnapshot().requests[0].song?.id).toBe("abcdefghijk");
 		expect(host.getSnapshot().requests[0].profile.username).toBe("New name");
 		host.resolveRequest(host.getSnapshot().requests[0].id, false);
@@ -875,8 +879,7 @@ describe("PeerJS room lifecycle", () => {
 		[...network.peers.values()][1].channels[0].close();
 		expect(guest.getSnapshot().status).toBe("reconnecting");
 		await until(guest, (s) => s.status === "connected");
-		await flush();
-		expect(guest.getSnapshot().status).toBe("connected");
+		await until(guest, (s) => s.playback?.song?.id === "abcdefghijk");
 		expect(host.getSnapshot().pending).toHaveLength(0);
 		expect(guest.getSnapshot().playback?.song?.id).toBe("abcdefghijk");
 	});

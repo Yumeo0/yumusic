@@ -28,7 +28,7 @@ export function MediaSessionSync() {
 		hasNext,
 		next,
 		previous,
-		videoElementRef,
+		activeMedia,
 		seek,
 	} = usePlayer();
 	const { isPlaying, toggle } = usePlayerControls();
@@ -40,7 +40,6 @@ export function MediaSessionSync() {
 	const canGoNext = hasNext;
 	const canStepPrevious = currentIndex > 0;
 
-	// Media key presses are handled with the latest player state.
 	const live = useRef({
 		canGoNext,
 		canStepPrevious,
@@ -48,7 +47,7 @@ export function MediaSessionSync() {
 		next,
 		previous,
 		toggle,
-		videoElementRef,
+		activeMedia,
 		seek,
 	});
 	live.current = {
@@ -58,7 +57,7 @@ export function MediaSessionSync() {
 		next,
 		previous,
 		toggle,
-		videoElementRef,
+		activeMedia,
 		seek,
 	};
 
@@ -67,7 +66,7 @@ export function MediaSessionSync() {
 		let disposed = false;
 		let unlisten: (() => void) | undefined;
 		const handle = ({ action, position }: MediaControlPayload) => {
-			const video = live.current.videoElementRef?.current;
+			const video = live.current.activeMedia;
 			switch (action) {
 				case "play":
 					if (!live.current.isPlaying) live.current.toggle();
@@ -133,7 +132,7 @@ export function MediaSessionSync() {
 	// shows (the OS fetches the URL itself).
 	const push = useCallback(() => {
 		if (!isTauri()) return;
-		const video = videoElementRef?.current;
+		const video = activeMedia;
 		const duration =
 			video && Number.isFinite(video.duration) && video.duration > 0
 				? video.duration
@@ -159,14 +158,13 @@ export function MediaSessionSync() {
 		isPlaying,
 		songId,
 		title,
-		videoElementRef,
+		activeMedia,
 	]);
 
 	useEffect(() => {
 		push();
 	}, [push]);
 
-	// Position ticks keep the OS progress bar moving while playing.
 	useEffect(() => {
 		if (!isPlaying) return;
 		const timer = window.setInterval(push, 5000);

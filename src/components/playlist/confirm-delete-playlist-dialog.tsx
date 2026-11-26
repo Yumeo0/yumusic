@@ -7,13 +7,11 @@ import { deleteLibraryPlaylist } from "@/lib/youtube/playlist-mutations";
 export function ConfirmDeletePlaylistDialog({
 	playlistId,
 	playlistTitle,
-	onDeleted,
 	open,
 	onOpenChange,
 }: {
 	playlistId: string;
 	playlistTitle: string;
-	onDeleted?: () => void;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
@@ -26,7 +24,6 @@ export function ConfirmDeletePlaylistDialog({
 			await deleteLibraryPlaylist(playlistId);
 			onOpenChange(false);
 			showToast("Playlist deleted");
-			onDeleted?.();
 		} catch (error) {
 			console.error("[YuMusic] delete playlist failed:", error);
 			showToast("Could not delete playlist");

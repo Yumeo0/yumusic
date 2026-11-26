@@ -4,18 +4,26 @@ import { AccountDeviceDiscovery, deviceId } from "./lifecycle";
 
 const session = (id: string) => ({ user: { id } }) as Session;
 
-test("device identity survives restarts and stays separate for each account and installation", () => {
+function installationStorage() {
 	const values = new Map<string, string>();
-	const storage = {
+	return {
 		getItem: (key: string) => values.get(key) ?? null,
 		setItem: (key: string, value: string) => {
 			values.set(key, value);
 		},
 	};
+}
+
+test("device identity survives restarts and stays separate for each account and installation", () => {
+	const storage = installationStorage();
+	const mobile = installationStorage();
 	const pc = deviceId("account", storage);
 	expect(deviceId("account", storage)).toBe(pc);
 	expect(deviceId("other-account", storage)).not.toBe(pc);
-	expect(deviceId("account", { ...storage, getItem: () => null })).not.toBe(pc);
+	const phone = deviceId("account", mobile);
+	expect(phone).not.toBe(pc);
+	expect(deviceId("account", mobile)).toBe(phone);
+	expect(deviceId("account", storage)).toBe(pc);
 });
 
 test("discovery starts when identity is ready without a mounted modal or settings view", () => {

@@ -21,8 +21,11 @@ export class SyncEngine {
 	get isRunning() {
 		return this.running;
 	}
+	get pendingCount() {
+		return Object.keys(this.journal.pending).length;
+	}
 	constructor(
-		readonly journal: Journal,
+		private journal: Journal,
 		private transport: SyncTransport,
 		private local: {
 			read: () => Snapshot;
@@ -38,6 +41,7 @@ export class SyncEngine {
 				journal.snapshot,
 				journal.pending,
 				journal.revisions,
+				journal.projection?.baseline ?? {},
 			]) {
 				for (const key of Object.keys(entries))
 					if (!local.supports(key)) delete entries[key];
@@ -51,21 +55,35 @@ export class SyncEngine {
 		captureChanges(this.journal, this.local.read());
 		this.local.save(this.journal);
 	}
-	private apply() {
-		this.local.save(this.journal);
-		const current = this.local.read();
+	private apply(baseline: Snapshot) {
 		const next = this.journal.snapshot;
 		if (
-			Object.keys(current).length !== Object.keys(next).length ||
-			Object.keys(next).some((key) => !sameValue(current[key], next[key]))
-		)
-			this.local.apply(next);
+			Object.keys(baseline).length !== Object.keys(next).length ||
+			Object.keys(next).some((key) => !sameValue(baseline[key], next[key]))
+		) {
+			this.journal.projection = { baseline, applying: true };
+			this.local.save(this.journal);
+			try {
+				this.local.apply(next);
+			} catch (error) {
+				this.journal.projection = {
+					baseline: this.local.read(),
+					applying: false,
+				};
+				this.local.save(this.journal);
+				throw error;
+			}
+			this.journal.snapshot = this.local.read();
+		}
+		delete this.journal.projection;
+		this.local.save(this.journal);
 	}
 	async sync() {
 		if (this.running || this.stopped) return;
 		this.running = true;
 		try {
 			this.capture();
+			if (this.journal.projection) this.apply(this.journal.projection.baseline);
 			const records = await this.transport.read();
 			if (this.stopped) return;
 			this.capture();
@@ -75,7 +93,7 @@ export class SyncEngine {
 					(record) => !this.local.supports || this.local.supports(record.key),
 				),
 			);
-			this.apply();
+			this.apply(this.local.read());
 			for (const key of Object.keys(this.journal.pending)) {
 				if (this.stopped) return;
 				const pending = this.journal.pending[key];
@@ -84,7 +102,7 @@ export class SyncEngine {
 				if (this.stopped) return;
 				this.capture();
 				acceptWrite(this.journal, key, pending, record);
-				this.apply();
+				this.apply(this.local.read());
 			}
 		} finally {
 			this.running = false;

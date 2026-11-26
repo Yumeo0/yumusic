@@ -2,13 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::http::{HeaderMap, HeaderName, HeaderValue, Request, Response, StatusCode};
-
-use super::apply_cors;
+use tauri::http::{HeaderMap, Method, Request, Response, StatusCode};
 
 /// Artwork CDN hosts. Upstream throttles these aggressively (429), so their
 /// GETs are paced, retried with backoff and cooled down individually.
-pub(super) fn is_artwork_host(host: &str) -> bool {
+fn is_artwork_host(host: &str) -> bool {
 	host.ends_with("ytimg.com")
 		|| host.ends_with("googleusercontent.com")
 		|| host.ends_with("ggpht.com")
@@ -42,10 +40,8 @@ const IMAGE_FRESHNESS_CAP: u64 = 30 * 24 * 60 * 60;
 
 #[derive(Clone)]
 struct CachedImage {
-	status: u16,
-	headers: Vec<(String, String)>,
+	headers: HeaderMap,
 	body: bytes::Bytes,
-	etag: Option<String>,
 	fresh_until: Instant,
 	last_used: Instant,
 }
@@ -126,13 +122,7 @@ fn is_image_response(headers: &HeaderMap) -> bool {
 		.is_some_and(|ctype| ctype.trim().to_ascii_lowercase().starts_with("image/"))
 }
 
-/// Returns a 200 (or conditional 304) response served from the in-memory
-/// cache, or `None` when the entry is missing or stale.
-pub(super) fn lookup(
-	request: &Request<Vec<u8>>,
-	target: &str,
-	origin: &str,
-) -> Option<Response<Vec<u8>>> {
+fn lookup(headers: &HeaderMap, target: &str) -> Option<Response<bytes::Bytes>> {
 	let now = Instant::now();
 	let entry = {
 		let mut cache = image_cache().lock().ok()?;
@@ -144,37 +134,66 @@ pub(super) fn lookup(
 		entry.clone()
 	};
 
-	let if_none_match = request
-		.headers()
-		.get("if-none-match")
-		.and_then(|value| value.to_str().ok());
-	if let (Some(inm), Some(etag)) = (if_none_match, entry.etag.as_deref()) {
+	if let (Some(inm), Some(etag)) = (headers.get("if-none-match"), entry.headers.get("etag")) {
 		if inm == etag {
-			let mut response = Response::new(Vec::new());
+			let mut response = Response::new(bytes::Bytes::new());
 			*response.status_mut() = StatusCode::NOT_MODIFIED;
-			apply_cors(&mut response, origin);
-			if let Ok(value) = HeaderValue::from_str(etag) {
-				response.headers_mut().insert("etag", value);
-			}
+			response.headers_mut().insert("etag", etag.clone());
 			return Some(response);
 		}
 	}
 
-	let mut response = Response::new(entry.body.to_vec());
-	if let Ok(status) = StatusCode::from_u16(entry.status) {
-		*response.status_mut() = status;
-	}
-	apply_cors(&mut response, origin);
-	let headers = response.headers_mut();
-	for (name, value) in &entry.headers {
-		if let (Ok(name), Ok(value)) = (
-			HeaderName::from_bytes(name.as_bytes()),
-			HeaderValue::from_str(value),
-		) {
-			headers.insert(name, value);
+	let mut response = Response::new(entry.body);
+	*response.headers_mut() = entry.headers;
+	Some(response)
+}
+
+pub(super) async fn serve<F>(
+	request: &Request<Vec<u8>>,
+	host: &str,
+	target: &str,
+	prepare: impl AsyncFnOnce() -> Result<F, String>,
+) -> Result<Response<bytes::Bytes>, String>
+where
+	F: Fn() -> reqwest::RequestBuilder,
+{
+	let cacheable = request.method() == Method::GET && !request.headers().contains_key("range");
+	if cacheable {
+		if let Some(cached) = lookup(request.headers(), target) {
+			return Ok(cached);
 		}
 	}
-	Some(response)
+	let paced = cacheable && is_artwork_host(host);
+	let permit = if paced {
+		let Some(permit) = acquire(target).await? else {
+			let mut response = Response::new(bytes::Bytes::new());
+			*response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+			return Ok(response);
+		};
+		Some(permit)
+	} else {
+		None
+	};
+	let upstream = prepare().await?;
+	let upstream = if paced {
+		fetch(target, upstream).await?
+	} else {
+		send(upstream()).await?
+	};
+	let freshness = cacheable
+		.then(|| freshness(upstream.headers(), upstream.status()))
+		.flatten();
+	let response = super::read_upstream(upstream).await?;
+	drop(permit);
+	if let Some(freshness) = freshness {
+		store(
+			target.to_owned(),
+			response.headers(),
+			response.body(),
+			freshness,
+		);
+	}
+	Ok(response)
 }
 
 /// Pacing state for artwork fetches: a global pause window when upstream
@@ -200,22 +219,19 @@ fn image_semaphore() -> &'static tokio::sync::Semaphore {
 	SEMAPHORE.get_or_init(|| tokio::sync::Semaphore::new(IMAGE_FETCH_CONCURRENCY))
 }
 
-/// How long an upstream artwork fetch must wait before it may start:
-/// `Some(Some(wait))` to sleep out a short cooldown, `Some(None)` when the
-/// target is in a long cooldown (caller should fail fast), `None` when the
-/// fetch may start immediately.
-fn image_cooldown_delay(target: &str) -> Option<Option<Duration>> {
+/// Long cooldowns return `None` so image loads fail immediately.
+fn image_cooldown_delay(target: &str) -> Option<Duration> {
 	let now = Instant::now();
-	let gate = image_gate().lock().ok()?;
+	let Ok(gate) = image_gate().lock() else {
+		return Some(Duration::ZERO);
+	};
 	let global = gate.cooldown_until.saturating_duration_since(now);
 	let target_wait = gate
 		.target_cooldowns
 		.get(target)
 		.map_or(Duration::ZERO, |until| until.saturating_duration_since(now));
-	if global > COOLDOWN_WAIT_CAP || target_wait > COOLDOWN_WAIT_CAP {
-		return Some(None);
-	}
-	Some(Some(global.max(target_wait)))
+	let wait = global.max(target_wait);
+	(wait <= COOLDOWN_WAIT_CAP).then_some(wait)
 }
 
 /// Records an upstream 429: pauses all artwork fetches briefly and, when
@@ -235,14 +251,6 @@ fn mark_image_throttled(target: Option<&str>) {
 	}
 }
 
-/// Response used when a request hits an image in a long 429 cooldown.
-pub(super) fn throttled_response(origin: &str) -> Response<Vec<u8>> {
-	let mut response = Response::new(Vec::new());
-	*response.status_mut() = StatusCode::TOO_MANY_REQUESTS;
-	apply_cors(&mut response, origin);
-	response
-}
-
 /// Backoff before retrying a throttled/failed artwork fetch: honors
 /// `Retry-After` for 429s, otherwise exponential (0.75s, 1.5s, 3s, …).
 fn image_backoff(status: StatusCode, headers: &HeaderMap, attempt: usize) -> Duration {
@@ -260,32 +268,37 @@ fn image_backoff(status: StatusCode, headers: &HeaderMap, attempt: usize) -> Dur
 		.min(MAX_BACKOFF)
 }
 
-pub(super) async fn acquire(
-	target: &str,
-) -> Result<Option<tokio::sync::SemaphorePermit<'static>>, String> {
-	match image_cooldown_delay(target) {
-		Some(None) => return Ok(None),
-		Some(Some(wait)) if !wait.is_zero() => tokio::time::sleep(wait).await,
-		_ => {}
+async fn acquire(target: &str) -> Result<Option<tokio::sync::SemaphorePermit<'static>>, String> {
+	if image_cooldown_delay(target).is_none() {
+		return Ok(None);
 	}
-	image_semaphore()
+	let permit = image_semaphore()
 		.acquire()
 		.await
-		.map(Some)
-		.map_err(|error| error.to_string())
+		.map_err(|error| error.to_string())?;
+	let Some(wait) = image_cooldown_delay(target) else {
+		return Ok(None);
+	};
+	if !wait.is_zero() {
+		tokio::time::sleep(wait).await;
+	}
+	Ok(Some(permit))
 }
 
-pub(super) async fn fetch(
+async fn send(request: reqwest::RequestBuilder) -> Result<reqwest::Response, String> {
+	request
+		.send()
+		.await
+		.map_err(|error| format!("Upstream request failed: {error:?}"))
+}
+
+async fn fetch(
 	target: &str,
 	request: impl Fn() -> reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, String> {
 	let mut attempt = 1;
 	loop {
-		let response = request()
-			.timeout(IMAGE_TIMEOUT)
-			.send()
-			.await
-			.map_err(|error| format!("Upstream request failed: {error:?}"))?;
+		let response = send(request().timeout(IMAGE_TIMEOUT)).await?;
 		let status = response.status();
 		let throttled = status == StatusCode::TOO_MANY_REQUESTS;
 		if attempt == MAX_IMAGE_ATTEMPTS || !(throttled || status.is_server_error()) {
@@ -302,19 +315,14 @@ pub(super) async fn fetch(
 	}
 }
 
-pub(super) fn freshness(headers: &HeaderMap, status: StatusCode) -> Option<Duration> {
+fn freshness(headers: &HeaderMap, status: StatusCode) -> Option<Duration> {
 	if status != StatusCode::OK || !is_image_response(headers) {
 		return None;
 	}
 	image_freshness(headers)
 }
 
-pub(super) fn store(
-	target: String,
-	headers: &HeaderMap,
-	bytes: &bytes::Bytes,
-	freshness: Duration,
-) {
+fn store(target: String, headers: &HeaderMap, bytes: &bytes::Bytes, freshness: Duration) {
 	if bytes.len() > IMAGE_CACHE_MAX_ENTRY_BYTES {
 		return;
 	}
@@ -325,21 +333,8 @@ pub(super) fn store(
 	cache.insert(
 		target,
 		CachedImage {
-			status: StatusCode::OK.as_u16(),
-			headers: headers
-				.iter()
-				.map(|(name, value)| {
-					(
-						name.to_string(),
-						value.to_str().unwrap_or_default().to_owned(),
-					)
-				})
-				.collect(),
+			headers: headers.clone(),
 			body: bytes.clone(),
-			etag: headers
-				.get("etag")
-				.and_then(|value| value.to_str().ok())
-				.map(String::from),
 			fresh_until: now + freshness,
 			last_used: now,
 		},
@@ -350,12 +345,53 @@ pub(super) fn store(
 mod tests {
 	use super::*;
 
+	#[test]
+	fn cached_artwork_supports_etags_and_never_answers_range_requests() {
+		let target = "https://i.ytimg.com/artwork-cache-test";
+		let mut headers = HeaderMap::new();
+		headers.insert("etag", "\"test-cover\"".parse().unwrap());
+		store(
+			target.to_owned(),
+			&headers,
+			&bytes::Bytes::from_static(b"artwork"),
+			Duration::from_secs(60),
+		);
+		tauri::async_runtime::block_on(async {
+			let request = Request::new(Vec::new());
+			let upstream = async || -> Result<fn() -> reqwest::RequestBuilder, String> {
+				Err("needs upstream".to_owned())
+			};
+			let response = serve(&request, "i.ytimg.com", target, upstream)
+				.await
+				.unwrap();
+			assert_eq!(response.status(), StatusCode::OK);
+			assert_eq!(&response.body()[..], b"artwork");
+			let request = Request::builder()
+				.header("if-none-match", "\"test-cover\"")
+				.body(Vec::new())
+				.unwrap();
+			let response = serve(&request, "i.ytimg.com", target, upstream)
+				.await
+				.unwrap();
+			assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+			assert!(response.body().is_empty());
+			let request = Request::builder()
+				.header("range", "bytes=0-1")
+				.body(Vec::new())
+				.unwrap();
+			assert_eq!(
+				serve(&request, "i.ytimg.com", target, upstream)
+					.await
+					.unwrap_err(),
+				"needs upstream"
+			);
+		});
+	}
+
 	fn image(size: usize, age: Duration) -> CachedImage {
 		CachedImage {
-			status: 200,
-			headers: vec![],
+			headers: HeaderMap::new(),
 			body: bytes::Bytes::from(vec![0; size]),
-			etag: None,
 			fresh_until: Instant::now() + age,
 			last_used: Instant::now(),
 		}

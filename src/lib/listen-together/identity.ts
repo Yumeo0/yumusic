@@ -1,4 +1,10 @@
-import { accountBindingPayload } from "../../../supabase/functions/_shared/account-proof";
+import {
+	accountBindingPayload,
+	DEVICE_KEY_ALGORITHM,
+	DEVICE_SIGNATURE_ALGORITHM,
+	fingerprintDeviceKey,
+	verifyDeviceSignature,
+} from "../../../supabase/functions/_shared/account-proof";
 import type { RoomProfile } from "./profile";
 
 export interface JoinChallenge {
@@ -19,19 +25,9 @@ export interface RoomIdentity {
 		purpose?: "join" | "trust",
 	) => Promise<string>;
 }
-const algorithm = { name: "ECDSA", namedCurve: "P-256" };
-const signing = { name: "ECDSA", hash: "SHA-256" };
 const encode = (bytes: ArrayBuffer) =>
 	btoa(String.fromCharCode(...new Uint8Array(bytes)));
-const decode = (text: string) =>
-	Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
 
-export function validPublicKey(value: unknown): value is string {
-	return typeof value === "string" && /^B[A-Za-z0-9+/]{86}=$/.test(value);
-}
-export function validSignature(value: unknown): value is string {
-	return typeof value === "string" && /^[A-Za-z0-9+/]{86}==$/.test(value);
-}
 export const validNonce = (value: unknown): value is string =>
 	typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 export const createNonce = () =>
@@ -61,12 +57,6 @@ function payload(
 		]),
 	);
 }
-async function fingerprint(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-	return Array.from(
-		new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-		(b) => b.toString(16).padStart(2, "0"),
-	).join("");
-}
 async function fromKeys(keys: CryptoKeyPair): Promise<RoomIdentity> {
 	if (keys.privateKey.extractable || keys.privateKey.type !== "private")
 		throw new Error("Invalid room identity key.");
@@ -74,11 +64,11 @@ async function fromKeys(keys: CryptoKeyPair): Promise<RoomIdentity> {
 	const publicKey = encode(raw);
 	return {
 		publicKey,
-		fingerprint: await fingerprint(new Uint8Array(raw)),
+		fingerprint: await fingerprintDeviceKey(new Uint8Array(raw)),
 		bindAccount: async (accountId, issuedAt) =>
 			encode(
 				await crypto.subtle.sign(
-					signing,
+					DEVICE_SIGNATURE_ALGORITHM,
 					keys.privateKey,
 					accountBindingPayload(accountId, publicKey, issuedAt),
 				),
@@ -86,7 +76,7 @@ async function fromKeys(keys: CryptoKeyPair): Promise<RoomIdentity> {
 		sign: async (challenge, token, profile, purpose = "join") =>
 			encode(
 				await crypto.subtle.sign(
-					signing,
+					DEVICE_SIGNATURE_ALGORITHM,
 					keys.privateKey,
 					payload(challenge, token, profile, publicKey, purpose),
 				),
@@ -94,10 +84,12 @@ async function fromKeys(keys: CryptoKeyPair): Promise<RoomIdentity> {
 	};
 }
 
-/** Standalone generation is also used by transport tests, without persisting a key. */
 export async function generateRoomIdentity(): Promise<RoomIdentity> {
 	return fromKeys(
-		await crypto.subtle.generateKey(algorithm, false, ["sign", "verify"]),
+		await crypto.subtle.generateKey(DEVICE_KEY_ALGORITHM, false, [
+			"sign",
+			"verify",
+		]),
 	);
 }
 
@@ -109,27 +101,12 @@ export async function verifyIdentity(
 	signature: string,
 	purpose: "join" | "trust" = "join",
 ): Promise<string | null> {
-	try {
-		if (
-			!validPublicKey(publicKey) ||
-			!validSignature(signature) ||
-			!validNonce(challenge.nonce)
-		)
-			return null;
-		const raw = decode(publicKey);
-		const key = await crypto.subtle.importKey("raw", raw, algorithm, false, [
-			"verify",
-		]);
-		const valid = await crypto.subtle.verify(
-			signing,
-			key,
-			decode(signature),
-			payload(challenge, token, profile, publicKey, purpose),
-		);
-		return valid ? fingerprint(raw) : null;
-	} catch {
-		return null;
-	}
+	if (!validNonce(challenge.nonce)) return null;
+	return verifyDeviceSignature(
+		publicKey,
+		signature,
+		payload(challenge, token, profile, publicKey, purpose),
+	);
 }
 
 function transaction<T>(
@@ -174,10 +151,11 @@ export function getRoomIdentity(scope = "device"): Promise<RoomIdentity> {
 				(store) => store.get(scope),
 			);
 			if (!keys) {
-				const generated = await crypto.subtle.generateKey(algorithm, false, [
-					"sign",
-					"verify",
-				]);
+				const generated = await crypto.subtle.generateKey(
+					DEVICE_KEY_ALGORITHM,
+					false,
+					["sign", "verify"],
+				);
 				try {
 					await transaction(db, "readwrite", (store) =>
 						store.add(generated, scope),

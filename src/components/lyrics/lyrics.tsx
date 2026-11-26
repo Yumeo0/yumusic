@@ -2,7 +2,6 @@ import { AudioLines, MicVocal } from "lucide-react";
 import {
 	type CSSProperties,
 	memo,
-	type RefObject,
 	useCallback,
 	useEffect,
 	useMemo,
@@ -29,6 +28,7 @@ import {
 import { useRomanizedLines } from "@/lib/lyrics/romanize";
 import { parseLyricSection } from "@/lib/lyrics/sections";
 import { prefersReducedMotion } from "@/lib/motion/spring";
+import type { PlaybackMedia } from "@/lib/player/playback-deck";
 import { useSettings } from "@/lib/stores/settings";
 import { cn } from "@/lib/utils/utils";
 
@@ -42,7 +42,7 @@ interface LyricsPanelProps {
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	/** The playing media element — sampled per frame for the word fills. */
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
+	media?: PlaybackMedia | null;
 	className?: string;
 }
 
@@ -69,7 +69,7 @@ export function LyricsPanel({
 	duration,
 	currentTime,
 	onSeekTime,
-	videoRef,
+	media,
 	className,
 }: LyricsPanelProps) {
 	const [settings] = useSettings();
@@ -205,9 +205,9 @@ export function LyricsPanel({
 					attribution={attribution}
 					currentTime={currentTime}
 					lines={active.synced}
+					media={media}
 					onSeekTime={onSeekTime}
 					romanize={romanize}
-					videoRef={videoRef}
 				/>
 			)}
 			{active && !active.synced && active.plain && (
@@ -228,14 +228,14 @@ function SyncedLines({
 	onSeekTime,
 	romanize,
 	attribution,
-	videoRef,
+	media,
 }: {
 	lines: LrcLine[];
 	currentTime: number;
 	onSeekTime: (seconds: number) => void;
 	romanize: boolean;
 	attribution?: string;
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
+	media?: PlaybackMedia | null;
 }) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	// Visual anchor per line index: the line itself, or the dots row that
@@ -436,12 +436,12 @@ function SyncedLines({
 								index={seg.index}
 								isActive={seg.index === activeIndex}
 								key={`lrc-${seg.index}`}
+								media={media}
 								onRef={setAnchor}
 								onSeekTime={onSeekTime}
 								romanize={showRomaji}
 								romanizedText={romanized?.get(seg.index)}
 								time={line.time}
-								videoRef={videoRef}
 								words={line.words}
 							/>
 						);
@@ -536,27 +536,27 @@ const LyricLine = memo(function LyricLine({
  * Returns undefined while the line is inactive (all words stay dim).
  */
 function useLivePosition(
-	videoRef: RefObject<HTMLVideoElement | null> | null | undefined,
+	media: PlaybackMedia | null | undefined,
 	activeTime: number | undefined,
 ): number | undefined {
-	const [position, setPosition] = useState(0);
+	const [position, setPosition] = useState<number>();
 	const active = activeTime !== undefined;
 
 	useEffect(() => {
-		if (!active || !videoRef) return;
-		const videoEl = videoRef.current;
-		if (videoEl) setPosition(videoEl.currentTime);
+		if (!active || !media) return;
+		const update = () =>
+			setPosition(media.readyState >= 2 ? media.currentTime : undefined);
+		update();
 		let frame = requestAnimationFrame(function tick() {
-			const media = videoRef.current;
-			if (media) setPosition(media.currentTime);
+			update();
 			frame = requestAnimationFrame(tick);
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [active, videoRef]);
+	}, [active, media]);
 
 	// Without a media element, fall back to the prop clock.
 	if (!active) return undefined;
-	return videoRef ? position : activeTime;
+	return media ? (position ?? activeTime) : activeTime;
 }
 
 /** Last-resort fill window for a word with no end and no following word. */
@@ -598,7 +598,7 @@ const WordSyncLyricLine = memo(function WordSyncLyricLine({
 	romanizedText,
 	onSeekTime,
 	onRef,
-	videoRef,
+	media,
 }: {
 	words: LrcWord[];
 	/** Playback position while this line is active; undefined otherwise. */
@@ -612,9 +612,9 @@ const WordSyncLyricLine = memo(function WordSyncLyricLine({
 	romanizedText?: string;
 	onSeekTime: (seconds: number) => void;
 	onRef: (index: number, el: HTMLParagraphElement | null) => void;
-	videoRef?: RefObject<HTMLVideoElement | null> | null;
+	media?: PlaybackMedia | null;
 }) {
-	const position = useLivePosition(videoRef, activeTime);
+	const position = useLivePosition(media, activeTime);
 
 	// A word without an end lasts until the next one starts — the line's end
 	// for the final word, or a short tail when even that is unknown.

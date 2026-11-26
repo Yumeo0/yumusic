@@ -1,37 +1,22 @@
-import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { DeviceHub } from "@/lib/connect/hub";
 import { AccountDeviceDiscovery, deviceId } from "@/lib/connect/lifecycle";
+import { deviceStatus } from "@/lib/connect/protocol";
+import { deviceRepository } from "@/lib/connect/repository";
 import { attachDeviceHub, getDeviceHub } from "@/lib/connect/store";
 import { peerOptions } from "@/lib/listen-together/peer-options";
 import { listenRoom } from "@/lib/listen-together/room";
 import {
 	type PlaybackSnapshot,
 	playbackInstance,
-	playbackThumbnail,
 	SHARED_AUTOPLAY_LIMIT,
 	sharedPlaybackQueue,
 	wireSong,
 } from "@/lib/player/shared-playback";
 import { updateSettings } from "@/lib/stores/settings";
-import { accountDataClient, supabase } from "@/lib/sync/client";
-import {
-	matchesYouTubeAccount,
-	YOUTUBE_ACCOUNT_CHANGED,
-} from "@/lib/sync/youtube-account";
-import { IS_ANDROID } from "@/lib/utils/tauri";
-
-export const DEVICE_NAME_KEY = "yumusic:device-name:v1";
-export function defaultDeviceName() {
-	return IS_ANDROID
-		? "Android phone"
-		: isTauri()
-			? /Windows/.test(navigator.userAgent)
-				? "Windows PC"
-				: "Desktop"
-			: "Web browser";
-}
+import { watchSyncAccount } from "@/lib/sync/client";
+import { matchesYouTubeAccount } from "@/lib/sync/youtube-account";
 
 /** No audio bytes, cookies or credentials cross devices; each plays its own stream. */
 export function DeviceBridge() {
@@ -45,7 +30,6 @@ export function DeviceBridge() {
 			eligible: (session) => matchesYouTubeAccount(session.user),
 			attach: attachDeviceHub,
 			create: (session) => {
-				const client = accountDataClient(session.user.id);
 				const id = deviceId(session.user.id);
 				let preparedGeneration = -1;
 				const available = () =>
@@ -54,55 +38,22 @@ export function DeviceBridge() {
 					!listenRoom.getSnapshot().role;
 				return new DeviceHub(
 					id,
-					{
-						publish: async (peer, token, state) => {
-							const { data, error } = await client.rpc(
-								"publish_playback_device",
-								{
-									device_id: id,
-									device_peer: peer,
-									device_token: token,
-									device_name: (
-										localStorage.getItem(DEVICE_NAME_KEY)?.trim() ||
-										defaultDeviceName()
-									).slice(0, 80),
-									device_kind: IS_ANDROID
-										? "phone"
-										: isTauri()
-											? "desktop"
-											: "browser",
-									device_state: { ...state },
-								},
-							);
-							if (error) throw error;
-							return data;
-						},
-						remove: async (token) => {
-							await client
-								.from("playback_devices")
-								.delete()
-								.eq("user_id", session.user.id)
-								.eq("id", id)
-								.eq("connection_token", token);
-						},
-					},
+					deviceRepository(session.user.id, id),
 					{
 						available,
-						status: () => ({
-							thumbnail: playbackThumbnail(
-								live.current.player.currentSong?.thumbnail,
-							),
-							upload: live.current.player.currentSong?.upload ?? false,
-							playing: live.current.controls.isPlaying,
-							title: live.current.player.currentSong?.title.slice(0, 500) ?? "",
-							artist:
-								live.current.player.currentSong?.artist.slice(0, 500) ?? "",
-							room: !!listenRoom.getSnapshot().role,
-						}),
+						status: () =>
+							deviceStatus({
+								thumbnail: live.current.player.currentSong?.thumbnail,
+								upload: live.current.player.currentSong?.upload,
+								playing: live.current.controls.isPlaying,
+								title: live.current.player.currentSong?.title,
+								artist: live.current.player.currentSong?.artist,
+								room: !!listenRoom.getSnapshot().role,
+							}),
 						playback: () => {
 							const { player: p, controls: c } = live.current;
 							if (!p.currentSong) return null;
-							const { sourceIndex, ...queue } = sharedPlaybackQueue(
+							const { sourceIndex, queue, index, song } = sharedPlaybackQueue(
 								p.queue,
 								p.currentIndex,
 								p.currentSong,
@@ -114,7 +65,9 @@ export function DeviceBridge() {
 									sourceIndex,
 									p.currentSong.id,
 								),
-								...queue,
+								queue,
+								index,
+								song,
 								autoplayQueue: p.autoplayTracks
 									.slice(0, SHARED_AUTOPLAY_LIMIT)
 									.map((s) => wireSong(s)),
@@ -212,22 +165,9 @@ export function DeviceBridge() {
 				);
 			},
 		});
-		let authRevision = 0;
-		const {
-			data: { subscription },
-		} = supabase.auth.onAuthStateChange((_event, session) => {
-			authRevision++;
-			// Do not call another Supabase API while inside the Auth callback.
-			queueMicrotask(() => discovery.setSession(session));
-		});
-		const revision = authRevision;
-		void supabase.auth
-			.getSession()
-			.then(({ data: { session } }) => {
-				if (revision === authRevision) discovery.setSession(session);
-			})
-			.catch(() => undefined);
-		window.addEventListener(YOUTUBE_ACCOUNT_CHANGED, discovery.reconcile);
+		const stopAccountWatch = watchSyncAccount((session) =>
+			discovery.setSession(session),
+		);
 		const refresh = () => {
 			if (document.visibilityState === "visible")
 				void getDeviceHub()?.refresh();
@@ -237,9 +177,8 @@ export function DeviceBridge() {
 		document.addEventListener("visibilitychange", refresh);
 		return () => {
 			stopped = true;
-			subscription.unsubscribe();
+			stopAccountWatch();
 			discovery.stop();
-			window.removeEventListener(YOUTUBE_ACCOUNT_CHANGED, discovery.reconcile);
 			window.removeEventListener("online", refresh);
 			window.removeEventListener("focus", refresh);
 			document.removeEventListener("visibilitychange", refresh);

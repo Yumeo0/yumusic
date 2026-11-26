@@ -1,6 +1,6 @@
 import type { Session } from "@supabase/supabase-js";
 import { useSyncExternalStore } from "react";
-import { accountDataClient, supabase } from "./client";
+import { AUTH_STORAGE_KEY, supabase, watchSyncAccount } from "./client";
 import { SyncEngine } from "./engine";
 import { SYNC_ACCOUNT_CHANGED, SYNC_DATA_CHANGED } from "./events";
 import {
@@ -11,17 +11,11 @@ import {
 	supportsSyncKey,
 } from "./local-data";
 import { authorizeWithGoogle, finishBrowserSignIn } from "./oauth";
-import {
-	createJournal,
-	type Journal,
-	type RemoteRecord,
-	type Snapshot,
-	ZERO_EDIT_ID,
-} from "./records";
+import { createJournal, type Journal, type Snapshot } from "./records";
+import { syncRepository } from "./repository";
 import {
 	getYouTubeSyncAccount,
 	matchesYouTubeAccount,
-	YOUTUBE_ACCOUNT_CHANGED,
 	type YouTubeSyncAccount,
 	youtubeSyncEmail,
 } from "./youtube-account";
@@ -61,6 +55,7 @@ export const useCloudSync = () =>
 	);
 
 const OWNER_KEY = "yumusic:sync:owner";
+const GUEST_RESTORE_KEY = "yumusic:sync:guest-restore";
 const journalKey = (owner: string) => `yumusic:sync:journal:${owner}`;
 let owner: string | null = null;
 let engine: SyncEngine | null = null;
@@ -76,26 +71,48 @@ function apply(snapshot: Snapshot) {
 	}
 }
 
-function changeAccount(session: Session | null) {
-	const nextOwner = session?.user.id ?? null;
-	if (nextOwner === owner && localStorage.getItem(OWNER_KEY) === nextOwner)
-		return;
-	engine?.capture();
-	engine?.stop();
-	window.dispatchEvent(new Event(SYNC_ACCOUNT_CHANGED));
+function archiveAccount() {
+	const previous = engine;
+	const previousOwner = owner;
 	engine = null;
 	owner = null;
+	if (timer) clearTimeout(timer);
+	timer = null;
+	if (!previous) return;
+	try {
+		if (
+			localStorage.getItem(OWNER_KEY) === previousOwner &&
+			localStorage.getItem(GUEST_RESTORE_KEY) === null
+		)
+			previous.capture();
+	} finally {
+		previous.stop();
+	}
+}
+
+function changeAccount(session: Session | null) {
+	const nextOwner = session?.user.id ?? null;
+	const storedOwner = localStorage.getItem(OWNER_KEY);
+	const restoringGuest = localStorage.getItem(GUEST_RESTORE_KEY) !== null;
+	if (nextOwner === owner && storedOwner === nextOwner && !restoringGuest)
+		return;
+	try {
+		archiveAccount();
+	} finally {
+		window.dispatchEvent(new Event(SYNC_ACCOUNT_CHANGED));
+	}
 	// Restore local preferences when leaving an account. A different account
 	// never inherits the previous account's private trust or pinned lists.
-	const storedOwner = localStorage.getItem(OWNER_KEY);
-	if (storedOwner && storedOwner !== nextOwner) {
+	if (restoringGuest || (storedOwner && storedOwner !== nextOwner)) {
 		const guest = localStorage.getItem(GUEST_BACKUP_KEY);
 		if (!guest)
 			throw new Error(
 				"The device's local settings backup is missing. Sync is paused.",
 			);
+		if (!restoringGuest) localStorage.setItem(GUEST_RESTORE_KEY, "1");
 		apply(JSON.parse(guest));
 		localStorage.removeItem(OWNER_KEY);
+		localStorage.removeItem(GUEST_RESTORE_KEY);
 	}
 	if (!session || !nextOwner) {
 		update({
@@ -107,8 +124,9 @@ function changeAccount(session: Session | null) {
 		});
 		return;
 	}
-	if (!storedOwner || storedOwner !== nextOwner)
-		localStorage.setItem(GUEST_BACKUP_KEY, JSON.stringify(readLocalData()));
+	const entering = restoringGuest || storedOwner !== nextOwner;
+	const guest = entering ? readLocalData() : null;
+	if (guest) localStorage.setItem(GUEST_BACKUP_KEY, JSON.stringify(guest));
 	const raw = localStorage.getItem(journalKey(nextOwner));
 	let journal: Journal;
 	if (raw) {
@@ -117,63 +135,26 @@ function changeAccount(session: Session | null) {
 			journal.version !== 1 ||
 			!journal.snapshot ||
 			!journal.revisions ||
-			!journal.pending
+			!journal.pending ||
+			(journal.projection &&
+				(!journal.projection.baseline ||
+					typeof journal.projection.applying !== "boolean"))
 		)
 			throw new Error(
 				"The saved sync journal is invalid. Sync is paused to protect your data.",
 			);
-		if (storedOwner !== nextOwner) apply(journal.snapshot);
+		if (guest) journal.projection = { baseline: guest, applying: false };
 	} else journal = createJournal(readLocalData());
 	localStorage.setItem(journalKey(nextOwner), JSON.stringify(journal));
 	localStorage.setItem(OWNER_KEY, nextOwner);
 	owner = nextOwner;
-	const dataClient = accountDataClient(nextOwner);
-	engine = new SyncEngine(
-		journal,
-		{
-			read: async () => {
-				const records: RemoteRecord[] = [];
-				for (let offset = 0; ; offset += 500) {
-					const { data, error } = await dataClient
-						.from("sync_records")
-						.select("key,value,revision,modified_at,edit_id")
-						.eq("user_id", nextOwner)
-						.order("key")
-						.range(offset, offset + 499);
-					if (error) throw error;
-					records.push(...data);
-					if (data.length < 500) return records;
-				}
-			},
-			write: async (key, pending) => {
-				const { data, error } = await dataClient.rpc("write_sync_record", {
-					record_key: key,
-					record_value: pending.value,
-					expected_revision: pending.revision,
-					record_modified_at: pending.modified_at ?? 0,
-					record_edit_id: pending.edit_id ?? ZERO_EDIT_ID,
-				});
-				if (error) throw error;
-				if (data?.[0]) return data[0];
-				// A newer value (including a deletion) wins a revision conflict.
-				const result = await dataClient
-					.from("sync_records")
-					.select("key,value,revision,modified_at,edit_id")
-					.eq("user_id", nextOwner)
-					.eq("key", key)
-					.single();
-				if (result.error) throw result.error;
-				return result.data;
-			},
-		},
-		{
-			read: readLocalData,
-			supports: supportsSyncKey,
-			apply,
-			save: (value) =>
-				localStorage.setItem(journalKey(nextOwner), JSON.stringify(value)),
-		},
-	);
+	engine = new SyncEngine(journal, syncRepository(nextOwner), {
+		read: readLocalData,
+		supports: supportsSyncKey,
+		apply,
+		save: (value) =>
+			localStorage.setItem(journalKey(nextOwner), JSON.stringify(value)),
+	});
 	update({
 		email: session.user.email ?? "Google account",
 		status: "syncing",
@@ -186,12 +167,12 @@ function changeAccount(session: Session | null) {
 export async function syncNow(options: { background?: boolean } = {}) {
 	const current = engine;
 	if (!current || current.isRunning) return;
-	if (!options.background || Object.keys(current.journal.pending).length > 0)
+	if (!options.background || current.pendingCount > 0)
 		update({ status: "syncing", error: null });
 	try {
 		await current.sync();
 		if (engine !== current) return;
-		const pending = Object.keys(current.journal.pending).length;
+		const pending = current.pendingCount;
 		update({ status: "synced", error: null, lastSynced: Date.now(), pending });
 		if (pending) scheduleSync(500);
 	} catch (error) {
@@ -202,7 +183,7 @@ export async function syncNow(options: { background?: boolean } = {}) {
 				error instanceof Error
 					? error.message
 					: "Could not sync. Your changes are saved on this device.",
-			pending: Object.keys(current.journal.pending).length,
+			pending: current.pendingCount,
 		});
 	}
 }
@@ -244,10 +225,7 @@ export function startCloudSync() {
 		});
 		return () => undefined;
 	}
-	let stopped = false;
-	let session: Session | null = null;
-	const reconcile = () => {
-		if (stopped) return;
+	const stopAccountWatch = watchSyncAccount((session) => {
 		const expected = getYouTubeSyncAccount();
 		update({
 			youtubeStatus: expected.status,
@@ -255,10 +233,7 @@ export function startCloudSync() {
 		});
 		try {
 			if (expected.status === "checking" || expected.status === "unavailable") {
-				engine?.capture();
-				engine?.stop();
-				engine = null;
-				owner = null;
+				archiveAccount();
 				update({
 					email: null,
 					status: "signed-out",
@@ -289,13 +264,12 @@ export function startCloudSync() {
 		} catch (error) {
 			update({ status: "error", error: String(error) });
 		}
-	};
-	window.addEventListener(YOUTUBE_ACCOUNT_CHANGED, reconcile);
+	});
 	const onChange = () => {
 		if (applying || !engine) return;
 		try {
 			engine.capture();
-			update({ pending: Object.keys(engine.journal.pending).length });
+			update({ pending: engine.pendingCount });
 			scheduleSync();
 		} catch {
 			update({
@@ -308,7 +282,7 @@ export function startCloudSync() {
 		if (
 			!event.key ||
 			event.key.startsWith("yumusic:sync:") ||
-			event.key.startsWith("yumusic-sync-auth")
+			event.key.startsWith(AUTH_STORAGE_KEY)
 		)
 			return;
 		onChange();
@@ -324,28 +298,17 @@ export function startCloudSync() {
 		if (document.visibilityState === "visible")
 			void syncNow({ background: true });
 	}, 30_000);
-	const {
-		data: { subscription },
-	} = supabase.auth.onAuthStateChange((_event, nextSession) => {
-		session = nextSession;
-		// Never await another Supabase call while inside the Auth callback.
-		setTimeout(() => {
-			reconcile();
-		}, 0);
-	});
 	void finishBrowserSignIn().catch((error) =>
 		update({ status: "error", error: String(error) }),
 	);
 	return () => {
-		stopped = true;
-		subscription.unsubscribe();
+		stopAccountWatch();
 		engine?.stop();
 		engine = null;
 		owner = null;
 		if (timer) clearTimeout(timer);
 		clearInterval(interval);
 		window.removeEventListener(SYNC_DATA_CHANGED, onChange);
-		window.removeEventListener(YOUTUBE_ACCOUNT_CHANGED, reconcile);
 		window.removeEventListener("storage", onStorage);
 		window.removeEventListener("online", onResume);
 		document.removeEventListener("visibilitychange", onResume);

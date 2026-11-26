@@ -6,7 +6,7 @@ import { usePlayer } from "@/contexts/player-context";
 import { preventSwipeContextMenu } from "@/lib/motion/swipe-context-menu";
 import { shareLink } from "@/lib/services/share";
 import { showToast } from "@/lib/stores/toast";
-import { getArtistMixSongs } from "@/lib/youtube/youtube-client";
+import { getArtistMixSongs } from "@/lib/youtube/track-recommendations";
 
 export function ArtistContextMenu({
 	artist,

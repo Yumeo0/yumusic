@@ -128,8 +128,7 @@ async fn process_with_cors(request: Request<Vec<u8>>) -> Response<Vec<u8>> {
 		log::warn!("Proxy request failed: {error}");
 		internal_error(error)
 	});
-	// Error paths bypass process()'s successful-response CORS setup. Without
-	// this boundary the browser hides the actual error as "Failed to fetch".
+	// Without CORS on errors, the browser hides them as "Failed to fetch".
 	apply_cors(&mut response, &origin);
 	response
 }
@@ -202,18 +201,8 @@ fn percent_decode(input: &str) -> String {
 }
 
 async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String> {
-	let origin = request
-		.headers()
-		.get("origin")
-		.and_then(|value| value.to_str().ok())
-		.unwrap_or_default()
-		.to_owned();
-
 	if request.method() == Method::OPTIONS {
-		let mut response = Response::new(Vec::new());
-		*response.status_mut() = StatusCode::OK;
-		apply_cors(&mut response, &origin);
-		return Ok(response);
+		return Ok(Response::new(Vec::new()));
 	}
 
 	let url = tauri::Url::parse(&request.uri().to_string()).map_err(|e| e.to_string())?;
@@ -241,26 +230,19 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		target.push_str(&kept.join("&"));
 	}
 
-	let method = request.method().clone();
+	let response = artwork::serve(&request, &host, &target, async || {
+		prepare_upstream(&request, &target, &host, headers_json).await
+	})
+	.await?;
+	Ok(response.map(|body| body.to_vec()))
+}
 
-	// Only plain GETs without range requests are eligible for the image cache.
-	let cacheable_request = method == Method::GET && request.headers().get("range").is_none();
-	let is_artwork = cacheable_request && artwork::is_artwork_host(&host);
-	if cacheable_request {
-		if let Some(response) = artwork::lookup(&request, &target, &origin) {
-			return Ok(response);
-		}
-	}
-
-	let permit = if is_artwork {
-		match artwork::acquire(&target).await? {
-			Some(permit) => Some(permit),
-			None => return Ok(artwork::throttled_response(&origin)),
-		}
-	} else {
-		None
-	};
-
+async fn prepare_upstream<'a>(
+	request: &Request<Vec<u8>>,
+	target: &'a str,
+	host: &str,
+	headers_json: Option<String>,
+) -> Result<impl Fn() -> reqwest::RequestBuilder + 'a, String> {
 	let mut upstream_headers = HeaderMap::new();
 	let headers_source = headers_json.or_else(|| {
 		request
@@ -319,39 +301,38 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 	// bodies to custom protocol handlers, so wry always hands us an empty body
 	// there. The frontend works around this by sending the body base64-encoded
 	// in the X-Proxy-Body header; fall back to it when the body is empty.
-	let proxy_body = request
-		.headers()
-		.get("x-proxy-body")
-		.and_then(|value| value.to_str().ok())
-		.map(String::from);
-	let mut body = request.into_body();
-	if body.is_empty() {
-		if let Some(encoded) = proxy_body {
-			if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded) {
-				body = decoded;
-			}
-		}
-	}
+	let body = if request.body().is_empty() {
+		request
+			.headers()
+			.get("x-proxy-body")
+			.and_then(|value| {
+				base64::engine::general_purpose::STANDARD
+					.decode(value.as_bytes())
+					.ok()
+			})
+			.map(bytes::Bytes::from)
+			.unwrap_or_default()
+	} else {
+		bytes::Bytes::copy_from_slice(request.body())
+	};
 
+	let method = request.method().clone();
 	let client = client().await?;
-	let upstream_request = || {
+	Ok(move || {
 		let request = client
-			.request(method.clone(), &target)
+			.request(method.clone(), target)
 			.headers(upstream_headers.clone());
 		if body.is_empty() {
 			request
 		} else {
 			request.body(body.clone())
 		}
-	};
-	let upstream_response = if is_artwork {
-		artwork::fetch(&target, upstream_request).await?
-	} else {
-		upstream_request()
-			.send()
-			.await
-			.map_err(|error| format!("Upstream request failed: {error:?}"))?
-	};
+	})
+}
+
+async fn read_upstream(
+	upstream_response: reqwest::Response,
+) -> Result<Response<bytes::Bytes>, String> {
 	let status = upstream_response.status();
 
 	let mut passthrough = HeaderMap::new();
@@ -360,10 +341,8 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		"content-disposition",
 		"accept-ranges",
 		"content-range",
-		// Resumable uploads: the session id must reach the WebView.
 		"x-goog-upload-id",
 		"x-guploader-uploadid",
-		// Cache headers must reach the WebView so responses can be revalidated.
 		"cache-control",
 		"etag",
 		"last-modified",
@@ -376,23 +355,9 @@ async fn process(request: Request<Vec<u8>>) -> Result<Response<Vec<u8>>, String>
 		}
 	}
 
-	let freshness = cacheable_request
-		.then(|| artwork::freshness(upstream_response.headers(), status))
-		.flatten();
 	let bytes = upstream_response.bytes().await.map_err(|e| e.to_string())?;
-	drop(permit);
-	if let Some(freshness) = freshness {
-		artwork::store(target, &passthrough, &bytes, freshness);
-	}
-
-	let mut response = Response::new(bytes.to_vec());
+	let mut response = Response::new(bytes);
 	*response.status_mut() = status;
-	apply_cors(&mut response, &origin);
-	response.headers_mut().extend(
-		passthrough
-			.into_iter()
-			.filter_map(|(name, value)| name.map(|name| (name, value))),
-	);
-
+	*response.headers_mut() = passthrough;
 	Ok(response)
 }

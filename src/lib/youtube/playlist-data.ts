@@ -1,62 +1,62 @@
 import { YTNodes } from "youtubei.js/web";
 import type { Song } from "@/lib/music/song";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
-import { applySongDescription } from "@/lib/utils/description";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
-import type { PlaylistView } from "../music/playlist";
+import type { PlaylistTrack, PlaylistView } from "../music/playlist";
+import { applySongEnrichment } from "../music/song-enrichment";
 import { type RowFallback, songFromMusicRow } from "./music-row";
-import { isAlbumId } from "./youtube.utils";
 import {
 	type Album,
 	getAlbum,
 	getPlaylist,
 	loadPlaylistContinuation,
 	type Playlist,
-	type SongRating,
-} from "./youtube-client";
+	type PlaylistPrivacy,
+} from "./playlist-api";
+import { type SongRating, songRatingEntry } from "./song-rating";
+import { isAlbumId } from "./youtube.utils";
 
-/**
- * The account's rating for a playlist/album row. List responses carry a
- * `LikeButton` per track whose `like_status` is the current rating, so these
- * pages know every row's state without extra requests.
- */
-export function songRatingEntry(
-	item: YTNodes.MusicResponsiveListItem,
-): { id: string; rating: SongRating } | null {
-	const button = item.menu?.top_level_buttons?.find(
-		(entry): entry is YTNodes.LikeButton => entry.is(YTNodes.LikeButton),
-	);
-	const id = button?.target?.video_id;
-	if (!id) return null;
-	const status = button.like_status;
-	if (status === "LIKE") return { id, rating: "like" };
-	if (status === "DISLIKE") return { id, rating: "dislike" };
-	if (status === "INDIFFERENT") return { id, rating: null };
-	return null;
-}
-
-export function collectSongs(
+function collectSongs(
 	items: Iterable<
 		| YTNodes.MusicResponsiveListItem
 		| YTNodes.MusicTwoRowItem
 		| YTNodes.ContinuationItem
 	>,
 	fallback?: RowFallback,
-): Song[] {
-	const songs: Song[] = [];
+): PlaylistTrack[] {
+	const songs: PlaylistTrack[] = [];
 	const ratings: Array<{ id: string; rating: SongRating }> = [];
 	for (const item of items) {
 		if (item.is(YTNodes.MusicResponsiveListItem)) {
 			const rating = songRatingEntry(item);
 			if (rating) ratings.push(rating);
 			const song = songFromMusicRow(item, fallback);
-			if (song.id) songs.push(song);
+			if (!song.id) continue;
+			const entryId = playlistEntryId(item);
+			songs.push(entryId ? { ...song, entryId } : song);
 		}
 	}
 	// Seed before the caller renders the rows, so their buttons open with the
 	// real state instead of neutral.
 	seedSongRatings(ratings);
 	return songs;
+}
+
+function playlistEntryId(item: YTNodes.MusicResponsiveListItem) {
+	for (const action of item.menu?.items ?? []) {
+		if (!action.is(YTNodes.MenuServiceItem)) continue;
+		const edits = action.endpoint?.payload?.actions;
+		if (!Array.isArray(edits)) continue;
+		for (const edit of edits) {
+			if (
+				edit?.action === "ACTION_REMOVE_VIDEO" &&
+				typeof edit.setVideoId === "string" &&
+				edit.setVideoId
+			)
+				return edit.setVideoId;
+		}
+	}
+	return undefined;
 }
 
 function sameArtists(a: Song["artists"], b: Song["artists"]): boolean {
@@ -68,13 +68,18 @@ function sameArtists(a: Song["artists"], b: Song["artists"]): boolean {
 	);
 }
 
-function sameSong(a: Song, b: Song): boolean {
+function sameSong(a: PlaylistTrack, b: PlaylistTrack): boolean {
 	return (
+		a.entryId === b.entryId &&
 		a.title === b.title &&
 		a.artist === b.artist &&
 		a.artistId === b.artistId &&
 		a.thumbnail === b.thumbnail &&
 		a.duration === b.duration &&
+		a.description === b.description &&
+		a.upload === b.upload &&
+		a.addedBy === b.addedBy &&
+		sameArtists(a.creditIds, b.creditIds) &&
 		sameArtists(a.artists, b.artists)
 	);
 }
@@ -86,24 +91,32 @@ function sameSong(a: Song, b: Song): boolean {
  * removed tracks are dropped and new ones added, all in fetched (server)
  * order.
  */
-export function mergePlaylistSongs(previous: Song[], fetched: Song[]): Song[] {
+export function mergePlaylistSongs(
+	previous: PlaylistTrack[],
+	fetched: PlaylistTrack[],
+): PlaylistTrack[] {
 	if (previous.length === 0) return fetched;
-	const byId = new Map<string, Song[]>();
+	const byId = new Map<string, PlaylistTrack[]>();
 	for (const song of previous) {
-		const bucket = byId.get(song.id);
+		const key = song.entryId ? `entry:${song.entryId}` : song.id;
+		const bucket = byId.get(key);
 		if (bucket) bucket.push(song);
-		else byId.set(song.id, [song]);
+		else byId.set(key, [song]);
 	}
 	return fetched.map((song) => {
-		const candidate = byId.get(song.id)?.shift();
+		const candidate = song.entryId
+			? (byId.get(`entry:${song.entryId}`)?.shift() ??
+				byId.get(song.id)?.shift())
+			: byId.get(song.id)?.shift();
 		if (!candidate) return song;
 		// A description-enriched entry keeps its credits across a refresh: the
 		// fresh row has no description, so reapply the previous one to it
 		// instead of losing the parsed title/artist.
-		if (!song.description && candidate.description) {
-			return applySongDescription(song, candidate.description);
-		}
-		return sameSong(candidate, song) ? candidate : song;
+		const enriched = applySongEnrichment(song, {
+			description: candidate.description,
+			upload: candidate.upload || undefined,
+		});
+		return sameSong(candidate, enriched) ? candidate : enriched;
 	});
 }
 
@@ -153,7 +166,7 @@ function headerArtists(
  * Editable playlist pages wrap their real header one level deep, and albums
  * use a different header class than playlists.
  */
-export function collectionHeader(raw: Playlist["header"] | Album["header"]): {
+function collectionHeader(raw: Playlist["header"] | Album["header"]): {
 	title: string;
 	subtitle: string;
 	thumbnail: string | null;
@@ -186,7 +199,7 @@ export function collectionHeader(raw: Playlist["header"] | Album["header"]): {
  * It is checked through the response memo as well: youtubei.js' `header`
  * can resolve to the inner MusicResponsiveHeader instead of the wrapper.
  */
-export function isEditablePlaylist(data: Playlist | Album): boolean {
+function isEditablePlaylist(data: Playlist | Album): boolean {
 	if (data.header instanceof YTNodes.MusicEditablePlaylistDetailHeader) {
 		return true;
 	}
@@ -196,12 +209,10 @@ export function isEditablePlaylist(data: Playlist | Album): boolean {
 	return (editable?.length ?? 0) > 0;
 }
 
-export type PlaylistPrivacyStatus = "PUBLIC" | "UNLISTED" | "PRIVATE";
-
-export interface PlaylistEditMeta {
+interface PlaylistEditMeta {
 	title: string;
 	description: string;
-	privacy: PlaylistPrivacyStatus | null;
+	privacy: PlaylistPrivacy | null;
 	thumbnail: string | null;
 	editable: boolean;
 }

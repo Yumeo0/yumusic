@@ -67,7 +67,6 @@ export function PlaylistContextMenu({
 	playlist,
 	isPinned,
 	onTogglePinned,
-	onDeleted,
 	onEdit,
 	songs,
 	highlight = true,
@@ -78,7 +77,6 @@ export function PlaylistContextMenu({
 	playlist: PlaylistRef;
 	isPinned: boolean;
 	onTogglePinned: () => void;
-	onDeleted?: () => void;
 	onEdit?: () => void;
 	songs?: Song[];
 	highlight?: boolean;
@@ -230,7 +228,6 @@ export function PlaylistContextMenu({
 				</ContextMenu.Portal>
 			</ContextMenu.Root>
 			<ConfirmDeletePlaylistDialog
-				onDeleted={onDeleted}
 				onOpenChange={setConfirmOpen}
 				open={confirmOpen}
 				playlistId={playlist.id}

@@ -12,9 +12,9 @@ import {
 import type { Song } from "@/lib/music/song";
 import { seedSongRatings } from "@/lib/stores/song-ratings";
 import { biggestThumb, hiResThumb } from "@/lib/utils/utils";
-import { songRatingEntry } from "./playlist-data";
-import { artistListOf, artistNames, videoIdOf } from "./youtube.utils";
-import type { SongRating } from "./youtube-client";
+import { songFromMusicRow } from "./music-row";
+import { type SongRating, songRatingEntry } from "./song-rating";
+import { videoIdOf } from "./youtube.utils";
 
 export interface ArtistShelfItem {
 	title: string;
@@ -48,23 +48,13 @@ export function artistShelfItems(
 		if (node.is(YTNodes.MusicResponsiveListItem)) {
 			const rating = songRatingEntry(node);
 			if (rating) ratings.push(rating);
-			const id = videoIdOf(node);
-			const title = node.title ?? "Unknown Title";
-			const thumbnail = hiResThumb(biggestThumb(node.thumbnails)?.url);
-			if (id) {
-				const artist = artistNames(node);
+			const song = songFromMusicRow(node);
+			if (song.id) {
 				items.push({
-					title,
-					subtitle: artist,
-					thumbnail,
-					song: {
-						id,
-						title,
-						artist,
-						artists: artistListOf(node),
-						thumbnail,
-						duration: node.duration?.text,
-					},
+					title: song.title,
+					subtitle: song.artist,
+					thumbnail: song.thumbnail,
+					song,
 				});
 			} else {
 				const link = collectionLink(
@@ -73,9 +63,9 @@ export function artistShelfItems(
 				);
 				if (link) {
 					items.push({
-						title,
+						title: song.title,
 						subtitle: node.subtitle?.text || "",
-						thumbnail,
+						thumbnail: song.thumbnail,
 						link,
 					});
 				}

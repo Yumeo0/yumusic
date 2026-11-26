@@ -25,7 +25,7 @@ export const defaultPermissions: GuestPermissions = {
 	seek: "allow",
 	repeat: "allow",
 };
-export const validMode = (value: unknown): value is PermissionMode =>
+const validMode = (value: unknown): value is PermissionMode =>
 	typeof value === "string" && ["allow", "suggest", "deny"].includes(value);
 export function validPermissions(value: unknown): value is GuestPermissions {
 	return (
@@ -91,6 +91,29 @@ export function actionCategory(action: RoomAction): PermissionCategory {
 }
 export const queueKey = (songs: Song[]) =>
 	JSON.stringify(songs.map((song) => song.id));
+
+const requiredContext: Partial<Record<PermissionCategory, "track" | "queue">> =
+	{
+		skip: "track",
+		playback: "track",
+		seek: "track",
+		remove: "queue",
+		reorder: "queue",
+	};
+
+export function actionContextError(
+	action: RoomAction,
+	expected: ActionContext,
+	current: ActionContext,
+) {
+	const required = requiredContext[actionCategory(action)];
+	if (required && expected.instance !== current.instance)
+		return "The track changed. Please try again.";
+	if (required === "queue" && expected.queueKey !== current.queueKey)
+		return "The queue changed. Please try again.";
+	return null;
+}
+
 export function actionSong(action: RoomAction): Song | null {
 	if (action.type === "play" || action.type === "playNext") return action.song;
 	if (action.type === "playQueue") return action.songs[action.index] ?? null;

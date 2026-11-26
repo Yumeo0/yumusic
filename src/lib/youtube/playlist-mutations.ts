@@ -1,4 +1,5 @@
 import { unsubscribeDownloadedPlaylist } from "../downloads/downloads";
+import type { PlaylistTrack } from "../music/playlist";
 import type { Song } from "../music/song";
 import { reconcilePinnedPlaylists, unpinPlaylist } from "../stores/pinned";
 import {
@@ -9,22 +10,25 @@ import {
 	removeSongFromCachedPlaylist,
 } from "../stores/playlist-cache";
 import { hiResThumb } from "../utils/utils";
-import { fetchPlaylistEditMeta } from "./playlist-data";
+import { removeHomeFeedPlaylist } from "./home-feed-cache";
 import {
 	addSongToPlaylist,
 	createPlaylist,
 	deletePlaylist,
 	type PlaylistEdit,
-	patchLibraryPlaylist,
 	removePlaylistThumbnail,
 	removeSongFromPlaylist,
 	setPlaylistThumbnail,
 	updatePlaylist,
-} from "./youtube-client";
+} from "./playlist-api";
+import { fetchPlaylistEditMeta } from "./playlist-data";
+import { canonicalPlaylistId } from "./playlist-id";
 
 export async function addPlaylistTrack(id: string, song: Song) {
-	await addSongToPlaylist(id, song.id);
-	addSongToCachedPlaylist(id, song);
+	await editPlaylistTrack(id, song.id, async () => {
+		await addSongToPlaylist(id, song.id);
+		addSongToCachedPlaylist(id, song);
+	});
 }
 
 export async function createPlaylistWithTrack(title: string, song: Song) {
@@ -32,13 +36,34 @@ export async function createPlaylistWithTrack(title: string, song: Song) {
 	invalidateLibraryCache();
 }
 
+const activeTrackEdits = new Set<string>();
+
+async function editPlaylistTrack(
+	id: string,
+	videoId: string,
+	edit: () => Promise<void>,
+) {
+	const key = `${canonicalPlaylistId(id)}:${videoId}`;
+	// In older snapshots, adding or removing a duplicate renumbers occurrences.
+	if (activeTrackEdits.has(key))
+		throw new Error("An edit for this track is already in progress.");
+	activeTrackEdits.add(key);
+	try {
+		await edit();
+	} finally {
+		activeTrackEdits.delete(key);
+	}
+}
+
 export async function removePlaylistTrack(
 	id: string,
-	songId: string,
-	index: number,
+	track: PlaylistTrack,
+	occurrence: number,
 ) {
-	await removeSongFromPlaylist(id, songId);
-	removeSongFromCachedPlaylist(id, songId, index);
+	await editPlaylistTrack(id, track.id, async () => {
+		await removeSongFromPlaylist(id, track.id, occurrence, track.entryId);
+		removeSongFromCachedPlaylist(id, track, occurrence);
+	});
 }
 
 export async function deleteLibraryPlaylist(id: string) {
@@ -46,6 +71,7 @@ export async function deleteLibraryPlaylist(id: string) {
 	unsubscribeDownloadedPlaylist(id);
 	unpinPlaylist(id);
 	removePlaylistFromCaches(id);
+	removeHomeFeedPlaylist(id);
 }
 
 export async function savePlaylistEdits(
@@ -73,7 +99,6 @@ export async function savePlaylistEdits(
 		}
 	} finally {
 		const metadata = { title, thumbnail };
-		patchLibraryPlaylist(id, metadata);
 		reconcilePinnedPlaylists([{ id, ...metadata }]);
 		patchCachedPlaylistMetadata(id, metadata);
 	}

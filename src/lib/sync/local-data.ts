@@ -5,7 +5,7 @@ import {
 } from "../listen-together/guest-permissions";
 import {
 	joinSettingsStorage,
-	validPolicy,
+	normalizeJoinSettings,
 	validTrustKey,
 } from "../listen-together/join-settings";
 import {
@@ -19,11 +19,15 @@ import {
 	CROSSFADE_MAX_SECONDS,
 	CROSSFADE_MIN_SECONDS,
 	getSettings,
+	replaceSettings,
 	type Settings,
-	updateSettings,
 } from "../stores/settings";
 import { ROOM_SETTINGS_RELOADED } from "./events";
-import type { Snapshot, SyncValue } from "./records";
+import {
+	type Snapshot,
+	type SyncValue,
+	TRUSTED_RECORD_PREFIX,
+} from "./records";
 
 // Explicit preference allowlist. ListenBrainz configuration is synced as one
 // record below; app login credentials and device-specific options stay local.
@@ -56,19 +60,43 @@ const syncedSettings = {
 	watchHistory: isBoolean,
 } satisfies Partial<Record<keyof Settings, (value: SyncValue) => boolean>>;
 
-const settingKeys = Object.keys(
-	syncedSettings,
-) as (keyof typeof syncedSettings)[];
+type Setting = keyof typeof syncedSettings;
+// A default-off device publishes no value until rich presence is enabled.
+const omittedDefaults: Partial<Record<Setting, SyncValue>> = {
+	discordRpc: false,
+};
+const settingRecords = (Object.keys(syncedSettings) as Setting[]).map(
+	(name) => ({
+		name,
+		key: `settings/${name}`,
+		validate: syncedSettings[name],
+		omittedDefault: omittedDefaults[name],
+	}),
+);
+const PINNED_RECORD_PREFIX = "pinned/";
+const JOIN_POLICY_KEY = "joinPolicy";
+const GUEST_PERMISSIONS_KEY = "guestPermissions";
+const ROOM_PROFILE_KEY = "roomProfile";
 export const GUEST_BACKUP_KEY = "yumusic:sync:guest";
 
 export const SCROBBLE_SYNC_KEY = "settings/scrobbling";
+
+function trustedFingerprint(key: string) {
+	if (!key.startsWith(TRUSTED_RECORD_PREFIX)) return null;
+	const fingerprint = key.slice(TRUSTED_RECORD_PREFIX.length);
+	return validTrustKey(fingerprint) ? fingerprint : null;
+}
+
+const pinnedRecordKey = (id: string) =>
+	`${PINNED_RECORD_PREFIX}${encodeURIComponent(id)}`;
+
 export function supportsSyncKey(key: string) {
 	return (
 		key === SCROBBLE_SYNC_KEY ||
-		settingKeys.some((setting) => key === `settings/${setting}`) ||
-		key.startsWith("pinned/") ||
-		(key.startsWith("trusted/") && validTrustKey(key.slice(8))) ||
-		["joinPolicy", "guestPermissions", "roomProfile"].includes(key)
+		settingRecords.some((setting) => key === setting.key) ||
+		key.startsWith(PINNED_RECORD_PREFIX) ||
+		trustedFingerprint(key) !== null ||
+		[JOIN_POLICY_KEY, GUEST_PERMISSIONS_KEY, ROOM_PROFILE_KEY].includes(key)
 	);
 }
 function validScrobbling(
@@ -111,11 +139,13 @@ export function migrateGuestBackup() {
 export function readLocalData(): Snapshot {
 	const snapshot: Snapshot = {};
 	const settings = getSettings();
-	for (const key of settingKeys) {
-		// Default-off devices publish no rich-presence value. Disabling a
-		// previously synced value produces a timestamped deletion instead.
-		if (key === "discordRpc" && !settings.discordRpc) continue;
-		snapshot[`settings/${key}`] = settings[key];
+	for (const { name, key, validate, omittedDefault } of settingRecords) {
+		const value = settings[name];
+		if (
+			omittedDefault === undefined ||
+			(validate(value) && value !== omittedDefault)
+		)
+			snapshot[key] = value;
 	}
 	const scrobbling = {
 		enabled: settings.listenbrainz,
@@ -126,30 +156,28 @@ export function readLocalData(): Snapshot {
 	if (validScrobbling(scrobbling) && (scrobbling.enabled || scrobbling.token))
 		snapshot[SCROBBLE_SYNC_KEY] = scrobbling;
 	for (const pinned of getPinnedPlaylists())
-		snapshot[`pinned/${encodeURIComponent(pinned.id)}`] = { ...pinned };
+		snapshot[pinnedRecordKey(pinned.id)] = { ...pinned };
 	const joins = joinSettingsStorage.read();
-	snapshot.joinPolicy = joins.policy;
+	snapshot[JOIN_POLICY_KEY] = joins.policy;
 	for (const person of joins.people)
-		snapshot[`trusted/${person.fingerprint}`] = person.username;
+		snapshot[`${TRUSTED_RECORD_PREFIX}${person.fingerprint}`] = person.username;
 	const permissions = readSavedGuestPermissions();
-	if (permissions) snapshot.guestPermissions = permissions;
+	if (permissions) snapshot[GUEST_PERMISSIONS_KEY] = permissions;
 	const profile = readSavedRoomProfile();
 	if (profile)
-		snapshot.roomProfile = {
+		snapshot[ROOM_PROFILE_KEY] = {
 			source: profile.source,
 			profile: { ...profile.profile },
 		};
 	return snapshot;
 }
 
-/** Validate cloud data before it reaches the existing stores and room engine. */
 export function applyLocalData(snapshot: Snapshot) {
 	const patch: Partial<Settings> = {};
-	if (snapshot["settings/discordRpc"] == null) patch.discordRpc = false;
-	for (const key of settingKeys) {
-		const value = snapshot[`settings/${key}`];
-		if (value !== undefined && syncedSettings[key](value))
-			Object.assign(patch, { [key]: value });
+	for (const { name, key, validate, omittedDefault } of settingRecords) {
+		const value = snapshot[key] ?? omittedDefault;
+		if (value !== undefined && validate(value))
+			Object.assign(patch, { [name]: value });
 	}
 	const scrobbling = snapshot[SCROBBLE_SYNC_KEY];
 	if (scrobbling === undefined || scrobbling === null)
@@ -159,19 +187,19 @@ export function applyLocalData(snapshot: Snapshot) {
 			listenbrainz: scrobbling.enabled,
 			listenbrainzToken: scrobbling.token,
 		});
-	updateSettings(patch);
+	replaceSettings({ ...getSettings(), ...patch });
 	const pinned = [];
 	const people = [];
 	for (const [key, value] of Object.entries(snapshot)) {
 		if (
-			key.startsWith("pinned/") &&
+			key.startsWith(PINNED_RECORD_PREFIX) &&
 			value &&
 			typeof value === "object" &&
 			!Array.isArray(value)
 		) {
 			if (
 				typeof value.id === "string" &&
-				key === `pinned/${encodeURIComponent(value.id)}` &&
+				key === pinnedRecordKey(value.id) &&
 				typeof value.title === "string" &&
 				value.title.length <= 1000 &&
 				(value.thumbnail === null || typeof value.thumbnail === "string")
@@ -182,26 +210,18 @@ export function applyLocalData(snapshot: Snapshot) {
 					thumbnail: value.thumbnail,
 				});
 		}
-		if (
-			key.startsWith("trusted/") &&
-			validTrustKey(key.slice(8)) &&
-			typeof value === "string" &&
-			value.length <= 40
-		)
-			people.push({ fingerprint: key.slice(8), username: value });
+		const fingerprint = trustedFingerprint(key);
+		if (fingerprint) people.push({ fingerprint, username: value });
 	}
 	replacePinnedPlaylists(pinned);
-	joinSettingsStorage.write({
-		policy: validPolicy(snapshot.joinPolicy) ? snapshot.joinPolicy : "manual",
-		people: people.slice(0, 100),
-	});
+	joinSettingsStorage.write(
+		normalizeJoinSettings(snapshot[JOIN_POLICY_KEY], people),
+	);
+	const permissions = snapshot[GUEST_PERMISSIONS_KEY];
 	replaceSavedGuestPermissions(
-		validPermissions(snapshot.guestPermissions)
-			? snapshot.guestPermissions
-			: null,
+		validPermissions(permissions) ? permissions : null,
 	);
-	replaceSavedRoomProfile(
-		validSavedRoomProfile(snapshot.roomProfile) ? snapshot.roomProfile : null,
-	);
+	const profile = snapshot[ROOM_PROFILE_KEY];
+	replaceSavedRoomProfile(validSavedRoomProfile(profile) ? profile : null);
 	window.dispatchEvent(new Event(ROOM_SETTINGS_RELOADED));
 }

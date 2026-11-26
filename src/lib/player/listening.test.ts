@@ -28,20 +28,26 @@ describe("scrobbleThresholdSeconds", () => {
 
 describe("listeningSession", () => {
 	test("repeating a song resets progress and permits another scrobble", () => {
-		const { events, stop } = recordEvents();
-		listeningSession.start("repeated-track", 60);
-		listeningSession.tick(30);
-		listeningSession.reset();
+		const events: { event: string; startedAt: number }[] = [];
+		const stop = listeningSession.subscribe((event, _, startedAt) =>
+			events.push({ event, startedAt }),
+		);
+		try {
+			listeningSession.start("repeated-track", 60, 100000);
+			listeningSession.tick(30);
+			listeningSession.reset();
 
-		listeningSession.start("repeated-track", 60);
-		listeningSession.tick(30);
-		expect(events).toEqual([
-			"established",
-			"scrobbled",
-			"established",
-			"scrobbled",
-		]);
-		stop();
+			listeningSession.start("repeated-track", 60, 160000);
+			listeningSession.tick(30);
+			expect(events).toEqual([
+				{ event: "established", startedAt: 100 },
+				{ event: "scrobbled", startedAt: 100 },
+				{ event: "established", startedAt: 160 },
+				{ event: "scrobbled", startedAt: 160 },
+			]);
+		} finally {
+			stop();
+		}
 	});
 	test("fires established after the grace period, then scrobbled at half the track", () => {
 		const { events, stop } = recordEvents();

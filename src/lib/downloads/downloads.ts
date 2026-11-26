@@ -9,10 +9,10 @@ import {
 import { showToast } from "@/lib/stores/toast";
 import { bytesToBase64 } from "@/lib/utils/base64";
 import { applySongDescription } from "@/lib/utils/description";
+import { getPlaybackStream } from "@/lib/youtube/playback-stream";
 import { loadPlaylistView } from "@/lib/youtube/playlist-data";
 import { createSabrAudioSource } from "@/lib/youtube/sabr-source";
 import { rememberSongDescription } from "@/lib/youtube/song-description";
-import { getPlaybackStream } from "@/lib/youtube/youtube-client";
 import { canonicalPlaylistId } from "../youtube/playlist-id";
 
 /**
@@ -46,28 +46,22 @@ export type DownloadStatus =
 	| { phase: "downloading"; progress: number | null; song: Song }
 	| { phase: "error"; song: Song };
 
-export interface PlaylistDownloadJob {
+interface PlaylistDownloadJob {
 	title: string;
 	total: number;
 	done: number;
 	failed: number;
 }
 
-/** One row of the download queue: the running track or anything waiting. */
-export interface DownloadTask {
+interface DownloadTask {
 	song: Song;
 	phase: "downloading" | "queued";
 	progress: number | null;
 }
 
-export interface DownloadsSnapshot {
-	entries: Map<string, DownloadEntry>;
-	statuses: Map<string, DownloadStatus>;
-	/** Playlist/album downloads in progress, keyed by collection id. */
-	jobs: Map<string, PlaylistDownloadJob>;
-	/** Running + queued downloads in order (running first). */
+interface DownloadsSnapshot {
+	entries: ReadonlyMap<string, DownloadEntry>;
 	tasks: DownloadTask[];
-	/** Songs whose download failed; retry or dismiss them from the queue. */
 	failed: Song[];
 	totalBytes: number;
 }
@@ -97,7 +91,6 @@ function getSnapshot(): DownloadsSnapshot {
 		let totalBytes = 0;
 		for (const entry of entries.values()) totalBytes += entry.size;
 
-		// Queue order: the running track first, then the waiting ones.
 		const tasks: DownloadTask[] = [];
 		if (current) {
 			const status = statuses.get(current.song.id);
@@ -118,8 +111,6 @@ function getSnapshot(): DownloadsSnapshot {
 		snapshot = {
 			entries,
 			failed,
-			jobs: new Map(jobs),
-			statuses: new Map(statuses),
 			tasks,
 			totalBytes,
 		};
@@ -127,12 +118,10 @@ function getSnapshot(): DownloadsSnapshot {
 	return snapshot;
 }
 
-/** Reactive view of the downloads; re-renders subscribers on any change. */
 export function useDownloads(): DownloadsSnapshot {
 	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** The stored download for a song, when it is saved on this device. */
 export function getDownloadEntry(id: string): DownloadEntry | undefined {
 	return entries.get(id);
 }
@@ -152,52 +141,46 @@ export function usePlaylistDownloadJob(id: string | undefined) {
 	return useSyncExternalStore(subscribe, job, job);
 }
 
-/** Loads the stored index once at startup. */
-let hydratePromise: Promise<void> | null = null;
-/** True once the stored index has been read; keeps sync from racing startup. */
-let hydrated = false;
-export function hydrateDownloads(): Promise<void> {
-	if (hydratePromise) return hydratePromise;
-	hydratePromise = (async () => {
-		if (!isTauri()) return;
-		try {
-			const stored = await invoke<DownloadEntry[]>("downloads_list");
-			entries = new Map(stored.map((entry) => [entry.id, entry]));
-			hydrated = true;
+let hydratePromise: Promise<boolean> | null = null;
+export function hydrateDownloads(): Promise<boolean> {
+	if (!isTauri()) return Promise.resolve(false);
+	hydratePromise ??= invoke<DownloadEntry[]>("downloads_list").then(
+		(stored) => {
+			entries = new Map([
+				...stored.map((entry) => [entry.id, entry] as const),
+				...entries,
+			]);
 			emit();
-		} catch (error) {
+			return true;
+		},
+		(error: unknown) => {
 			hydratePromise = null;
 			console.warn("[downloads] could not load the index:", error);
-		}
-	})();
+			return false;
+		},
+	);
 	return hydratePromise;
 }
 
-/* ── Queue and runner ──────────────────────────────────────────── */
-
 interface QueueItem {
 	song: Song;
-	/** Playlist/album job this song belongs to, for aggregate progress. */
 	jobId?: string;
 }
 
 let queue: QueueItem[] = [];
 let current: {
 	song: Song;
-	jobId?: string;
 	cancel: () => void;
 	settled: Promise<void>;
 } | null = null;
 let pumping = false;
 
-/** Re-downloading a stored song is a no-op; anything in flight is skipped too. */
 function isBusy(id: string): boolean {
 	const status = statuses.get(id);
 	return (
 		entries.has(id) ||
 		(status !== undefined && status.phase !== "error") ||
-		current?.song.id === id ||
-		queue.some((item) => item.song.id === id)
+		current?.song.id === id
 	);
 }
 
@@ -219,7 +202,6 @@ function finishJob(jobId: string) {
 	emit();
 }
 
-/** Clears a failed download from the queue without retrying it. */
 export function dismissDownloadError(id: string) {
 	const status = statuses.get(id);
 	if (status?.phase !== "error") return;
@@ -231,6 +213,7 @@ async function pump() {
 	if (pumping) return;
 	pumping = true;
 	try {
+		await hydrateDownloads();
 		while (queue.length > 0) {
 			const item = queue.shift();
 			if (!item) break;
@@ -266,7 +249,6 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 			void reader?.cancel().catch(() => undefined);
 			disposeStream?.();
 		},
-		jobId: item.jobId,
 		song,
 	};
 	statuses.set(song.id, { phase: "downloading", progress: null, song });
@@ -277,13 +259,6 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 	try {
 		const result = await getPlaybackStream(song.id);
 		signal.throwIfAborted();
-		// Hydration may have filled the index while this sat in the queue:
-		// the file is already stored, so re-downloading it is wasted work.
-		if (entries.has(song.id)) {
-			statuses.delete(song.id);
-			emit();
-			return true;
-		}
 		const videoInfo = result.videoInfo;
 		// Keep the uploader description with the stored song: playback uses it
 		// to refine the parsed title/artist, and it is saved in the index.
@@ -406,7 +381,6 @@ async function runDownload(item: QueueItem): Promise<boolean> {
 	}
 }
 
-/** Queues songs unless they are stored or already in flight. */
 function enqueue(items: QueueItem[]): number {
 	let added = 0;
 	for (const item of items) {
@@ -422,16 +396,9 @@ function enqueue(items: QueueItem[]): number {
 	return added;
 }
 
-/** Saves one song for offline playback. */
 export function downloadSong(song: Song) {
 	if (!isTauri()) return;
 	enqueue([{ song }]);
-}
-
-/** Saves every given song that is not stored yet. */
-export function downloadSongs(songs: Song[]) {
-	if (!isTauri()) return;
-	enqueue(songs.map((song) => ({ song })));
 }
 
 /**
@@ -474,19 +441,20 @@ function downloadPlaylist(playlistId: string, title: string, songs?: Song[]) {
 	})();
 }
 
-/** Whether the playlist is kept downloaded (the toggle's on state). */
-export function isPlaylistDownloaded(id: string): boolean {
-	return getSettings().downloadedPlaylists.some(
-		(saved) => canonicalPlaylistId(saved) === canonicalPlaylistId(id),
-	);
+function isSamePlaylist(id: string, saved: string) {
+	return canonicalPlaylistId(saved) === canonicalPlaylistId(id);
 }
 
-/** Reactive version of `isPlaylistDownloaded` for menus and buttons. */
+function isPlaylistDownloaded(
+	id: string,
+	saved = getSettings().downloadedPlaylists,
+) {
+	return saved.some((playlist) => isSamePlaylist(id, playlist));
+}
+
 export function usePlaylistDownloaded(id: string): boolean {
 	const [settings] = useSettings();
-	return settings.downloadedPlaylists.some(
-		(saved) => canonicalPlaylistId(saved) === canonicalPlaylistId(id),
-	);
+	return isPlaylistDownloaded(id, settings.downloadedPlaylists);
 }
 
 /**
@@ -502,13 +470,8 @@ export function togglePlaylistDownload(
 ) {
 	if (!isTauri()) return;
 	const { downloadedPlaylists } = getSettings();
-	if (isPlaylistDownloaded(id)) {
-		updateSettings({
-			downloadedPlaylists: downloadedPlaylists.filter(
-				(playlistId) =>
-					canonicalPlaylistId(playlistId) !== canonicalPlaylistId(id),
-			),
-		});
+	if (isPlaylistDownloaded(id, downloadedPlaylists)) {
+		unsubscribeDownloadedPlaylist(id);
 		return;
 	}
 	updateSettings({
@@ -526,14 +489,13 @@ export function togglePlaylistDownload(
  * download should not be re-enqueued on every visit (the queue offers an
  * explicit retry instead), which previously re-fetched whole playlists.
  */
-export function syncDownloadedPlaylist(
+export async function syncDownloadedPlaylist(
 	id: string,
 	title: string,
 	songs: Song[],
 ) {
-	// Before the stored index is read, every song would look missing and the
-	// whole playlist would be re-downloaded. Wait for the next visit instead.
-	if (!hydrated || songs.length === 0 || !isPlaylistDownloaded(id)) return;
+	if (!isTauri() || songs.length === 0 || !isPlaylistDownloaded(id)) return;
+	if (!(await hydrateDownloads()) || !isPlaylistDownloaded(id)) return;
 	const missing = songs.filter(
 		(song) => !entries.has(song.id) && !statuses.has(song.id),
 	);
@@ -543,16 +505,13 @@ export function syncDownloadedPlaylist(
 /** Drops a deleted playlist's subscription (its files stay until removed). */
 export function unsubscribeDownloadedPlaylist(id: string) {
 	const { downloadedPlaylists } = getSettings();
-	if (!isPlaylistDownloaded(id)) return;
-	updateSettings({
-		downloadedPlaylists: downloadedPlaylists.filter(
-			(playlistId) =>
-				canonicalPlaylistId(playlistId) !== canonicalPlaylistId(id),
-		),
-	});
+	const remaining = downloadedPlaylists.filter(
+		(playlist) => !isSamePlaylist(id, playlist),
+	);
+	if (remaining.length !== downloadedPlaylists.length)
+		updateSettings({ downloadedPlaylists: remaining });
 }
 
-/** Cancels a queued or running download. */
 export function cancelDownload(id: string) {
 	if (current?.song.id === id) {
 		current.cancel();
@@ -566,13 +525,13 @@ export function cancelDownload(id: string) {
 	for (const item of cancelled) settle(item, false);
 }
 
-/** Removes downloads from disk and the index. */
 export async function removeDownloads(ids: string[]) {
 	if (ids.length === 0) return;
 	const transfer =
 		current && ids.includes(current.song.id) ? current.settled : null;
 	for (const id of ids) cancelDownload(id);
 	try {
+		await hydrateDownloads();
 		if (transfer) await transfer;
 		const failed = await invoke<string[]>("downloads_remove", { ids });
 		const failedIds = new Set(failed);

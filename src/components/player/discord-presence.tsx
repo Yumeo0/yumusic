@@ -6,11 +6,7 @@ import { loadCoverCrop } from "@/lib/utils/cover-crop";
 import { discordArtworkUrl } from "@/lib/utils/discord-artwork";
 import { proxiedImageUrl } from "@/lib/utils/tauri";
 import { displayTitle, formatArtistName } from "@/lib/utils/title";
-import {
-	getArtistAvatar,
-	getTrackMeta,
-	type TrackMeta,
-} from "@/lib/youtube/youtube-client";
+import { getArtistAvatar } from "@/lib/youtube/channel-data";
 
 /**
  * Mirrors the current song into Discord rich presence while enabled:
@@ -19,10 +15,14 @@ import {
  * expires after 15 minutes and returns when playback resumes.
  */
 export function DiscordPresenceSync() {
-	const { currentSong, videoElementRef, duration: knownDuration } = usePlayer();
+	const {
+		currentSong,
+		currentAlbum,
+		activeMedia,
+		duration: knownDuration,
+	} = usePlayer();
 	const { isPlaying } = usePlayerControls();
 	const [settings] = useSettings();
-	const [meta, setMeta] = useState<TrackMeta | null>(null);
 	const [mediaDuration, setMediaDuration] = useState(0);
 
 	const songId = currentSong?.id;
@@ -87,44 +87,27 @@ export function DiscordPresenceSync() {
 		return () => window.clearTimeout(timeout);
 	}, [discordEnabled, isPlaying]);
 
-	// Track the element's duration reactively: when a song starts, the
-	// presence update fires before MSE metadata is parsed (duration NaN),
-	// so re-send once durationchange/loadedmetadata deliver the real value.
-	// A crossfade preloads the next track onto the idle deck early, so its
-	// duration events have already fired by the time the handover makes it
-	// current — read the value once at attach time to catch those.
-	// biome-ignore lint/correctness/useExhaustiveDependencies: songId is an intentional reset trigger for the tracked duration
 	useEffect(() => {
-		setMediaDuration(0);
-		const videoEl = videoElementRef?.current;
-		if (!videoEl) return;
+		if (!activeMedia) {
+			setMediaDuration(0);
+			return;
+		}
 		const sync = () =>
 			setMediaDuration(
-				Number.isFinite(videoEl.duration) ? videoEl.duration : 0,
+				activeMedia.readyState > 0 && Number.isFinite(activeMedia.duration)
+					? activeMedia.duration
+					: 0,
 			);
 		sync();
-		videoEl.addEventListener("durationchange", sync);
-		videoEl.addEventListener("loadedmetadata", sync);
+		activeMedia.addEventListener("emptied", sync);
+		activeMedia.addEventListener("durationchange", sync);
+		activeMedia.addEventListener("loadedmetadata", sync);
 		return () => {
-			videoEl.removeEventListener("durationchange", sync);
-			videoEl.removeEventListener("loadedmetadata", sync);
+			activeMedia.removeEventListener("emptied", sync);
+			activeMedia.removeEventListener("durationchange", sync);
+			activeMedia.removeEventListener("loadedmetadata", sync);
 		};
-	}, [videoElementRef, songId]);
-
-	// Album data arrives from a follow-up fetch; it upgrades the presence
-	// (album tooltip/link) once loaded.
-	useEffect(() => {
-		let cancelled = false;
-		setMeta(null);
-		if (discordEnabled && songId) {
-			getTrackMeta(songId).then((next) => {
-				if (!cancelled) setMeta(next);
-			});
-		}
-		return () => {
-			cancelled = true;
-		};
-	}, [discordEnabled, songId]);
+	}, [activeMedia]);
 
 	// The player's metadata length (YouTube's listing) is preferred over the
 	// media element's duration, which reports a fraction less; it is also the
@@ -133,13 +116,12 @@ export function DiscordPresenceSync() {
 
 	useEffect(() => {
 		if (!discordEnabled || discordIdle || !songId) return;
-		const videoEl = videoElementRef?.current ?? null;
 		const update = () =>
 			invoke("set_discord_activity", {
 				track: {
 					title,
 					artist: formatArtistName(artist),
-					album: meta?.album?.name ?? null,
+					album: currentAlbum?.name ?? null,
 					coverUrl:
 						discordCover.source === cover ? discordCover.url || null : null,
 					artistAvatarUrl,
@@ -147,21 +129,21 @@ export function DiscordPresenceSync() {
 					artistUrl: artistId
 						? `https://music.youtube.com/channel/${artistId}`
 						: null,
-					albumUrl: meta?.album?.id
-						? `https://music.youtube.com/playlist?list=${meta.album.id}`
+					albumUrl: currentAlbum?.id
+						? `https://music.youtube.com/playlist?list=${currentAlbum.id}`
 						: null,
 					playing: isPlaying,
-					elapsedSecs: videoEl?.currentTime ?? 0,
+					elapsedSecs: activeMedia?.currentTime ?? 0,
 					durationSecs,
 				},
 			}).catch((error) => {
 				console.warn("[discord] presence update failed:", error);
 			});
 		void update();
-		videoEl?.addEventListener("seeked", update);
+		activeMedia?.addEventListener("seeked", update);
 		const retry = window.setInterval(update, 30_000);
 		return () => {
-			videoEl?.removeEventListener("seeked", update);
+			activeMedia?.removeEventListener("seeked", update);
 			window.clearInterval(retry);
 		};
 	}, [
@@ -176,8 +158,8 @@ export function DiscordPresenceSync() {
 		artistAvatarUrl,
 		isPlaying,
 		durationSecs,
-		meta,
-		videoElementRef,
+		currentAlbum,
+		activeMedia,
 	]);
 
 	// Clear expired paused presence as well as disabled or empty playback.

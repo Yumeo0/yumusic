@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+mod android_activity;
 mod discord;
 mod downloads;
 mod haptics;
@@ -8,6 +10,7 @@ mod media_controls;
 mod native_audio;
 mod po_token;
 mod proxy;
+mod session_window;
 mod sync_oauth;
 mod youtube_session;
 

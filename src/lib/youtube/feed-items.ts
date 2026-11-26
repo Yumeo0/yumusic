@@ -1,4 +1,4 @@
-import { YTNodes } from "youtubei.js/web";
+import { type Innertube, YTNodes } from "youtubei.js/web";
 import type { Song } from "@/lib/music/song";
 import {
 	biggestThumb,
@@ -6,14 +6,13 @@ import {
 	type ThumbCandidate,
 } from "@/lib/utils/utils";
 import {
-	artistIdOf,
-	artistListOf,
-	artistNames,
 	artistSubtitle,
 	isVideoId,
 	videoIdOf,
 } from "@/lib/youtube/youtube.utils";
-import type { HomeFeed } from "./youtube-client";
+import { songFromMusicRow } from "./music-row";
+
+export type HomeFeed = Awaited<ReturnType<Innertube["music"]["getHomeFeed"]>>;
 
 /**
  * One card in a home feed row. Carousels mix tracks with playlists, albums,
@@ -52,7 +51,6 @@ export function feedItemKey(item: FeedItem): string {
 	return `${item.kind}:${item.id}`;
 }
 
-/** Every playable song in the feed, for the description prefetch. */
 function lastThumb(urls: ThumbCandidate[] | undefined): string {
 	return hiResThumb(biggestThumb(urls)?.url);
 }
@@ -63,42 +61,13 @@ export function feedSongs(sections: HomeSection[]): Song[] {
 	);
 }
 
-/** Replaces one song wherever it appears in the feed. */
-export function withUpdatedSong(
-	sections: HomeSection[],
-	updated: Song,
-): HomeSection[] {
-	return sections.map((section) => ({
-		...section,
-		items: section.items.map((item) =>
-			item.kind === "song" && item.song.id === updated.id
-				? { ...item, song: updated }
-				: item,
-		),
-	}));
-}
-
-/** A playable card from a responsive list item (song/video/non-music track). */
 function responsiveSong(
 	item: YTNodes.MusicResponsiveListItem,
 ): FeedItem | null {
-	const id = videoIdOf(item);
-	if (!id) return null;
-	return {
-		kind: "song",
-		song: {
-			id,
-			title: item.title ?? "Unknown Title",
-			artist: artistNames(item),
-			artistId: artistIdOf(item),
-			artists: artistListOf(item),
-			thumbnail: lastThumb(item.thumbnail?.contents),
-			duration: item.duration?.text,
-		},
-	};
+	const song = songFromMusicRow(item);
+	return song.id ? { kind: "song", song } : null;
 }
 
-/** Parses a single-column shelf row. */
 function responsiveFeedItem(
 	item: YTNodes.MusicResponsiveListItem,
 ): FeedItem | null {
@@ -135,7 +104,6 @@ function responsiveFeedItem(
 	}
 }
 
-/** Parses a two-row (card) shelf entry. */
 function twoRowFeedItem(item: YTNodes.MusicTwoRowItem): FeedItem | null {
 	const thumbnail = lastThumb(item.thumbnail);
 	switch (item.item_type) {
@@ -264,7 +232,7 @@ function navigationFeedItem(
 }
 
 /** Parses any entry a home-feed carousel can contain. */
-export function toFeedItem(
+function toFeedItem(
 	item:
 		| YTNodes.MusicResponsiveListItem
 		| YTNodes.MusicTwoRowItem

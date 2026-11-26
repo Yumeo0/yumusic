@@ -117,6 +117,66 @@ fn write_index(root: &Path, entries: &[DownloadEntry]) -> Result<(), String> {
 	result.map_err(|error: std::io::Error| error.to_string())
 }
 
+struct IndexTransaction<'a> {
+	root: &'a Path,
+	_lock: fs::File,
+	entries: Vec<DownloadEntry>,
+	moves: Vec<StagedMove>,
+}
+
+struct StagedMove {
+	source: PathBuf,
+	target: PathBuf,
+	discard_on_commit: bool,
+}
+
+impl<'a> IndexTransaction<'a> {
+	fn open(root: &'a Path) -> Result<Self, String> {
+		let lock = lock_index(root)?;
+		Ok(Self {
+			root,
+			_lock: lock,
+			entries: read_index(root)?,
+			moves: Vec::new(),
+		})
+	}
+
+	fn stage_move(
+		&mut self,
+		source: &Path,
+		target: &Path,
+		discard_on_commit: bool,
+	) -> std::io::Result<()> {
+		fs::rename(source, target)?;
+		self.moves.push(StagedMove {
+			source: source.to_owned(),
+			target: target.to_owned(),
+			discard_on_commit,
+		});
+		Ok(())
+	}
+
+	fn save(&mut self) -> Result<(), String> {
+		write_index(self.root, &self.entries)?;
+		for staged in self.moves.drain(..) {
+			if staged.discard_on_commit {
+				let _ = fs::remove_file(staged.target);
+			}
+		}
+		Ok(())
+	}
+}
+
+impl Drop for IndexTransaction<'_> {
+	fn drop(&mut self) {
+		for staged in self.moves.drain(..).rev() {
+			if let Err(error) = fs::rename(staged.target, staged.source) {
+				log::warn!("Could not restore a staged download: {error}");
+			}
+		}
+	}
+}
+
 fn operation_id() -> String {
 	static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 	format!(
@@ -156,8 +216,11 @@ fn safe_ext(ext: &str) -> Result<&str, String> {
 	}
 }
 
-/// Cleans up temporary files left by an interrupted run.
 fn cleanup_stale_temp(root: &Path, active: &HashMap<String, PendingDownload>) {
+	// A staged deletion keeps the audio file's original modification time.
+	let Ok(_index) = lock_index(root) else {
+		return;
+	};
 	let Ok(dir) = fs::read_dir(root.join(TEMP_DIR)) else {
 		return;
 	};
@@ -226,7 +289,6 @@ pub async fn download_finish(
 	let root = downloads_root(&app)?;
 	let mut sessions = store.lock()?;
 	let pending = sessions.get(&token).ok_or("unknown download")?;
-	let _index = lock_index(&root)?;
 	let entry = commit_download(&root, &token, pending, metadata)?;
 	sessions.remove(&token);
 	Ok(entry)
@@ -256,24 +318,20 @@ fn commit_download(
 		path: final_path.to_string_lossy().into_owned(),
 		downloaded_at: now_ms(),
 	};
-	let mut entries = read_index(root)?;
-	let previous = entries
+	let mut index = IndexTransaction::open(root)?;
+	let previous = index
+		.entries
 		.iter()
 		.find(|existing| existing.id == entry.id)
 		.cloned();
-	entries.retain(|existing| existing.id != entry.id);
-	entries.push(entry.clone());
+	index.entries.retain(|existing| existing.id != entry.id);
+	index.entries.push(entry.clone());
 
 	// A new path keeps the previously indexed file playable until the commit succeeds.
-	fs::rename(&pending.temp, &final_path).map_err(|e| e.to_string())?;
-	if let Err(error) = write_index(root, &entries) {
-		if let Err(restore) = fs::rename(&final_path, &pending.temp) {
-			return Err(format!(
-				"{error}; could not restore the pending download: {restore}"
-			));
-		}
-		return Err(error);
-	}
+	index
+		.stage_move(&pending.temp, &final_path, false)
+		.map_err(|error| error.to_string())?;
+	index.save()?;
 	if let Some(previous) = previous {
 		let path = Path::new(&previous.path);
 		if path.parent() == Some(root.join(AUDIO_DIR).as_path()) {
@@ -346,27 +404,28 @@ pub async fn downloads_list(
 	let root = downloads_root(&app)?;
 	let sessions = store.lock()?;
 	cleanup_stale_temp(&root, &sessions);
-	let _index = lock_index(&root)?;
-	let mut entries = read_index(&root)?;
+	let mut index = IndexTransaction::open(&root)?;
 	let mut changed = false;
-	entries.retain_mut(|entry| match fs::metadata(&entry.path) {
-		Ok(meta) if meta.is_file() => {
-			if entry.size != meta.len() {
-				entry.size = meta.len();
-				changed = true;
+	index
+		.entries
+		.retain_mut(|entry| match fs::metadata(&entry.path) {
+			Ok(meta) if meta.is_file() => {
+				if entry.size != meta.len() {
+					entry.size = meta.len();
+					changed = true;
+				}
+				true
 			}
-			true
-		}
-		_ => {
-			changed = true;
-			false
-		}
-	});
+			_ => {
+				changed = true;
+				false
+			}
+		});
 	if changed {
-		write_index(&root, &entries)?;
+		index.save()?;
 	}
-	cleanup_unindexed_audio(&root, &entries);
-	Ok(entries)
+	cleanup_unindexed_audio(&root, &index.entries);
+	Ok(std::mem::take(&mut index.entries))
 }
 
 /// Returns ids whose files could not be removed, such as open media on Windows.
@@ -385,38 +444,32 @@ pub async fn downloads_remove(
 		let _ = fs::remove_file(&pending.temp);
 		false
 	});
-	let _index = lock_index(&root)?;
-	let mut entries = read_index(&root)?;
-	let mut staged = Vec::new();
+	let mut index = IndexTransaction::open(&root)?;
+	let mut changed = false;
 	let mut failed = Vec::new();
 	for id in &ids {
-		let Some(position) = entries.iter().position(|entry| &entry.id == id) else {
+		let Some(position) = index.entries.iter().position(|entry| &entry.id == id) else {
 			continue;
 		};
-		let path = PathBuf::from(&entries[position].path);
+		let path = PathBuf::from(&index.entries[position].path);
 		let temporary = root
 			.join(TEMP_DIR)
 			.join(format!("removed-{}", operation_id()));
-		match fs::rename(&path, &temporary) {
+		match index.stage_move(&path, &temporary, true) {
 			Ok(()) => {
-				staged.push((path, temporary));
-				entries.remove(position);
+				index.entries.remove(position);
+				changed = true;
 			}
 			Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-				entries.remove(position);
+				index.entries.remove(position);
+				changed = true;
 			}
 			Err(_) => failed.push(id.clone()),
 		}
 	}
-	let result = write_index(&root, &entries);
-	for (path, temporary) in staged {
-		if result.is_ok() {
-			let _ = fs::remove_file(temporary);
-		} else if let Err(error) = fs::rename(temporary, path) {
-			log::warn!("Could not restore a staged download: {error}");
-		}
+	if changed {
+		index.save()?;
 	}
-	result?;
 	Ok(failed)
 }
 
@@ -527,5 +580,22 @@ mod tests {
 		let root = test_root("missing");
 		assert!(read_index(&root).unwrap().is_empty());
 		let _ = fs::remove_dir_all(&root);
+	}
+
+	#[test]
+	fn failed_index_write_restores_staged_audio() {
+		let root = test_root("failed-index-write");
+		let original = root.join(AUDIO_DIR).join("playing.webm");
+		let staged = root.join(TEMP_DIR).join("removed.webm");
+		fs::write(&original, b"original audio").unwrap();
+		{
+			let mut transaction = IndexTransaction::open(&root).unwrap();
+			transaction.stage_move(&original, &staged, true).unwrap();
+			fs::create_dir(index_path(&root)).unwrap();
+			assert!(transaction.save().is_err());
+		}
+		assert_eq!(fs::read(original).unwrap(), b"original audio");
+		assert!(!staged.exists());
+		fs::remove_dir_all(root).unwrap();
 	}
 }

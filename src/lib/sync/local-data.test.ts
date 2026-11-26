@@ -10,15 +10,20 @@ import {
 
 const storage = new Map<string, string>();
 const descriptors = new Map<string, PropertyDescriptor | undefined>();
+let blockedKey: string | null;
 beforeEach(() => {
 	storage.clear();
+	blockedKey = null;
 	for (const name of ["window", "localStorage"])
 		descriptors.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
 	Object.defineProperty(globalThis, "localStorage", {
 		configurable: true,
 		value: {
 			getItem: (key: string) => storage.get(key) ?? null,
-			setItem: (key: string, value: string) => storage.set(key, value),
+			setItem: (key: string, value: string) => {
+				if (key === blockedKey) throw new Error("storage quota exceeded");
+				storage.set(key, value);
+			},
 			removeItem: (key: string) => storage.delete(key),
 		},
 	});
@@ -223,6 +228,19 @@ test("invalid remote settings, profiles and trust entries do not reach the app",
 	expect(
 		JSON.parse(storage.get("yumusic:join-settings:v2") || "{}").people,
 	).toEqual([]);
+});
+
+test("sync reports a failed settings write before advancing to later stores", () => {
+	const initial = readLocalData();
+	blockedKey = "yumusic:settings:v1";
+	expect(() =>
+		applyLocalData({
+			...initial,
+			"settings/cleanTitles": false,
+			joinPolicy: "trusted-only",
+		}),
+	).toThrow("storage quota exceeded");
+	expect(readLocalData()).toEqual(initial);
 });
 
 test("account trust entries sync and their removal does not leave device approvals", () => {

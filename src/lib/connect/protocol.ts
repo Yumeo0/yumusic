@@ -13,11 +13,15 @@ export type DeviceRequest =
 export function parseDeviceRequest(input: unknown): DeviceRequest | null {
 	if (!input || typeof input !== "object") return null;
 	const m = input as Record<string, unknown>;
+	const command = m.command;
 	if (
 		m.type === "control" &&
-		["pause", "resume", "next", "previous"].includes(String(m.command))
+		(command === "pause" ||
+			command === "resume" ||
+			command === "next" ||
+			command === "previous")
 	)
-		return { type: "control", command: m.command as DeviceCommand };
+		return { type: "control", command };
 	if (
 		m.type === "handoff" &&
 		typeof m.target === "string" &&

@@ -11,14 +11,8 @@ import {
 	addPlaylistTrack,
 	createPlaylistWithTrack,
 } from "@/lib/youtube/playlist-mutations";
-import { getLibraryPlaylists } from "@/lib/youtube/youtube-client";
+import { usePlaylistLibrary } from "@/lib/youtube/use-playlist-library";
 
-/**
- * Modal for adding a song to one of the user's playlists, with an inline
- * "new playlist" flow. Playlists are fetched once per session and the chosen
- * playlist's cached tracklist is updated in place so the new song shows up
- * without a refetch.
- */
 export function AddToPlaylistDialog({
 	song,
 	open,
@@ -29,34 +23,19 @@ export function AddToPlaylistDialog({
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 }) {
-	const [playlists, setPlaylists] = useState<LibraryPlaylist[] | null>(null);
-	const [failed, setFailed] = useState(false);
+	const { playlists, failed, loading } = usePlaylistLibrary(open);
 	const [query, setQuery] = useState("");
 	const [creating, setCreating] = useState(false);
 	const [newTitle, setNewTitle] = useState("");
 	/** Playlist id (or "new") currently being written to. */
 	const [busy, setBusy] = useState<string | null>(null);
 
-	// Reload (from the session cache) whenever the dialog opens.
 	useEffect(() => {
 		if (!open) return;
 		setQuery("");
 		setCreating(false);
 		setNewTitle("");
-		setFailed(false);
-		setPlaylists(null);
 		setBusy(null);
-		let cancelled = false;
-		getLibraryPlaylists()
-			.then((list) => {
-				if (!cancelled) setPlaylists(list);
-			})
-			.catch(() => {
-				if (!cancelled) setFailed(true);
-			});
-		return () => {
-			cancelled = true;
-		};
 	}, [open]);
 
 	const addTo = async (playlist: LibraryPlaylist) => {
@@ -164,7 +143,7 @@ export function AddToPlaylistDialog({
 					)}
 
 					<div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-						{playlists === null && !failed && (
+						{loading && playlists === null && (
 							<p className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground">
 								<Loader2 className="size-3.5 animate-spin" />
 								Loading playlists…

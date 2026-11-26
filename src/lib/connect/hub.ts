@@ -1,6 +1,5 @@
 import type { DataConnection, Peer } from "peerjs";
 import type { PlaybackSnapshot } from "../player/shared-playback";
-import type { Tables } from "../sync/database.types";
 import {
 	type DeviceCommand,
 	type DeviceRequest,
@@ -8,7 +7,17 @@ import {
 	parseDeviceRequest,
 } from "./protocol";
 
-export type PlaybackDevice = Tables<"playback_devices">;
+export interface PlaybackDevice {
+	id: string;
+	name: string;
+	kind: string;
+	status: DeviceStatus;
+}
+
+export interface DeviceDestination extends PlaybackDevice {
+	peerId: string;
+	connectionToken: string;
+}
 export interface DeviceAdapter {
 	status(): DeviceStatus;
 	playback(): PlaybackSnapshot | null;
@@ -24,7 +33,7 @@ export interface DeviceRepository {
 		peer: string,
 		token: string,
 		state: DeviceStatus,
-	): Promise<PlaybackDevice[]>;
+	): Promise<DeviceDestination[]>;
 	remove(token: string): Promise<void>;
 }
 export interface DeviceState {
@@ -40,6 +49,7 @@ export class DeviceHub {
 	private state: DeviceState;
 	private listeners = new Set<() => void>();
 	private peer: Peer | null = null;
+	private directory: DeviceDestination[] = [];
 	private token = crypto.randomUUID();
 	private stopped = false;
 	private publishing = false;
@@ -117,13 +127,22 @@ export class DeviceHub {
 			return;
 		this.publishing = true;
 		try {
-			const devices = await this.repository.publish(
+			const directory = await this.repository.publish(
 				this.peer.id,
 				this.token,
 				this.adapter.status(),
 			);
+			if (this.stopped) return;
+			this.directory = directory;
+			const devices = directory.map(({ id, name, kind, status }) => ({
+				id,
+				name,
+				kind,
+				status,
+			}));
 			this.update({ devices, status: "online", error: null });
 		} catch {
+			this.directory = [];
 			this.update({
 				devices: [],
 				status: "error",
@@ -219,7 +238,7 @@ export class DeviceHub {
 		});
 	}
 	private call(
-		device: PlaybackDevice,
+		device: DeviceDestination,
 		request: DeviceRequest,
 		accepted?: () => void,
 	): Promise<void> {
@@ -228,7 +247,7 @@ export class DeviceHub {
 				reject(new Error("Devices are offline."));
 				return;
 			}
-			const c = this.peer.connect(device.peer_id, { reliable: true });
+			const c = this.peer.connect(device.peerId, { reliable: true });
 			this.connections.add(c);
 			let done = false;
 			const finish = (error?: Error) => {
@@ -257,7 +276,7 @@ export class DeviceHub {
 					JSON.parse(
 						JSON.stringify({
 							version: 1,
-							token: device.connection_token,
+							token: device.connectionToken,
 							request,
 						}),
 					),
@@ -288,7 +307,7 @@ export class DeviceHub {
 					if (request.type === "transfer")
 						c.send({
 							version: 1,
-							token: device.connection_token,
+							token: device.connectionToken,
 							type: "confirm",
 						});
 					else finish();
@@ -298,7 +317,7 @@ export class DeviceHub {
 		});
 	}
 	private destination(id: string) {
-		const device = this.state.devices.find(
+		const device = this.directory.find(
 			(d) => d.id === id && d.id !== this.state.id,
 		);
 		if (!device) throw new Error("That device is no longer available.");
@@ -342,6 +361,7 @@ export class DeviceHub {
 	}
 	stop() {
 		this.stopped = true;
+		this.directory = [];
 		if (this.timer) clearInterval(this.timer);
 		for (const c of this.connections) c.close();
 		this.connections.clear();
