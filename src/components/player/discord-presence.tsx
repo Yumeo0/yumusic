@@ -4,7 +4,7 @@ import { usePlayer, usePlayerControls } from "@/contexts/player-context";
 import { useSettings } from "@/lib/stores/settings";
 import { loadCoverCrop } from "@/lib/utils/cover-crop";
 import { discordArtworkUrl } from "@/lib/utils/discord-artwork";
-import { proxiedImageUrl } from "@/lib/utils/tauri";
+import { IS_ANDROID, proxiedImageUrl } from "@/lib/utils/tauri";
 import { displayTitle, formatArtistName } from "@/lib/utils/title";
 import { getArtistAvatar } from "@/lib/youtube/channel-data";
 
@@ -54,7 +54,8 @@ export function DiscordPresenceSync() {
 	const artistId =
 		currentSong?.artistId ?? currentSong?.artists?.find((a) => a.id)?.id;
 	const discordEnabled = settings.discordRpc;
-	const [discordIdle, setDiscordIdle] = useState(false);
+	const [pauseTimedOut, setPauseTimedOut] = useState(false);
+	const discordIdle = pauseTimedOut && !isPlaying;
 	const [artistAvatar, setArtistAvatar] = useState<{
 		artistId: string;
 		url: string;
@@ -78,12 +79,15 @@ export function DiscordPresenceSync() {
 		};
 	}, [discordEnabled, artistId]);
 
-	// Metadata refreshes, seeks and the presence retry must not restart this
-	// countdown. Only resuming playback or toggling the feature resets it.
+	// Stop retries after the pause timeout. Desktop expiry is enforced in Rust
+	// so it also runs while WebView timers are throttled.
 	useEffect(() => {
-		setDiscordIdle(false);
+		setPauseTimedOut(false);
 		if (!discordEnabled || isPlaying) return;
-		const timeout = window.setTimeout(() => setDiscordIdle(true), 15 * 60_000);
+		const timeout = window.setTimeout(
+			() => setPauseTimedOut(true),
+			15 * 60_000,
+		);
 		return () => window.clearTimeout(timeout);
 	}, [discordEnabled, isPlaying]);
 
@@ -162,12 +166,14 @@ export function DiscordPresenceSync() {
 		activeMedia,
 	]);
 
-	// Clear expired paused presence as well as disabled or empty playback.
+	const shouldClear = !discordEnabled || !songId || (IS_ANDROID && discordIdle);
 	useEffect(() => {
-		if (!discordEnabled || discordIdle || !songId) {
-			invoke("clear_discord_activity").catch(() => undefined);
+		if (shouldClear) {
+			invoke("clear_discord_activity").catch((error) => {
+				console.warn("[discord] presence clear failed:", error);
+			});
 		}
-	}, [discordEnabled, discordIdle, songId]);
+	}, [shouldClear]);
 
 	return null;
 }

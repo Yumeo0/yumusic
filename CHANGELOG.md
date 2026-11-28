@@ -8,6 +8,8 @@
 
 ### Bug fixes
 
+- Fixed paused Discord Rich Presence lingering on desktop when YuMusic is in the background.
+
 ## [1.2.0] - 2026-11-26
 
 ### Features

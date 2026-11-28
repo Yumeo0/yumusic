@@ -1,14 +1,52 @@
 #[cfg(not(target_os = "android"))]
 use std::sync::Mutex;
 #[cfg(not(target_os = "android"))]
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(not(target_os = "android"))]
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use serde::{Deserialize, Serialize};
 
 #[cfg(not(target_os = "android"))]
-static DISCORD: Mutex<Option<DiscordIpcClient>> = Mutex::new(None);
+const PAUSED_PRESENCE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+#[cfg(not(target_os = "android"))]
+static DISCORD: Mutex<DesktopPresence> = Mutex::new(DesktopPresence {
+	client: None,
+	pause_deadline: None,
+});
+
+#[cfg(not(target_os = "android"))]
+#[derive(Default)]
+struct DesktopPresence {
+	client: Option<DiscordIpcClient>,
+	pause_deadline: Option<SystemTime>,
+}
+
+#[cfg(not(target_os = "android"))]
+impl DesktopPresence {
+	fn update_playback(&mut self, playing: bool, now: SystemTime) -> Option<SystemTime> {
+		if playing {
+			self.pause_deadline = None;
+		} else if self.pause_deadline.is_none() {
+			let deadline = now + PAUSED_PRESENCE_TIMEOUT;
+			self.pause_deadline = Some(deadline);
+			return Some(deadline);
+		}
+		None
+	}
+
+	fn pause_expired(&self, now: SystemTime) -> bool {
+		self.pause_deadline.is_some_and(|deadline| now >= deadline)
+	}
+
+	fn clear_activity(&mut self) -> Result<(), String> {
+		// Release the IPC connection even when Discord fails to accept the clear.
+		if let Some(mut client) = self.client.take() {
+			client.clear_activity().map_err(|error| error.to_string())?;
+		}
+		Ok(())
+	}
+}
 
 const APPLICATION_ID: &str = "1544382362924613854";
 
@@ -51,13 +89,21 @@ fn now_ms() -> i64 {
 
 #[cfg(not(target_os = "android"))]
 fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
-	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
-	let client = match guard.as_mut() {
+	let mut presence = DISCORD.lock().map_err(|_| "discord state poisoned")?;
+	let now = SystemTime::now();
+	if let Some(deadline) = presence.update_playback(track.playing, now) {
+		tauri::async_runtime::spawn(expire_desktop_activity(deadline));
+	}
+	if presence.pause_expired(now) {
+		return presence.clear_activity();
+	}
+
+	let client = match presence.client.as_mut() {
 		Some(client) => client,
 		None => {
 			let mut client = DiscordIpcClient::new(APPLICATION_ID);
 			client.connect().map_err(|e| e.to_string())?;
-			guard.insert(client)
+			presence.client.insert(client)
 		}
 	};
 
@@ -123,27 +169,49 @@ fn set_desktop_activity(track: TrackPresence) -> Result<(), String> {
 		act = act.state_url(artist_url.clone());
 	}
 
-	client.set_activity(act).map_err(|e| e.to_string())
+	if let Err(error) = client.set_activity(act) {
+		// The next update can reconnect after Discord has restarted.
+		presence.client = None;
+		return Err(error.to_string());
+	}
+	Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+async fn expire_desktop_activity(deadline: SystemTime) {
+	loop {
+		// Poll the wall clock so time spent in system sleep counts toward expiry.
+		let remaining = deadline
+			.duration_since(SystemTime::now())
+			.unwrap_or_default();
+		tokio::time::sleep(remaining.min(Duration::from_secs(30))).await;
+
+		let Ok(mut presence) = DISCORD.lock() else {
+			return;
+		};
+		if presence.pause_deadline != Some(deadline) {
+			return;
+		}
+		if presence.pause_expired(SystemTime::now()) {
+			if let Err(error) = presence.clear_activity() {
+				log::warn!("[discord] clearing expired presence failed: {error}");
+			}
+			return;
+		}
+	}
 }
 
 #[cfg(not(target_os = "android"))]
 fn clear_desktop_activity() -> Result<(), String> {
-	let mut guard = DISCORD.lock().map_err(|_| "discord state poisoned")?;
-	if let Some(client) = guard.as_mut() {
-		client.clear_activity().map_err(|e| e.to_string())?;
-	}
-	Ok(())
+	let mut presence = DISCORD.lock().map_err(|_| "discord state poisoned")?;
+	presence.pause_deadline = None;
+	presence.clear_activity()
 }
 
 pub fn shutdown() {
 	#[cfg(not(target_os = "android"))]
 	{
-		if let Ok(mut guard) = DISCORD.lock() {
-			if let Some(mut client) = guard.take() {
-				let _ = client.clear_activity();
-				let _ = client.close();
-			}
-		}
+		let _ = clear_desktop_activity();
 	}
 }
 
@@ -189,4 +257,56 @@ async fn android_presence(data: Option<String>) -> Result<(), String> {
 		Ok(())
 	})
 	.await
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn paused_updates_keep_the_original_deadline_even_after_expiry() {
+		let mut presence = DesktopPresence::default();
+		let deadline = UNIX_EPOCH + PAUSED_PRESENCE_TIMEOUT;
+		let before_expiry = deadline - Duration::from_secs(1);
+		let after_sleep = UNIX_EPOCH + Duration::from_secs(3600);
+
+		assert_eq!(presence.update_playback(false, UNIX_EPOCH), Some(deadline));
+		assert_eq!(presence.update_playback(false, before_expiry), None);
+		assert!(!presence.pause_expired(before_expiry));
+		assert!(presence.pause_expired(deadline));
+		assert_eq!(presence.update_playback(false, after_sleep), None);
+		assert!(presence.pause_expired(after_sleep));
+	}
+
+	#[test]
+	fn resuming_cancels_expiry_and_the_next_pause_gets_its_own_deadline() {
+		let mut presence = DesktopPresence::default();
+		let first_deadline = presence.update_playback(false, UNIX_EPOCH).unwrap();
+		let resume = UNIX_EPOCH + Duration::from_secs(10);
+		let second_pause = resume + Duration::from_secs(10);
+
+		assert_eq!(presence.update_playback(true, resume), None);
+		assert!(!presence.pause_expired(first_deadline));
+		assert_eq!(
+			presence.update_playback(false, second_pause),
+			Some(second_pause + PAUSED_PRESENCE_TIMEOUT),
+		);
+		assert!(!presence.pause_expired(first_deadline));
+	}
+
+	#[test]
+	fn expiry_discards_a_failed_ipc_connection_without_frontend_updates() {
+		let deadline = UNIX_EPOCH + PAUSED_PRESENCE_TIMEOUT;
+		{
+			let mut presence = DISCORD.lock().unwrap();
+			presence.pause_deadline = Some(deadline);
+			presence.client = Some(DiscordIpcClient::new(APPLICATION_ID));
+		}
+
+		tauri::async_runtime::block_on(expire_desktop_activity(deadline));
+
+		let mut presence = DISCORD.lock().unwrap();
+		assert_eq!(presence.pause_deadline.take(), Some(deadline));
+		assert!(presence.client.is_none());
+	}
 }
